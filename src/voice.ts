@@ -88,7 +88,7 @@ function start(id: string, channel: 'narr' | 'emote', gain: number): boolean {
     // an element made before unlock plays outside Web Audio; once audio is unlocked, make a routed one
     if (c && !c.setGain && sfx.isUnlocked()) { c.el.pause(); c = undefined; }
     if (!c) {
-      const el = new Audio(`/voice/${id}.mp3`);
+      const el = new Audio(`/media/v_${id}.mp3`);
       el.preload = 'auto';
       el.addEventListener('ended', () => { if (channels.narr?.el === el) drainNarr(); });
       c = { el, setGain: sfx.routeVoice(el), gain };
