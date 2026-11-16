@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import type { RoomProps } from '../props';
 import { EMOTES, TAUNTS, type EmoteId } from '../../shared/types';
 import { sfx } from '../sfx';
+import PixelIcon from '../ui/PixelIcon';
 
 /* ---------- tiny pixel icons (8x8 grids -> crisp SVG) ---------- */
 const ICONS: Record<string, string[]> = {
@@ -111,7 +112,7 @@ export function ContextMenu({ room }: { room?: RoomProps }) {
   if (room) {
     items.push({
       id: 'emote', label: 'Emote', icon: 'emote',
-      sub: (Object.keys(EMOTES) as EmoteId[]).map((k) => ({ id: `e-${k}`, label: EMOTES[k].label, icon: EMOTES[k].icon, run: () => roomRef.current?.send({ t: 'emote', emote: k }) })),
+      sub: (Object.keys(EMOTES) as EmoteId[]).map((k) => ({ id: `e-${k}`, label: EMOTES[k].label, icon: `px:${k}`, run: () => roomRef.current?.send({ t: 'emote', emote: k }) })),
     });
     items.push({
       id: 'say', label: 'Say a taunt', icon: 'say',
@@ -234,7 +235,7 @@ export function ContextMenu({ room }: { room?: RoomProps }) {
       onClick={(e) => { if (it.sub) kbSub.current = e.detail === 0; activate(it); }}
       onPointerEnter={(e) => { if (e.pointerType === 'mouse') { if (!inSub) setSubOpen(it.sub ? it.id : null); e.currentTarget.focus({ preventScroll: true }); } }}
     >
-      {it.icon ? (/^[a-z]+$/.test(it.icon) ? <Ico name={it.icon} /> : <span className="cm-ico cm-emoji" aria-hidden>{it.icon}</span>) : <span className="cm-ico cm-quote" aria-hidden>“</span>}
+      {it.icon ? it.icon.startsWith('px:') ? <PixelIcon name={it.icon.slice(3)} className="cm-ico" /> : (/^[a-z]+$/.test(it.icon) ? <Ico name={it.icon} /> : <span className="cm-ico cm-emoji" aria-hidden>{it.icon}</span>) : <span className="cm-ico cm-quote" aria-hidden>“</span>}
       <span className="cm-label">{it.label}</span>
       {it.sub && <span className="cm-arrow" aria-hidden>▸</span>}
     </button>

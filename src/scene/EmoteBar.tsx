@@ -9,6 +9,7 @@ import { sfx } from '../sfx';
 import ChatPanel, { drawBubble, useChatLog, useDeskChat } from './ChatPanel';
 import { useShotExtras } from '../phases/ShotExtras';
 import '../phases/gameplay.css';
+import PixelIcon from '../ui/PixelIcon';
 
 const EMOTE_CD = 1200, SAY_CD = 2000;
 
@@ -95,7 +96,7 @@ export default function EmoteBar(rp: RoomProps) {
           <div className="emo-grid">
             {(Object.keys(EMOTES) as EmoteId[]).map((id) => (
               <button key={id} className="emo-e px-btn" disabled={emoteCool} onClick={() => emote(id)} title={EMOTES[id].label}>
-                <span aria-hidden>{EMOTES[id].icon}</span><span>{EMOTES[id].label}</span>
+                <span aria-hidden><PixelIcon name={id} /></span><span>{EMOTES[id].label}</span>
               </button>
             ))}
           </div>

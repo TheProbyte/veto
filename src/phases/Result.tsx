@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { RoomProps } from '../props';
-import { BADGES, heroArt, type BadgeId } from '../../shared/types';
+import { BADGES, type BadgeId } from '../../shared/types';
 import { sfx } from '../sfx';
 import { PixelArt, PixelPanel, PixelSprite } from '../pixel/PixelCanvas';
 import { PAL } from '../pixel/palette';
 import type { DrawFn } from '../pixel/sprites';
 import '../pixel/pixel.css';
+import PixelIcon from '../ui/PixelIcon';
+import { useUiP } from '../ui/scale';
 
 const drawNail: DrawFn = (c) => {
   c.fillStyle = 'rgba(42,26,16,.55)'; c.fillRect(2, 5, 5, 2);
@@ -27,6 +29,7 @@ type Tab = 'badges' | 'stats' | 'record' | 'history';
 export default function Result({ state, me, send, skew, on }: RoomProps) {
   const res = state.result;
   useShotExtras(state, skew);
+  const uiP = useUiP();
   useEffect(() => { sfx.win(); buzz(BUZZ.win); }, []);
   // the winning chamber zooms in, becomes the poster, then gets nailed up (3 hits)
   const [nails, setNails] = useState(0);
@@ -120,11 +123,10 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
 
   return (
     <div className={`result gp-result ${tab ? 'rx-has-open' : ''}`}>
-      <div className="result-backdrop" style={{ backgroundImage: `url(${heroArt(res.appid)})` }} />
       <div className="poster-wrap">
         <div className="poster px-poster-in" ref={posterRef}>
           {NAILS.map(([l, t], i) => <PixelSprite key={i} draw={drawNail} w={7} h={7} className={`px-nail ${nails > i ? 'on' : ''}`} style={{ left: l, top: t }} />)}
-          <PixelPanel kind="paper" size={4} />
+          <PixelPanel kind="paper" size={uiP} />
           <div className="poster-body">
             <div className="poster-wanted">WANTED</div>
             <div className="poster-sub">— TONIGHT —</div>
@@ -191,7 +193,7 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
                   const k = badgeN++;
                   return (
                     <span key={b} className="gp-badge" title={BADGES[b].desc} style={{ '--dl': `${1700 + k * 220}ms`, '--rot': `${(k * 37) % 7 - 3}deg` } as CSSProperties}>
-                      <i aria-hidden>{BADGES[b].icon}</i>{BADGES[b].label}
+                      <i aria-hidden><PixelIcon name={b} /></i>{BADGES[b].label}
                     </span>
                   );
                 })}

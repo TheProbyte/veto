@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { headerArt, type Pitch, type Player, type StoreHit } from '../../shared/types';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import { Avatar } from './Lobby';
 import Cover from '../scene/Cover';
 import { play } from '../scene/Dock';
-import { tossOrTake } from './Nominate';
+import { PagedDeck, tossOrTake, usePages, type CellSize } from './Nominate';
 import { settingsOf } from './Lobby';
-import './panels.css';
+import './nominate.css';
 
 function PixImg({ src, className }: { src: string; className: string }) {
   const [bad, setBad] = useState(false);
@@ -84,87 +84,101 @@ export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | '
   const voters = (p: Pitch, v: 'buy' | 'nope') =>
     Object.entries(p.votes || {}).filter(([, x]) => x === v).map(([id]) => byId.get(id)).filter(Boolean) as Player[];
 
+  // search results replace the pitched cards while there's a query; both page instead of scrolling
+  const searching = q.trim().length >= 2;
+  const hitSize: CellSize = useCallback((u, t) => ({ w: Math.max(200, 92 * t), h: 10 * t + 4 * u, ideal: 10 * t + 4 * u }), []);
+  const cardSize: CellSize = useCallback((u, t, w) => {
+    const text = 8 * t * 2 + 11 * t + 8 * u;
+    const minW = Math.max(120, 56 * t, 34 * u);
+    const art = (w || minW) * 30 / 64;
+    return { w: minW, h: Math.round(text + art * 0.3), ideal: Math.round(text + art) };
+  }, []);
+  const hitList = hits.slice(0, 24);
+  const hitPager = usePages(hitList.length, hitSize, q.trim());
+  const cardPager = usePages(state.pitches.length, cardSize, 'pitches');
+
+  const hitRow = (h: StoreHit) => {
+    const done = pitched.has(h.appid);
+    const have = owned.has(h.appid);
+    return (
+      <div key={h.appid} className="nm-hit">
+        <PixImg className="nm-hit-img" src={h.img || headerArt(h.appid)} />
+        <span className="nm-hit-name" title={h.name}>{h.name}</span>
+        {h.price && <span className="nm-hit-price">{h.price}</span>}
+        <button type="button" className="nm-btn nm-btn-sm" disabled={done || have} onClick={() => pitch(h)}>
+          {done ? 'Pitched' : have ? 'Owned' : 'Pitch'}
+        </button>
+      </div>
+    );
+  };
+
+  const pitchCard = (p: Pitch) => {
+    const by = nomBy.get(p.appid) || [];
+    const mine = by.includes(me);
+    const full = !mine && myCount >= MAX_NOMS;
+    const myVote = p.votes?.[me];
+    const buy = voters(p, 'buy');
+    const nope = voters(p, 'nope');
+    const pitcher = byId.get(p.by);
+    const others = by.filter((id) => id !== me).map((id) => byId.get(id)).filter(Boolean) as Player[];
+    const names = (l: Player[]) => (l.length ? l.map((v) => (v.id === me ? 'You' : v.name)).join(', ') : 'nobody yet');
+    return (
+      <div key={p.appid} className={`nm-card nm-pcard ${mine ? 'is-mine' : ''} ${by.length ? 'is-nom' : ''} ${myVote ? `voted-${myVote}` : ''}`}>
+        <span className="nm-face">
+          <span className="nm-art">
+            <Cover appid={p.appid} name={p.name} kind="header" />
+            {p.discount ? <span className="nm-disc">-{p.discount}%</span> : null}
+            <span className="nm-ptag">{p.price || '$ ?'}</span>
+            {others.length > 0 && <span className="nm-by">{others.slice(0, 3).map((o) => <Avatar key={o.id} p={o} size={16} />)}</span>}
+          </span>
+          <span className="nm-name" title={p.name}>{p.name}</span>
+          <span className="nm-meta"><span className="nm-hrs">by <b>{p.by === me ? 'you' : pitcher?.name ?? 'someone'}</b></span>
+            {p.by === me && (
+              <button type="button" className="nm-withdraw" onClick={() => { sfx.unlock(); sfx.whoosh(); send({ t: 'unpitch', appid: p.appid }); }}>withdraw</button>
+            )}
+          </span>
+          <span className="nm-votes">
+            <button type="button" className={`nm-vote buy ${myVote === 'buy' ? 'on' : ''}`} aria-pressed={myVote === 'buy'} title={`Would buy: ${names(buy)}`} aria-label={`I'd buy: ${buy.length}`} onClick={() => vote(p, 'buy')}>
+              Buy <b>{buy.length}</b>
+              {burst?.appid === p.appid && burst.v === 'buy' && <span key={burst.n} className="nm-coins" aria-hidden><i /><i /><i /></span>}
+            </button>
+            <button type="button" className={`nm-vote nope ${myVote === 'nope' ? 'on' : ''}`} aria-pressed={myVote === 'nope'} title={`Nope: ${names(nope)}`} aria-label={`Nope: ${nope.length}`} onClick={() => vote(p, 'nope')}>
+              Nope <b>{nope.length}</b>
+              {burst?.appid === p.appid && burst.v === 'nope' && <span key={burst.n} className="nm-spit" aria-hidden><i /><i /><i /></span>}
+            </button>
+            <button type="button" className={`nm-vote nm-toss ${mine ? 'is-done' : ''}`} disabled={full} onClick={(e) => nominate(p, e)} aria-pressed={mine}
+              title={mine ? 'On the table: tap to take it back' : 'Toss it on the table'}>
+              {mine ? '✓ In' : 'Toss'}
+            </button>
+          </span>
+          {mine && <span className="nm-stamp" aria-hidden>✓ Yours</span>}
+        </span>
+      </div>
+    );
+  };
+
   return (
     <section className="nm-buy" aria-label="Buy something new">
-      <h3 className="nm-sec-h">Buy something new {state.pitches.length > 0 && <em>{state.pitches.length}</em>}</h3>
-      <p className="nm-hint">Pitch a store game. It takes two shots to kill.</p>
-
-      <div className="nh-psearch">
-        <input className="nh-input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the Steam store…"
+      <div className="nm-bar nm-psearch">
+        <input className="nm-input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the Steam store…"
           spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="none" inputMode="search" enterKeyHint="search"
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } if (e.key === 'Escape' && q) { e.preventDefault(); setQ(''); } }}
           aria-label="Search the Steam store" />
         {busy && <i className="nh-spin" />}
+        {searching
+          ? <button type="button" className="nm-chip" onClick={() => { sfx.click(); setQ(''); }}>Done</button>
+          : <span className="nm-hint">Pitch a store game. Two shots kill it.</span>}
       </div>
-      {err && <div className="nh-err">{err}</div>}
-      {hits.length > 0 && (
-        <ul className="nh-hits">
-          {hits.slice(0, 8).map((h) => {
-            const done = pitched.has(h.appid);
-            const have = owned.has(h.appid);
-            return (
-              <li key={h.appid} className="nh-hit">
-                <PixImg className="nh-hit-img" src={h.img || headerArt(h.appid)} />
-                <span className="nh-hit-name" title={h.name}>{h.name}</span>
-                {h.price && <span className="nh-hit-price">{h.price}</span>}
-                <button type="button" className="nh-btn nh-btn-xs" disabled={done || have} onClick={() => pitch(h)}>
-                  {done ? 'Pitched' : have ? 'Owned' : 'Pitch it'}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {!busy && !err && q.trim().length >= 2 && hits.length === 0 && <div className="nm-empty sm">Nothing by that name.</div>}
-
-      {state.pitches.length > 0 && (
-        <div className="nm-felt nm-felt-buy">
-        <div className="nm-grid">
-          {state.pitches.map((p) => {
-            const by = nomBy.get(p.appid) || [];
-            const mine = by.includes(me);
-            const full = !mine && myCount >= MAX_NOMS;
-            const myVote = p.votes?.[me];
-            const buy = voters(p, 'buy');
-            const nope = voters(p, 'nope');
-            const pitcher = byId.get(p.by);
-            const others = by.filter((id) => id !== me).map((id) => byId.get(id)).filter(Boolean) as Player[];
-            const names = (l: Player[]) => (l.length ? l.map((v) => (v.id === me ? 'You' : v.name)).join(', ') : 'nobody yet');
-            return (
-              <div key={p.appid} className={`nm-card nm-pcard ${mine ? 'is-mine' : ''} ${by.length ? 'is-nom' : ''} ${myVote ? `voted-${myVote}` : ''}`}>
-                <span className="nm-face">
-                  <span className="nm-art">
-                    <Cover appid={p.appid} name={p.name} kind="header" />
-                    {p.discount ? <span className="nm-disc">-{p.discount}%</span> : null}
-                    <span className="nm-ptag">{p.price || '$ ?'}</span>
-                    {others.length > 0 && <span className="nm-by">{others.slice(0, 3).map((o) => <Avatar key={o.id} p={o} size={16} />)}</span>}
-                  </span>
-                  <span className="nm-name" title={p.name}>{p.name}</span>
-                  <span className="nm-meta"><span className="nm-hrs">Pitched by <b>{p.by === me ? 'you' : pitcher?.name ?? 'someone'}</b></span>
-                    {p.by === me && (
-                      <button type="button" className="nm-withdraw" onClick={() => { sfx.unlock(); sfx.whoosh(); send({ t: 'unpitch', appid: p.appid }); }}>withdraw</button>
-                    )}
-                  </span>
-                  <span className="nh-votes">
-                    <button type="button" className={`nh-vote buy ${myVote === 'buy' ? 'on' : ''}`} aria-pressed={myVote === 'buy'} title={`Would buy: ${names(buy)}`} onClick={() => vote(p, 'buy')}>
-                      I'd buy <b>{buy.length}</b>
-                      {burst?.appid === p.appid && burst.v === 'buy' && <span key={burst.n} className="nh-coins" aria-hidden><i /><i /><i /></span>}
-                    </button>
-                    <button type="button" className={`nh-vote nope ${myVote === 'nope' ? 'on' : ''}`} aria-pressed={myVote === 'nope'} title={`Nope: ${names(nope)}`} onClick={() => vote(p, 'nope')}>
-                      Nope <b>{nope.length}</b>
-                      {burst?.appid === p.appid && burst.v === 'nope' && <span key={burst.n} className="nh-spit" aria-hidden><i /><i /><i /></span>}
-                    </button>
-                  </span>
-                  <button type="button" className={`nh-btn nh-btn-xs nm-toss ${mine ? 'is-done' : ''}`} disabled={full} onClick={(e) => nominate(p, e)} aria-pressed={mine}>
-                    {mine ? 'On the table ✓' : 'Toss it in'}
-                  </button>
-                  {mine && <span className="nm-stamp" aria-hidden>✓ Yours</span>}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-        </div>
+      {searching ? (
+        <PagedDeck pager={hitPager} label="Store search results" className="is-hits"
+          empty={err ? <div className="nm-empty"><span className="nm-err">{err}</span></div> : !busy && hits.length === 0 ? <div className="nm-empty">Nothing by that name.</div> : null}>
+          {hitList.slice(hitPager.start, hitPager.start + hitPager.per).map(hitRow)}
+        </PagedDeck>
+      ) : (
+        <PagedDeck pager={cardPager} label="Pitched games" className="is-pitches"
+          empty={state.pitches.length === 0 ? <div className="nm-empty">Nothing pitched yet. Search the store above.</div> : null}>
+          {state.pitches.slice(cardPager.start, cardPager.start + cardPager.per).map(pitchCard)}
+        </PagedDeck>
       )}
     </section>
   );

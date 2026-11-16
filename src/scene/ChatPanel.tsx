@@ -10,6 +10,7 @@ import { PixelSprite } from '../pixel/PixelCanvas';
 import { PAL } from '../pixel/palette';
 import type { DrawFn } from '../pixel/sprites';
 import { sfx } from '../sfx';
+import PixelIcon from '../ui/PixelIcon';
 
 /** 13x11 pixel speech bubble with three dots */
 export const drawBubble: DrawFn = (c) => {
@@ -164,8 +165,8 @@ export default function ChatPanel({ log, emote, say, emoteCool, sayCool, open: i
       </div>
       <div className="chat-emotes" role="group" aria-label="Emotes">
         {(Object.keys(EMOTES) as EmoteId[]).map((id) => (
-          <button key={id} type="button" className="chat-e px-btn" disabled={emoteCool} onClick={(e) => { blurAfter(e); emote(id); }} title={EMOTES[id].label} {...btnKeys}>
-            <span className="chat-e-ico" aria-hidden>{EMOTES[id].icon}</span>
+          <button key={id} type="button" className="chat-e px-btn" disabled={emoteCool} onClick={(e) => { blurAfter(e); emote(id); }} title={EMOTES[id].label} aria-label={EMOTES[id].label} {...btnKeys}>
+            <span className="chat-e-ico" aria-hidden><PixelIcon name={id} /></span>
             <span className="chat-e-lbl">{EMOTES[id].label}</span>
           </button>
         ))}
@@ -215,7 +216,7 @@ function Line({ l }: { l: LogEntry }) {
         <span className="chat-who">{name}</span>
         {l.kind === 'say'
           ? <span className="chat-txt">{l.text}</span>
-          : <span className="chat-txt chat-act"><i aria-hidden>{EMOTES[l.text as EmoteId]?.icon}</i> {EMOTE_LOG[l.text] ?? l.text}</span>}
+          : <span className="chat-txt chat-act"><i aria-hidden><PixelIcon name={l.text} /></i> {EMOTE_LOG[l.text] ?? l.text}</span>}
       </div>
     </div>
   );

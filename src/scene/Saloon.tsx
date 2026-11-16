@@ -15,6 +15,9 @@ import { playVoice } from '../voice';
 import EmoteBar from './EmoteBar';
 import ContextMenu from './ContextMenu';
 import { useDeskChat } from './ChatPanel';
+import { setSceneScale, textUnit } from '../ui/scale';
+import '../ui/cursors';
+import PixelIcon, { hasPixelIcon } from '../ui/PixelIcon';
 
 /** piano player's tempo per music mode (fallback until sfx.getMusicBpm exists; matches src/music.ts grooves) */
 const BPM: Record<string, number> = { lobby: 76, veto: 92, roulette: 92, result: 76, off: 0 };
@@ -104,6 +107,9 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
 
   const split = land && (phase === 'lobby' || phase === 'nominate');
   const layout = useStageLayout(split);
+  // the UI's pixel unit follows the scene's (see src/ui/scale.ts)
+  useLayoutEffect(() => { setSceneScale(layout.P); }, [layout.P]);
+  useLayoutEffect(() => () => setSceneScale(null), []);
   const shotRef = useRef<SceneData['shot']>(undefined);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
 
@@ -122,9 +128,8 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   const push = (e: SceneFX['queue'][number]) => { const q = sceneFx.current.queue; q.push(e); if (q.length > 24) q.splice(0, q.length - 24); };
   const phaseRef = useRef(state.phase);
   phaseRef.current = state.phase;
-  // the storm clears at the result: rain stops (and comes back for the next round)
+  // the storm keeps going through the result (the result sits in the same stormy saloon)
   const unlocked = useRef(false);
-  useEffect(() => { if (unlocked.current) sfx.rain(state.phase !== 'result'); }, [state.phase]);
 
   // ---- emotes + speech bubbles (transient room events)
   const [pops, setPops] = useState<Record<string, { emote: string; id: number }>>({});
@@ -173,7 +178,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
 
   // first gesture: unlock audio + start ambience (+ the rain, unless the storm already cleared)
   useEffect(() => {
-    const go = () => { sfx.unlock(); sfx.ambience(true); unlocked.current = true; sfx.rain(phaseRef.current !== 'result'); window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); };
+    const go = () => { sfx.unlock(); sfx.ambience(true); unlocked.current = true; sfx.rain(true); window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); };
     window.addEventListener('pointerdown', go);
     window.addEventListener('keydown', go);
     return () => { window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); };
@@ -245,9 +250,10 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   const data: SceneData = useMemo(() => ({
     players: state.players.map((p) => ({ id: p.id, seat: p.seat, look: p.look, style: p.style, connected: p.connected, bot: p.bot }) as ScenePlayer),
     shooter,
-    phase: state.phase,
+    // the result is shown in the normal poker room: no dawn sky (scene.ts keys dawn off 'result'), barely dimmed
+    phase: state.phase === 'result' ? 'lobby' : state.phase,
     shot: shotRef.current,
-    dimAll: state.phase === 'roulette' ? 0.45 : state.phase === 'result' ? 0.6 : 1,
+    dimAll: state.phase === 'roulette' ? 0.45 : state.phase === 'result' ? 0.9 : 1,
     fx: sceneFx.current,
     poster: posterId,
   }), [state.players, shooter, state.phase, fx, posterId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -362,15 +368,15 @@ function Seat({ p, me, L, seats, shooter, order, turnIdx, n, fresh, pop }: { p: 
     <div className={`seat ${lit ? 'lit' : ''} ${dark ? 'dark' : ''} ${p.connected ? '' : 'ghost'} ${p.id === me ? 'me' : ''} ${g.back ? 'back' : ''} ${g.slot ? 'row' : ''} ${fresh ? 'fresh' : ''}`} style={style}>
       {p.steam?.avatar && <img className="seat-avatar" src={p.steam.avatar} alt="" draggable={false} />}
       <div className="seat-plate">
-        {!p.shieldUsed && <TinStar size={12} />}
+        {!p.shieldUsed && <TinStar size={textUnit(P) * 6} />}
+        {p.host && <PixelIcon name="host" className="seat-host" title="Host" />}
         <span className="seat-name">{p.name}{p.id === me && <span className="seat-you"> (you)</span>}</span>
         {p.bot && <span className="seat-bot" title="Practice bot">BOT</span>}
         {!!p.badges?.length && (
           <span className="seat-badges">
-            {p.badges.slice(0, 3).map((b) => BADGES[b] && <i key={b} className="seat-badge" title={`${BADGES[b].label}: ${BADGES[b].desc}`} aria-label={BADGES[b].label}>{BADGES[b].icon}</i>)}
+            {p.badges.slice(0, 3).map((b) => BADGES[b] && <i key={b} className="seat-badge" title={`${BADGES[b].label}: ${BADGES[b].desc}`} aria-label={BADGES[b].label}><PixelIcon name={b} /></i>)}
           </span>
         )}
-        {p.host && <span className="seat-host" title="Host">HOST</span>}
       </div>
       {pop && <EmotePop key={pop.id} emote={pop.emote} name={p.name} cx={g.x * P} high={rel >= 0 || !!g.back} flip={g.x * P > window.innerWidth * 0.5}
         lift={pop.emote === 'tip' ? Math.round(13 * g.scale * P) : 0} />}
@@ -390,7 +396,7 @@ function EmotePop({ emote, name, cx, high, flip, lift }: { emote: string; name: 
       <div className={`seat-pop emote-${emote} ${high ? 'high' : ''}`} role="status" aria-label={`${name} ${t?.cap ?? emote}`}
         style={{ '--cx': `${Math.round(cx)}px`, '--rx': `${Math.round(vw - cx)}px`, '--lift': `${lift}px` } as CSSProperties}>
         <div className="seat-pop-in">
-          <span className="seat-pop-icon" aria-hidden>{icon}</span>
+          <span className="seat-pop-icon" aria-hidden>{hasPixelIcon(emote) ? <PixelIcon name={emote} /> : icon}</span>
           <span className="seat-pop-cap" aria-hidden>{t?.cap ?? emote}</span>
         </div>
       </div>

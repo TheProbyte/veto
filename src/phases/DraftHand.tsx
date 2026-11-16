@@ -5,7 +5,8 @@ import { sfx } from '../sfx';
 import Cover from '../scene/Cover';
 import { launchCard, play } from '../scene/Dock';
 import { Avatar, settingsOf } from './Lobby';
-import './panels.css';
+import { units } from './Nominate';
+import './nominate.css';
 
 const reduced = () => { try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
 const SUITS = ['♠', '♥', '♦', '♣'];
@@ -63,6 +64,19 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
     if (mode?.k === 'give' && !offers.some((o) => o.id === mode.offer && o.to === me)) setMode(null);
   }, [offerKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (mode?.k === 'offer' && sel == null) setMode(null); }, [sel, mode]);
+
+  /* ---- cards sized to the table: the whole hand fits, no scrolling ---- */
+  const fanRef = useRef<HTMLDivElement>(null);
+  const [fanBox, setFanBox] = useState({ w: 0, h: 0, u: 3, t: 3 });
+  useLayoutEffect(() => {
+    const el = fanRef.current;
+    if (!el) return;
+    const read = () => { const { u, t } = units(el); setFanBox((b) => (b.w === el.clientWidth && b.h === el.clientHeight && b.u === u && b.t === t ? b : { w: el.clientWidth, h: el.clientHeight, u, t })); };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   /* ---- new cards slide in from the deck ---- */
   const deckRef = useRef<HTMLDivElement>(null);
@@ -148,6 +162,14 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
     slots.splice(Math.max(0, Math.min(slots.length, b.idx)), 0, { appid: b.appid, burn: true });
   }
   const n = slots.length;
+  const { u, t } = fanBox;
+  const textH = 16 * t + 5 * u; // two name lines + face padding / gaps
+  const lift = 6 * u; // room for a selected card to rise
+  // the fan tilts its cards a few degrees: leave slack so tilted corners stay inside the table
+  const cwH = (fanBox.h - textH - lift - 7 * u) / 1.62; // 6u bottom padding: outer cards dip by up to 4u
+  const deckW = Math.max(24, Math.min(cwH * 0.6, 60));
+  const cwW = (fanBox.w - deckW - 3 * u * Math.max(1, n) - 6 * u) / (Math.max(1, n) * 1.1);
+  const cw = Math.floor(Math.max(24, Math.min(cwH, cwW, Math.max(40 * t, 26 * u))));
   const giving = mode?.k === 'give' ? offers.find((o) => o.id === mode.offer) : undefined;
   const onOffer = new Map(outgoing.map((o) => [o.give, o.to]));
 
@@ -161,7 +183,7 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
     return (
       <button key={appid} type="button" ref={(el) => { if (el) cardEls.current.set(appid, el); else cardEls.current.delete(appid); }}
         className={`dh-card ${isSel ? 'is-sel' : ''} ${burn ? 'is-burning' : ''} ${playing.has(appid) ? 'is-playing' : ''} ${giving ? 'is-giving' : ''}`}
-        style={{ '--r': `${c * 4}deg`, '--y': `${Math.abs(c) * Math.abs(c) * 3}px` } as CSSProperties}
+        style={{ '--r': `${c * 3}deg`, '--y': `${Math.round(Math.abs(c) * Math.abs(c) * u)}px` } as CSSProperties}
         disabled={burn} aria-pressed={isSel} onClick={() => pick(appid)}
         aria-label={`${name}${g ? `, ${g.hours > 0 ? `${hrs(g.hours)} hours together` : 'nobody has played it'}` : ''}${missing.length ? `, ${missing.length} short` : ''}`}>
         <span className="dh-face">
@@ -197,8 +219,8 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
     bar = (
       <div className="dh-bar is-give">
         <span className="dh-bar-txt">{sel != null ? <>Give <b>{who(giving.from)}</b> your <b>{selName}</b>?</> : <>Pick a card to give <b>{who(giving.from)}</b></>}</span>
-        <button type="button" className="nh-btn nh-btn-sm" disabled={sel == null} onClick={() => doGive(giving.id)}>Trade</button>
-        <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => { sfx.click(); setMode(null); setSel(null); }}>Cancel</button>
+        <button type="button" className="nm-btn nm-btn-sm" disabled={sel == null} onClick={() => doGive(giving.id)}>Trade</button>
+        <button type="button" className="nm-btn nm-btn-sm is-ghost" onClick={() => { sfx.click(); setMode(null); setSel(null); }}>Cancel</button>
       </div>
     );
   } else if (mode?.k === 'offer' && sel != null) {
@@ -213,19 +235,19 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
             </button>
           ))}
         </div>
-        <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => { sfx.click(); setMode(null); }}>Cancel</button>
+        <button type="button" className="nm-btn nm-btn-sm is-ghost" onClick={() => { sfx.click(); setMode(null); }}>Cancel</button>
       </div>
     );
   } else if (sel != null) {
     bar = (
       <div className="dh-bar">
-        <button type="button" className="nh-btn nh-btn-sm dh-play" disabled={full} onClick={() => doPlay(sel)} title={full ? `You've played all ${picks}` : 'Play it onto the table'}>
+        <button type="button" className="nm-btn nm-btn-sm dh-play" disabled={full} onClick={() => doPlay(sel)} title={full ? `You've played all ${picks}` : 'Play it onto the table'}>
           {full ? 'Picks full' : 'Play'}
         </button>
-        <button type="button" className="nh-btn nh-btn-sm nh-btn-red dh-burn" disabled={burnsLeft <= 0} onClick={() => doBurn(sel)} title={draft.deck <= 0 ? "Deck's empty: you won't draw a new one" : 'Discard it and draw a new one'}>
+        <button type="button" className="nm-btn nm-btn-sm is-red dh-burn" disabled={burnsLeft <= 0} onClick={() => doBurn(sel)} title={draft.deck <= 0 ? "Deck's empty: you won't draw a new one" : 'Discard it and draw a new one'}>
           Burn{burnsLeft > 0 ? '' : ' (used)'}
         </button>
-        <button type="button" className="nh-btn nh-btn-sm dh-offer" disabled={targets.length === 0} onClick={() => { sfx.click(); setMode({ k: 'offer' }); }}>Offer to…</button>
+        <button type="button" className="nm-btn nm-btn-sm dh-offer" disabled={targets.length === 0} onClick={() => { sfx.click(); setMode({ k: 'offer' }); }}>Offer to…</button>
       </div>
     );
   } else if (incoming.length > 0) {
@@ -239,65 +261,55 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
     );
   }
 
+  const seatsRow = (
+    <div className="nm-bar dh-table" aria-label="Hands at the table" role="group">
+      {others.map((p) => {
+        const c = draft.handCounts?.[p.id] ?? 0;
+        return (
+          <span key={p.id} className={`dh-seat ${p.connected || p.bot ? '' : 'is-off'}`} title={`${p.name}: ${c} card${c === 1 ? '' : 's'}`}>
+            <Avatar p={p} size={16} /><span className="dh-seat-name">{p.name}</span><CardBacks n={c} /><b>{c}</b>
+          </span>
+        );
+      })}
+    </div>
+  );
+
+  // trades: one compact banner (an offer to me wins over my own pending offer)
+  const inOffer = !giving && sel == null ? incoming[0] : undefined;
+  const outOffer = !inOffer && !giving ? outgoing[0] : undefined;
+  const banner = inOffer ? (
+    <div className="dh-trade" aria-live="polite" role="group" aria-label="Trade offer to you">
+      <span className="dh-trade-art"><Cover appid={inOffer.give} name={nameOf(inOffer.give)} kind="box" /></span>
+      <span className="dh-trade-txt"><span className="dh-trade-k">Trade</span> <b>{who(inOffer.from)}</b> offers <b>{nameOf(inOffer.give)}</b>{incoming.length > 1 && <span className="dh-more"> +{incoming.length - 1} more</span>}</span>
+      <span className="dh-trade-btns">
+        <button type="button" className="nm-btn nm-btn-sm" disabled={hand.length === 0}
+          onClick={() => { sfx.unlock(); sfx.click(); setSel(null); setMode({ k: 'give', offer: inOffer.id }); }}>Accept…</button>
+        <button type="button" className="nm-btn nm-btn-sm is-ghost" onClick={() => decline(inOffer.id)}>Decline</button>
+      </span>
+    </div>
+  ) : outOffer ? (
+    <div className="dh-trade is-out" role="group" aria-label="Your trade offer">
+      <span className="dh-trade-art"><Cover appid={outOffer.give} name={nameOf(outOffer.give)} kind="box" /></span>
+      <span className="dh-trade-txt"><span className="dh-trade-k">Your offer</span> <b>{nameOf(outOffer.give)}</b> → {who(outOffer.to)} <i className="nh-spin" />{outgoing.length > 1 && <span className="dh-more"> +{outgoing.length - 1} more</span>}</span>
+      <span className="dh-trade-btns">
+        <button type="button" className="nm-btn nm-btn-sm is-ghost" onClick={() => decline(outOffer.id)}>Withdraw</button>
+      </span>
+    </div>
+  ) : null;
+
   return (
-    <>
-      <section className="dh-table" aria-label="Hands at the table">
-        {others.map((p) => {
-          const c = draft.handCounts?.[p.id] ?? 0;
-          return (
-            <span key={p.id} className={`dh-seat ${p.connected || p.bot ? '' : 'is-off'}`} title={`${p.name}: ${c} card${c === 1 ? '' : 's'}`}>
-              <Avatar p={p} size={18} /><span className="dh-seat-name">{p.name}</span><CardBacks n={c} /><b>{c}</b>
-            </span>
-          );
-        })}
-      </section>
-
-      {outgoing.length > 0 && (
-        <section className="dh-offers" aria-label="Trades">
-          {outgoing.map((o) => (
-            <div key={o.id} className="dh-trade is-out">
-              <span className="dh-trade-art"><Cover appid={o.give} name={nameOf(o.give)} kind="box" /></span>
-              <div className="dh-trade-txt">
-                <span className="dh-trade-k">Your offer</span>
-                <span><b>{nameOf(o.give)}</b> → {who(o.to)}</span>
-                <span className="dh-wait"><i className="nh-spin" /> Waiting on {who(o.to)}…</span>
-              </div>
-              <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => decline(o.id)}>Withdraw</button>
-            </div>
-          ))}
-        </section>
-      )}
-
-      <section className={`dh ${giving ? 'is-give' : ''}`} aria-label="Your hand">
-          {!giving && sel == null && incoming.length > 0 && (
-            <div className="dh-offers is-in" aria-label="Trade offers to you" aria-live="polite">
-            {incoming.slice(0, 1).map((o) => (
-            <div key={o.id} className="dh-trade">
-              <span className="dh-trade-art"><Cover appid={o.give} name={nameOf(o.give)} kind="box" /></span>
-              <div className="dh-trade-txt">
-                <span className="dh-trade-k">Trade</span>
-                <span><b>{who(o.from)}</b> offers <b>{nameOf(o.give)}</b></span>
-                <div className="dh-trade-btns">
-                  <button type="button" className="nh-btn nh-btn-sm" disabled={hand.length === 0}
-                    onClick={() => { sfx.unlock(); sfx.click(); setSel(null); setMode({ k: 'give', offer: o.id }); }}>Accept…</button>
-                  <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => decline(o.id)}>Decline</button>
-                </div>
-              </div>
-            </div>
-          ))}
-            {incoming.length > 1 && <span className="dh-more">+{incoming.length - 1} more</span>}
-            </div>
-          )}
-        <div className="dh-fan" role="group" aria-label={`Your hand: ${hand.length} of ${DRAFT_HAND} cards`}>
-          <div className="dh-deck" ref={deckRef} title={`${draft.deck} left in the deck`}>
-            <CardBacks n={draft.deck} max={4} big />
-            <span className="dh-deck-n"><b>{draft.deck}</b>deck</span>
-          </div>
-          {slots.map(card)}
-          {n === 0 && <div className="dh-none">No cards</div>}
+    <section className={`dh ${giving ? 'is-give' : ''}`} aria-label="Your hand">
+      {seatsRow}
+      {banner}
+      <div className="dh-fan" ref={fanRef} role="group" aria-label={`Your hand: ${hand.length} of ${DRAFT_HAND} cards`} style={{ '--cw': `${cw}px` } as CSSProperties}>
+        <div className="dh-deck" ref={deckRef} title={`${draft.deck} left in the deck`}>
+          <CardBacks n={draft.deck} max={4} big />
+          <span className="dh-deck-n"><b>{draft.deck}</b>deck</span>
         </div>
-        {bar}
-      </section>
-    </>
+        {slots.map(card)}
+        {n === 0 && <div className="dh-none">No cards</div>}
+      </div>
+      {bar ?? <div className="dh-bar is-idle"><span className="dh-bar-txt">Answer the trade above.</span></div>}
+    </section>
   );
 }

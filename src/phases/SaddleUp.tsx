@@ -9,6 +9,7 @@ import { sfx } from '../sfx';
 import { BUZZ, buzz } from '../scene/haptics';
 import { playVoice } from '../voice';
 import './gameplay.css';
+import PixelIcon from '../ui/PixelIcon';
 
 type Status = Launch['ready'][string];
 const CHIP: Record<Status | 'wait', { icon: string; label: string }> = {
@@ -86,7 +87,7 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
               const st = (ready[p.id] as Status | undefined) ?? 'wait';
               return (
                 <span key={p.id} className={`sad-pc ${st} ${p.connected ? '' : 'off'}`} title={`${p.name}: ${CHIP[st].label}`} role="img" aria-label={`${p.name}: ${CHIP[st].label}`}>
-                  <MiniBust p={p} className="sad-pc-bust" /><i aria-hidden>{CHIP[st].icon}</i>
+                  <MiniBust p={p} className="sad-pc-bust" /><i aria-hidden><PixelIcon name={st} /></i>
                 </span>
               );
             })}
@@ -100,16 +101,16 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
             <div key={p.id} className={`sad-row ${p.id === me ? 'me' : ''} ${p.connected ? '' : 'off'}`}>
               <MiniBust p={p} className="sad-bust" />
               <span className="sad-name">{p.id === me ? 'You' : p.name}</span>
-              <span className={`sad-chip ${st}`}><i aria-hidden>{CHIP[st].icon}</i>{CHIP[st].label}</span>
+              <span className={`sad-chip ${st}`}><i aria-hidden><PixelIcon name={st} /></i>{CHIP[st].label}</span>
             </div>
           );
         })}
       </div>
       {launch && meP && !meP.bot && (
         <div className="sad-mine sad-seg" role="group" aria-label="Your status">
-          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'ready' ? 'on' : ''}`} aria-pressed={myStatus === 'ready'} aria-label="Ready" onClick={() => set('ready')}>✓ Ready</button>
-          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'download' ? 'on' : ''}`} aria-pressed={myStatus === 'download'} aria-label="Downloading" title="Downloading" onClick={() => set('download')}><i className="sad-ico" aria-hidden>⬇</i><span className="sad-lbl"> Downloading</span></button>
-          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'buy' ? 'on' : ''} ${!owned && !myStatus ? 'hint' : ''}`} aria-pressed={myStatus === 'buy'} aria-label="Need to buy" title="Need to buy" onClick={() => set('buy')}><i className="sad-ico" aria-hidden>💲</i><span className="sad-lbl"> Need to buy</span></button>
+          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'ready' ? 'on' : ''}`} aria-pressed={myStatus === 'ready'} aria-label="Ready" onClick={() => set('ready')}><i className="sad-ico" aria-hidden><PixelIcon name="ready" /></i> Ready</button>
+          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'download' ? 'on' : ''}`} aria-pressed={myStatus === 'download'} aria-label="Downloading" title="Downloading" onClick={() => set('download')}><i className="sad-ico" aria-hidden><PixelIcon name="download" /></i><span className="sad-lbl"> Downloading</span></button>
+          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'buy' ? 'on' : ''} ${!owned && !myStatus ? 'hint' : ''}`} aria-pressed={myStatus === 'buy'} aria-label="Need to buy" title="Need to buy" onClick={() => set('buy')}><i className="sad-ico" aria-hidden><PixelIcon name="buy" /></i><span className="sad-lbl"> Need to buy</span></button>
         </div>
       )}
       {!owned && (
