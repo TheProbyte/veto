@@ -1317,7 +1317,8 @@ export class Room extends DurableObject<Env> {
         ?? pick(pool.filter((p) => !champs.includes(p.id))).id;
       champs.push(c);
     }
-    const startedAt = Date.now() + 1200;
+    // when the Barkeep explains the duel (~8 s line), hold the standoff until he's done talking
+    const startedAt = Date.now() + (s.settings.explain ? 7500 : 1200);
     const drawAt = startedAt + rnd(2500, 5000);
     s.duel = { games: [a.appid, b.appid], champs: [champs[0], champs[1]], startedAt, drawAt, taps: {} };
     s.phase = 'duel';

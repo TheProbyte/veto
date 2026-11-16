@@ -39,10 +39,46 @@ sfx.onLevels(() => {
 });
 
 /** returns true if a recording exists and playback was started */
+/** recorded alternate takes: "emote_laugh" may also have "emote_laugh_2", "emote_laugh_3"… */
+const lastTake = new Map<string, string>();
+function pickTake(id: string): string {
+  const takes = [id];
+  for (let n = 2; VOICE_IDS.has(`${id}_${n}`); n++) takes.push(`${id}_${n}`);
+  if (takes.length === 1) return id;
+  const fresh = takes.filter((t) => t !== lastTake.get(id));
+  const t = fresh[Math.floor(Math.random() * fresh.length)];
+  lastTake.set(id, t);
+  return t;
+}
+
+/** narrator lines queue behind the one still talking (instead of cutting it off); stale ones are dropped */
+const narrQueue: { id: string; gain: number; at: number }[] = [];
+const MAX_WAIT = 9000;
+function narrBusy() {
+  const c = channels.narr;
+  return !!c && !c.el.paused && !c.el.ended && c.el.currentTime < (c.el.duration || Infinity) - 0.05;
+}
+function drainNarr() {
+  const next = narrQueue.shift();
+  if (!next) return;
+  if (Date.now() - next.at > MAX_WAIT) return drainNarr();
+  start(next.id, 'narr', next.gain);
+}
+
 export function playVoice(id: string, channel: 'narr' | 'emote' = 'narr', gain = 1): boolean {
   if (!VOICE_IDS.has(id)) return false;
+  id = pickTake(id);
   if (sfx.isMuted()) return true; // recorded, just muted: callers shouldn't fall back to a synth
   if (sfx.isBackground()) return true; // page hidden: say nothing (and no synth fallback either)
+  if (channel === 'narr' && narrBusy()) {
+    narrQueue.push({ id, gain, at: Date.now() });
+    if (narrQueue.length > 2) narrQueue.shift(); // keep only the freshest two waiting
+    return true;
+  }
+  return start(id, channel, gain);
+}
+
+function start(id: string, channel: 'narr' | 'emote', gain: number): boolean {
   try {
     const prev = channels[channel];
     if (prev) { prev.el.pause(); held.delete(prev); }
@@ -52,6 +88,7 @@ export function playVoice(id: string, channel: 'narr' | 'emote' = 'narr', gain =
     if (!c) {
       const el = new Audio(`/voice/${id}.mp3`);
       el.preload = 'auto';
+      el.addEventListener('ended', () => { if (channels.narr?.el === el) drainNarr(); });
       c = { el, setGain: sfx.routeVoice(el), gain };
       cache.set(id, c);
     }
