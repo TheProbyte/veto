@@ -168,7 +168,7 @@ function Seat({ p, me, shooter, order, turnIdx, n }: { p: Player; me: string; sh
     top: `${pos.top}vh`,
     '--sc': pos.scale,
     '--blur': `${Math.max(0, (pos.depth - 0.35) * 1.8).toFixed(2)}px`,
-    '--dim': 0.55 + 0.45 * (1 - pos.depth),
+    '--dim': (0.72 + 0.28 * (1 - pos.depth)).toFixed(2),
     zIndex: Math.round((1 - pos.depth) * 10) + (lit ? 20 : 0),
   } as CSSProperties;
   return (

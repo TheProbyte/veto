@@ -1,5 +1,5 @@
 // Embeds the Vite build (dist/) into the Worker bundle so deploy is a single script upload.
-import { readdirSync, statSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 const files = [];
 const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); statSync(p).isDirectory() ? walk(p) : files.push(p); } };
@@ -10,8 +10,7 @@ const rows = [];
 files.forEach((f, i) => {
   const ext = f.split('.').pop();
   if (!types[ext]) return;
-  out += `import f${i} from '../${f}';\n`;
-  rows.push(`  ${JSON.stringify('/' + relative('dist', f))}: { body: f${i}, type: ${JSON.stringify(types[ext])} },`);
+  rows.push(`  ${JSON.stringify('/' + relative('dist', f))}: { body: ${JSON.stringify(readFileSync(f, 'utf8'))}, type: ${JSON.stringify(types[ext])} },`);
 });
 out += `export const STATIC: Record<string, { body: string; type: string }> = {\n${rows.join('\n')}\n};\n`;
 writeFileSync('worker/static.gen.ts', out);
