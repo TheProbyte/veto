@@ -39,6 +39,7 @@ export default function Duel({ state, me, send, skew }: RoomProps) {
   const amChamp = myIdx >= 0;
 
   const sent = useRef(false);
+  const mountedAt = useRef(performance.now());
   const [jumped, setJumped] = useState(false);
   const drawShownAt = useRef<number | null>(null);
   const duelKey = d ? `${d.startedAt}` : '';
@@ -76,6 +77,8 @@ export default function Duel({ state, me, send, skew }: RoomProps) {
   const bangRef = useRef<() => void>(() => {});
   bangRef.current = () => {
     if (!d || !amChamp || decided || sent.current) return;
+    // a leftover tap from the veto FIRE button as the phase flips isn't a foul: ignore input until the standoff begins
+    if (Date.now() + skew < d.startedAt || performance.now() - mountedAt.current < 350) return;
     if (d.taps[me] !== undefined) { sent.current = true; return; }
     sent.current = true;
     if (Date.now() + skew < d.drawAt) {
@@ -121,9 +124,9 @@ export default function Duel({ state, me, send, skew }: RoomProps) {
   // sizing: bust scale + box width that fit two columns side by side (iPhone SE: 375x667)
   const land = vp.h <= 500 && vp.w > vp.h;
   const colW = Math.min(300, (land ? vp.w * 0.6 : vp.w) / 2 - 22);
-  const roomH = land ? vp.h - 90 : vp.h - 330; // header + fuse + button
-  const bustScale = Math.max(1, Math.min(4, Math.floor(Math.min(colW / 48, (roomH * 0.42) / 74))));
-  const boxW = Math.max(70, Math.min(colW - 8, ((roomH - bustScale * 66) / 1.5) | 0, 190));
+  const roomH = land ? vp.h - 90 : vp.h - (vp.h < 700 ? 330 : 380); // room left for bust + box after header, names, fuse, button
+  const bustScale = Math.max(1, Math.min(4, Math.floor(2 * Math.min(colW / 48, (roomH * 0.4) / 74)) / 2));
+  const boxW = Math.max(70, Math.min(colW - 8, ((roomH - bustScale * 74 + 8) / 1.5) | 0, 190));
 
   const myTap = amChamp ? d.taps[me] : undefined;
   const winIdx = decided ? d.games.indexOf(d.winner!) : -1;
@@ -171,9 +174,9 @@ export default function Duel({ state, me, send, skew }: RoomProps) {
           </div>
         )}
         {amChamp && !decided && (
-          <button className="duel-bang px-btn" disabled={myTap !== undefined} aria-label="Bang">{myTap !== undefined ? (myTap < 0 ? 'FOUL' : fmt(myTap)) : 'BANG!'}</button>
+          <button className="duel-bang px-btn" disabled={myTap !== undefined || jumped} aria-label="Bang">{jumped ? 'FOUL' : myTap !== undefined ? fmt(myTap) : 'BANG!'}</button>
         )}
-        {amChamp && !decided && <div className="duel-note">{myTap !== undefined ? 'Waiting on the other gun…' : drawn ? 'NOW!' : 'Tap, click or Space on DRAW. Not before.'}</div>}
+        {amChamp && !decided && <div className="duel-note">{myTap !== undefined ? 'Waiting on the other gun…' : drawn ? 'NOW!' : 'Wait for DRAW!, then tap.'}</div>}
         {!amChamp && !decided && <div className="duel-spect px-box">SPECTATING</div>}
       </div>
       {drawn && !decided && <div className="duel-flash" />}

@@ -68,15 +68,15 @@
 }
 @keyframes gpx-stamp { 0%, 40% { opacity: 0; transform: translate(-50%, -50%) rotate(-13deg) scale(3); } 70%, 100% { opacity: 1; transform: translate(-50%, -50%) rotate(-13deg) scale(1); } }
 .gpx-slow-label {
-  position: absolute; top: calc(10vh + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); white-space: nowrap;
-  font-family: var(--px-sm); font-size: 12px; letter-spacing: .4em; color: #d9d2c4; opacity: .8; animation: pulse .6s steps(2) infinite;
+  position: absolute; bottom: calc(14vh + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: max-content; max-width: 90vw; text-align: center;
+  font-family: var(--px-sm); font-size: 11px; letter-spacing: .24em; line-height: 1.6; color: #d9d2c4; opacity: .8; animation: pulse .6s steps(2) infinite;
 }
 
 /* revenge slam */
 .gpx-revenge {
   position: absolute; left: 50%; bottom: calc(14vh + 64px); white-space: nowrap;
   font-family: var(--px); font-weight: 700; font-size: clamp(40px, 11vw, 72px); line-height: 1; letter-spacing: .04em;
-  color: #ff2a1f; text-shadow: 4px 4px 0 #2a0404, -2px 0 0 #ffb3a8; padding: 6px 14px 2px; box-shadow: inset 0 0 0 5px #ff2a1f;
+  color: #ff2a1f; text-shadow: 4px 4px 0 #2a0404, -2px 0 0 #ffb3a8; padding: 6px 14px 4px; box-shadow: inset 0 0 0 5px #ff2a1f; background: rgba(26, 3, 3, .86);
   animation: gpx-slam 1.7s steps(20) both;
 }
 .gpx-revenge small { display: block; font-family: var(--px-sm); font-size: .22em; letter-spacing: .14em; color: #ffd5c9; text-align: center; margin-top: 2px; }
@@ -125,7 +125,8 @@
 @keyframes gpx-words { 0% { opacity: 0; transform: translateX(-50%) scale(.6); } 8% { opacity: 1; transform: translateX(-50%) scale(1.05); } 12%, 90% { opacity: 1; transform: translateX(-50%) scale(1); } 100% { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .gpx-slow-box, .gpx-l, .gpx-r, .gpx-bullet, .gpx-shards i, .gpx-reveal .tinstar, .gpx-slow-label, .gp-revenge-tag, .crosshair.revenge, .btn-fire.avenge { animation: none !important; }
+  .gpx-bullet, .gpx-shards { display: none; }
+  .gpx-slow-box, .gpx-l, .gpx-r, .gpx-reveal .tinstar, .gpx-slow-label, .gp-revenge-tag, .crosshair.revenge, .btn-fire.avenge { animation: none !important; }
   .gpx-slow-stamp { animation: none; opacity: 1; transform: translate(-50%, -50%) rotate(-13deg); }
   .gpx-revenge { animation: fadein .2s steps(2) both; transform: translateX(-50%) rotate(-6deg); }
   .gpx-words { animation: fadein .2s steps(2) both; }
@@ -167,8 +168,9 @@
 .emo-taunts { display: flex; flex-wrap: wrap; gap: 8px 6px; }
 .emo-t {
   --face: #e8d5b5; --hi: #fff2d6; --lo: #c9b08a; --depth: 3px;
-  color: var(--ink); font-family: var(--px); font-weight: 500; font-size: 13px; letter-spacing: 0; padding: 8px 9px 6px; min-height: 36px; text-align: left;
+  color: var(--ink); font-family: var(--px); font-weight: 500; font-size: 12px; letter-spacing: 0; padding: 6px 8px 4px; min-height: 32px; text-align: left;
 }
+@media (pointer: coarse) { .emo-t.px-btn { min-height: 36px; } }
 .emo-say { display: flex; gap: 8px; }
 .emo-say input {
   flex: 1; min-width: 0; height: 44px; padding: 0 10px; border: 0; border-radius: 0; font-family: var(--px); font-size: 16px; color: var(--parch);
@@ -180,7 +182,10 @@
 .emo-cool { font-family: var(--px-sm); font-size: 9px; color: var(--amber); text-align: right; min-height: 11px; margin-top: -6px; }
 
 /* placement per phase (the bar sits above whatever owns the bottom edge) */
-.emo.ph-lobby, .emo.ph-nominate { --emo-bottom: calc(var(--dock-h, 0px) + 12px); }
+/* lobby / nominate: the panel + dealer's dock own the bottom edge, so sit top-left over the scene (mirrors the sound button) */
+.emo.ph-lobby, .emo.ph-nominate { bottom: auto; top: calc(12px + env(safe-area-inset-top)); }
+.emo.ph-lobby .emo-wheel, .emo.ph-nominate .emo-wheel { bottom: auto; top: calc(100% + 14px); max-height: min(430px, calc(100dvh - 90px)); }
+@media (max-width: 640px) { .emo.ph-lobby, .emo.ph-nominate { top: calc(8px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left)); } }
 @media (max-width: 640px) {
   .emo.ph-veto { --emo-bottom: calc(104px + env(safe-area-inset-bottom)); }
   .emo-btn { width: 46px; height: 46px; }
@@ -227,7 +232,7 @@
 }
 .duel-flash { position: fixed; inset: 0; z-index: 2; background: #fff6e4; pointer-events: none; animation: flash .35s steps(4) forwards; }
 .duel-jump {
-  position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%) rotate(-4deg); z-index: 4; pointer-events: none; white-space: nowrap;
+  position: fixed; left: 50%; top: 30%; translate: -50% -50%; rotate: -4deg; z-index: 4; pointer-events: none; width: max-content; max-width: 92vw; text-align: center;
   font-family: var(--px); font-weight: 700; font-size: clamp(30px, 9vw, 64px); color: #ff3b2f; text-shadow: 4px 4px 0 var(--ink);
   padding: 8px 16px 4px; box-shadow: inset 0 0 0 5px #ff3b2f; background: rgba(11,7,5,.7); animation: shudder .4s steps(6);
 }
@@ -242,15 +247,15 @@
 
 /* decided */
 .duel-side.win .duel-box { box-shadow: 8px 8px 0 rgba(0,0,0,.65), 0 0 0 4px var(--ink), 0 0 0 8px rgba(255,179,92,.85); }
-.duel-gunflash { position: absolute; z-index: 3; top: 20%; width: 60%; height: auto; aspect-ratio: 1; animation: muzzle .45s steps(4) forwards; transform: translate(-50%, -50%); }
+.duel-gunflash { position: absolute; z-index: 3; top: 20%; width: 60%; height: auto; aspect-ratio: 1; animation: muzzle .45s steps(4) 3 forwards; transform: translate(-50%, -50%); }
 .duel-side.left .duel-gunflash { left: 92%; }
 .duel-side.right .duel-gunflash { left: 8%; }
 .duel-side.lose .px-bust { filter: grayscale(.8) brightness(.55); }
 .duel-side.lose .duel-l { clip-path: polygon(0 0, 55% 0, 55% 8%, 45% 8%, 45% 28%, 60% 28%, 60% 50%, 40% 50%, 40% 74%, 52% 74%, 52% 100%, 0 100%); animation: duel-fall-l 1.2s steps(14) .15s forwards; }
 .duel-side.lose .duel-r { clip-path: polygon(55% 0, 100% 0, 100% 100%, 52% 100%, 52% 74%, 40% 74%, 40% 50%, 60% 50%, 60% 28%, 45% 28%, 45% 8%, 55% 8%); animation: duel-fall-r 1.2s steps(14) .15s forwards; }
 .duel-side.lose .duel-box { box-shadow: none; }
-@keyframes duel-fall-l { 0% { transform: none; } 20% { transform: translate(-6px, 3px) rotate(-3deg); } 100% { transform: translate(-30px, 60px) rotate(-16deg); opacity: .55; filter: grayscale(.8); } }
-@keyframes duel-fall-r { 0% { transform: none; } 20% { transform: translate(6px, 2px) rotate(3deg); } 100% { transform: translate(30px, 52px) rotate(18deg); opacity: .55; filter: grayscale(.8); } }
+@keyframes duel-fall-l { 0% { transform: none; } 20% { transform: translate(-6px, 3px) rotate(-3deg); } 100% { transform: translate(-14px, 22px) rotate(-9deg); opacity: .6; filter: grayscale(.8); } }
+@keyframes duel-fall-r { 0% { transform: none; } 20% { transform: translate(6px, 2px) rotate(3deg); } 100% { transform: translate(14px, 18px) rotate(10deg); opacity: .6; filter: grayscale(.8); } }
 .duel-stamp {
   position: absolute; left: 50%; top: 45%; z-index: 4; padding: 4px 10px 0; font-family: var(--px); font-weight: 700; font-size: clamp(34px, 10vw, 60px); line-height: 1;
   color: var(--stamp); box-shadow: inset 0 0 0 5px var(--stamp); text-shadow: 3px 3px 0 var(--red2); background: rgba(232,213,181,.12);
@@ -266,13 +271,16 @@
   .duel { flex-direction: row; flex-wrap: wrap; align-content: center; padding-top: calc(10px + env(safe-area-inset-top)); }
   .duel-title { display: none; }
   .duel-ring { max-width: 60vw; }
-  .duel-hud { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  @media (max-height: 700px) and (orientation: portrait) { .duel-title { display: none; } .duel-steady { font-size: clamp(26px, 8vw, 44px); } }
+.duel-hud { display: flex; flex-direction: column; align-items: center; gap: 10px; }
   .duel-bang { width: 220px; }
 }
+@media (max-height: 700px) and (orientation: portrait) { .duel-title { display: none; } .duel-steady { font-size: clamp(26px, 8vw, 44px); } }
 .duel-hud { display: flex; flex-direction: column; align-items: center; gap: clamp(6px, 1.4dvh, 12px); }
 
 @media (prefers-reduced-motion: reduce) {
-  .duel-steady, .duel-fuse b, .duel-flash, .duel-jump, .duel.drawn .duel-bang { animation: none !important; }
+  .duel-steady, .duel-fuse b, .duel-jump, .duel.drawn .duel-bang { animation: none !important; }
+  .duel-flash { display: none; }
   .duel-side.lose .duel-l, .duel-side.lose .duel-r { animation-duration: .01s; }
 }
 
@@ -308,3 +316,16 @@
 .gp-streak b { color: var(--parch); }
 @media (max-width: 400px) { .gp-record-grid { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .gp-badge { animation: none; } }
+
+/* phones: keep the first Boot Hill grave clear of the emote button */
+@media (max-width: 640px) {
+  .phase-veto .graveyard-row { padding-left: 72px; }
+  .gp-epitaph { margin: 2px 12px 0 72px; max-width: none; width: auto; text-align: left; }
+}
+
+/* result: leave room under the last card for the emote button */
+.result.gp-result { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+
+/* finale copy: short form on phones (styles.css hides the long one there) */
+.veto-count .gp-fin-short { display: none; }
+@media (max-width: 640px) { .veto-count span.gp-fin-short { display: inline; font-size: 11px; } }

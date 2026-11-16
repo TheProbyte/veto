@@ -53,7 +53,9 @@ export default function Nominate({ state, me, send }: RoomProps) {
     for (const p of state.pitches || []) if ((p.discount ?? 0) >= 30 && (!best || p.discount! > best.discount)) best = { appid: p.appid, name: p.name, discount: p.discount!, price: p.price, missing: null };
     return best;
   }, [state.pool, state.pitches]);
-  const dealWho = deal ? (deal.missing ? deal.missing.map((id) => byId.get(id)?.name).filter(Boolean).join(', ') || 'Somebody' : 'Everyone') : '';
+  const dealNames = deal?.missing ? deal.missing.map((id) => (id === me ? 'You' : byId.get(id)?.name)).filter(Boolean) as string[] : null;
+  const dealWho = !deal ? '' : !dealNames ? 'Everyone needs it' : !dealNames.length ? 'Somebody needs it'
+    : `${dealNames.join(', ')} need${dealNames.length === 1 && dealNames[0] !== 'You' ? 's' : ''} it`;
   const all = visible.filter((g) => g.tier === 'all');
   const almost = visible.filter((g) => g.tier === 'almost');
 
@@ -160,7 +162,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
           <span className="nh-deal-txt">
             <span className="nh-deal-k">Deal of the night</span>
             <b className="nh-deal-name">{deal.name}</b>
-            <span className="nh-deal-line">{dealWho} need{deal.missing && deal.missing.length > 1 ? '' : 's'} it · <em>-{deal.discount}%</em>{deal.price ? <> · {deal.price}</> : null}</span>
+            <span className="nh-deal-line">{dealWho} · <em>-{deal.discount}%</em>{deal.price ? <> · {deal.price}</> : null}</span>
           </span>
           <span className="nh-deal-go">Gift it ↗</span>
         </a>

@@ -151,14 +151,16 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
       </div>
 
       <DockActions>
+        <div className="dock-act">
         {nag && locked.length > 0 && (
-          <div className="cc-nag" role="alert">🔒 {locked.map(({ label }) => label).join(', ')} still locked. Earn it first, or pick another.</div>
+          <div className="cc-nag" role="alert">🔒 {locked.map(({ label }) => label).join(', ')} {locked.length > 1 ? 'are' : 'is'} locked. Earn it or pick another.</div>
         )}
         <div className="dock-act dock-act-row">
           {!first && <button type="button" className="nh-linkbtn" onClick={() => { sfx.click(); onDone(); }} disabled={tip}>never mind</button>}
           <button type="button" className={`nh-btn nh-btn-big cc-save ${locked.length ? 'is-locked' : ''}`} onClick={save} disabled={tip} aria-disabled={locked.length > 0}>
             {tip ? 'Much obliged…' : locked.length ? '🔒 Locked' : "Lookin' good →"}
           </button>
+        </div>
         </div>
       </DockActions>
     </div>

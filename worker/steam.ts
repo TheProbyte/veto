@@ -18,7 +18,7 @@ async function getJson(url: string, label: string): Promise<any> {
   try {
     r = await fetch(url, { headers: UA });
   } catch (e) {
-    console.error(`steam ${label}: network error`, e instanceof Error ? e.message : e);
+    console.error(`steam ${label}: network error`, e instanceof Error ? e.name : 'unknown'); // message could echo the keyed URL
     throw new Error("Couldn't reach Steam. Try again in a minute.");
   }
   if (!r.ok) {

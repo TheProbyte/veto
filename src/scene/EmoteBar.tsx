@@ -30,27 +30,7 @@ export default function EmoteBar({ state, send, skew }: RoomProps) {
   const [ringKey, setRingKey] = useState<{ k: number; ms: number } | null>(null);
   const [, force] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
-  const [dockH, setDockH] = useState(0);
   const phase = state.phase;
-
-  // lobby / nominate: sit on top of the dealer's dock (measured; its height changes)
-  useEffect(() => {
-    if (phase !== 'lobby' && phase !== 'nominate') { setDockH(0); return; }
-    let ro: ResizeObserver | null = null;
-    let raf = 0, tries = 0;
-    const hook = () => {
-      const el = document.querySelector('.dock') as HTMLElement | null;
-      if (!el) { if (tries++ < 30) raf = requestAnimationFrame(hook); return; }
-      const upd = () => setDockH(Math.round(window.innerHeight - el.getBoundingClientRect().top));
-      upd();
-      if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(upd); ro.observe(el); }
-      window.addEventListener('resize', upd);
-      cleanup = () => window.removeEventListener('resize', upd);
-    };
-    let cleanup = () => {};
-    hook();
-    return () => { cancelAnimationFrame(raf); ro?.disconnect(); cleanup(); };
-  }, [phase]);
 
   const toggle = useCallback((v?: boolean) => {
     setOpen((o) => {
@@ -109,9 +89,8 @@ export default function EmoteBar({ state, send, skew }: RoomProps) {
     setOpen(false);
   };
 
-  const style = { '--dock-h': `${dockH}px` } as CSSProperties;
   return createPortal(
-    <div className={`emo ph-${phase}`} ref={rootRef} style={style}>
+    <div className={`emo ph-${phase}`} ref={rootRef}>
       {open && (
         <div className="emo-wheel px-box" role="dialog" aria-label="Emotes and taunts">
           <div className="emo-grid">
@@ -120,10 +99,6 @@ export default function EmoteBar({ state, send, skew }: RoomProps) {
                 <span aria-hidden>{EMOTES[id].icon}</span><span>{EMOTES[id].label}</span>
               </button>
             ))}
-          </div>
-          <div className="emo-sec">TAUNTS</div>
-          <div className="emo-taunts">
-            {TAUNTS.map((t) => <button key={t} className="emo-t px-btn" disabled={sayCool} onClick={() => say(t)}>{t}</button>)}
           </div>
           <form className="emo-say" onSubmit={(e) => { e.preventDefault(); say(text); }}>
             <input
@@ -137,6 +112,10 @@ export default function EmoteBar({ state, send, skew }: RoomProps) {
             />
             <button type="submit" className="px-btn" disabled={sayCool || !text.trim()}>Say</button>
           </form>
+          <div className="emo-sec">TAUNTS</div>
+          <div className="emo-taunts">
+            {TAUNTS.map((t) => <button key={t} className="emo-t px-btn" disabled={sayCool} onClick={() => say(t)}>{t}</button>)}
+          </div>
           <div className="emo-cool">{emoteCool || sayCool ? 'catching your breath…' : ''}</div>
         </div>
       )}

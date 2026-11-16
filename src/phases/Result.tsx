@@ -78,7 +78,7 @@ export default function Result({ state, me, send, skew }: RoomProps) {
   let badgeN = 0;
 
   return (
-    <div className="result">
+    <div className="result gp-result">
       <div className="result-backdrop" style={{ backgroundImage: `url(${heroArt(res.appid)})` }} />
       <div className="poster-wrap">
         <div className="poster px-poster-in" ref={posterRef}>

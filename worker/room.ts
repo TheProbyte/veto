@@ -12,8 +12,10 @@ const NARR_HIGH = 6;
 // higher wins when several fire at once; >= NARR_HIGH may cut into the 2.5s throttle window
 const NARR_PRI: Partial<Record<NarrKey, number>> = {
   kill: 1, crack: 2, misfire: 2, fuse_low: 2, first_blood: 3, spree: 4, slowmo: 5,
-  ricochet: 6, draw: 6, cylinder: 6, rematch: 6, revenge: 7, duel: 7, duel_foul: 8, duel_win: 8, result: 9, repeat: 9,
+  draw: 6, cylinder: 6, rematch: 6, ricochet: 7, revenge: 8, duel: 7, duel_foul: 8, duel_win: 8, result: 9, repeat: 9,
 };
+// phase-change cues always cut in (even over an equal/higher line still ringing)
+const CUES = new Set<NarrKey>(['draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat']);
 const BOT_NAMES = ['Dusty Pete', 'One-Eye Jack', 'Calamity Sue', 'Tumbleweed Tim', 'Sagebrush Sal', 'Two-Bit Earl', 'Whiskey Nell', 'Slim Pickens', 'Rattlesnake Ray', 'Biscuit Bill'];
 const FAKE_LIB: [number, string][] = [[730, 'Counter-Strike 2'], [252490, 'Rust'], [892970, 'Valheim'], [1966720, 'Lethal Company'],
   [548430, 'Deep Rock Galactic'], [105600, 'Terraria'], [413150, 'Stardew Valley'], [632360, 'Risk of Rain 2'], [739630, 'Phasmophobia'],
@@ -96,6 +98,8 @@ export class Room extends DurableObject<Env> {
       s.pitches ??= [];
       s.settings = { ...DEFAULT_SETTINGS, ...(s.settings ?? {}) };
       s.record ??= emptyRecord();
+      for (const g of s.pool) g.hoursBy ??= {};
+      if (s.result) s.result.badges ??= {};
       for (const g of s.board) {
         const sb = g.shieldedBy as unknown;
         if (typeof sb === 'string') g.shieldedBy = [sb];
@@ -185,7 +189,7 @@ export class Room extends DurableObject<Env> {
     if (!n) return;
     this.narrPending = undefined;
     const now = Date.now();
-    if (now - this.narrAt < NARR_GAP && !(n.pri >= NARR_HIGH && n.pri > this.narrPri)) return;
+    if (now - this.narrAt < NARR_GAP && !(n.pri >= NARR_HIGH && (n.pri > this.narrPri || CUES.has(n.key)))) return;
     const line = pickLine(n.key, this.narrId);
     this.narrAt = now; this.narrPri = n.pri; this.narrId = line.id;
     this.event({ t: 'narrate', id: line.id, text: line.text, at: now });
@@ -411,9 +415,9 @@ export class Room extends DurableObject<Env> {
       }
       case 'say': {
         this.me(pid);
-        const text = [...String(i.text ?? '')].filter((ch) => !invisible(ch.codePointAt(0)!)).join('').trim().slice(0, SAY_MAX).trim();
-        if (!text) return;
         if (this.limited('s:' + pid, 2000)) return;
+        const text = [...String(i.text ?? '').slice(0, 500)].filter((ch) => !invisible(ch.codePointAt(0)!)).join('').trim().slice(0, SAY_MAX).trim();
+        if (!text) return;
         this.event({ t: 'say', pid, text, at: Date.now() });
         return;
       }
@@ -539,6 +543,7 @@ export class Room extends DurableObject<Env> {
         s.phase = 'nominate';
         s.board = []; s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.result = undefined; s.duel = undefined;
         s.turnOrder = []; s.turnIdx = 0; s.turnDeadline = 0; s.aim = undefined;
+        for (const p of s.players) p.revengeOn = undefined;
         this.narr('deal');
         this.scheduleBotNoms();
         this.broadcast();

@@ -885,7 +885,8 @@
 /* creator: locked options + record strip */
 .cc-row.is-locked .cc-mid { background: repeating-linear-gradient(135deg, rgba(0,0,0,.45) 0 4px, rgba(0,0,0,.3) 4px 8px); }
 .cc-row.is-locked .cc-val { color: rgba(232,213,181,.45); }
-.cc-lock { grid-column: 1 / -1; grid-row: 3; font-family: var(--nh-px); font-size: 11px; color: rgba(232,213,181,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-lock { grid-column: 1 / -1; grid-row: 3; font-family: var(--nh-px); font-size: 11px; line-height: 1.25; color: rgba(232,213,181,.6); }
+.cc-lock em { white-space: nowrap; }
 .cc-lock em { font-style: normal; color: var(--nh-amber); margin-left: 4px; }
 .cc-sw i.lk { opacity: .25; background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.6) 0 1px, transparent 1px 3px) !important; }
 .cc-record { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 8px; background: rgba(0,0,0,.3); box-shadow: 0 -2px 0 0 #4a2c14, 0 2px 0 0 #4a2c14, -2px 0 0 0 #4a2c14, 2px 0 0 0 #4a2c14; }
@@ -893,7 +894,7 @@
 .cc-stat { display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 6px; font-family: var(--nh-px); font-size: 11px; color: rgba(232,213,181,.65); background: #120904; }
 .cc-stat b { font-family: 'Rye', serif; font-weight: 400; font-size: 14px; color: var(--nh-parch); }
 .cc-save.is-locked { filter: grayscale(.8) brightness(.6); }
-.cc-nag { font-family: var(--nh-px); font-size: 12px; color: var(--nh-parch); background: #3a0e0a; padding: 6px 10px; margin: 0 0 6px; text-align: center; box-shadow: 0 -2px 0 0 #5a1a14, 0 2px 0 0 #5a1a14, -2px 0 0 0 #5a1a14, 2px 0 0 0 #5a1a14; }
+.cc-nag { font-family: var(--nh-px); font-size: 12px; color: var(--nh-parch); background: #3a0e0a; padding: 4px 10px; margin: 2px 0 2px; max-width: 420px; text-align: center; box-shadow: 0 -2px 0 0 #5a1a14, 0 2px 0 0 #5a1a14, -2px 0 0 0 #5a1a14, 2px 0 0 0 #5a1a14; }
 
 /* nominate: deal banner, hours breakdown, fresh blood chip */
 .nh-nom-rules { display: block; }

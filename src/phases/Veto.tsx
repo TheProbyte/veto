@@ -111,6 +111,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
       <div className="veto-head">
         <div className="veto-count">
           <b>{n}</b> left {n > finaleN ? <span>· shoot down to {finaleN}, {finaleTail}</span> : <span>· {finaleNow}</span>}
+          {n > finaleN && <span className="gp-fin-short">· shoot down to {finaleN}</span>}
         </div>
         <div className="veto-status">
           {myTurn ? <span className="your-shot">Your shot, partner.</span> : <span><b>{shooter?.name ?? 'Someone'}</b> is taking aim…</span>}
