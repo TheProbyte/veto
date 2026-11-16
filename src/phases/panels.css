@@ -555,3 +555,4 @@
 .nh-lamp-r { top: calc(68px - 35vmax); }
 .nh-lamp-c { top: calc(60px - 35vmax); }
 .nh-lamp::before { transform: scale(2); }
+.nh-tagline { margin-top: clamp(28px, 5vw, 48px) !important; position: relative; z-index: 2; }
