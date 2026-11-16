@@ -13,6 +13,7 @@ export type NarrKey =
   | 'sheriff' | 'pardon' | 'jail' | 'ousted'
   | 'draft' | 'trade' | 'burn'
   | 'saddle' | 'straggler'
+  | 'vote' | 'golf' | 'horse' | 'how_vote' | 'how_golf' | 'how_horse'
   | 'how_lobby' | 'how_nominate' | 'how_draft' | 'how_veto' | 'how_star' | 'how_slide' | 'how_cylinder' | 'how_duel' | 'how_result';
 
 export interface NarrLine { id: string; text: string; direction?: string }
@@ -176,6 +177,24 @@ export const NARRATOR: Record<NarrKey, { when: string; lines: NarrLine[] }> = {
   ] },
   burn: { when: 'Someone burns a card', lines: [
     { id: 'burn_1', text: 'Into the stove it goes.' },
+  ] },
+  vote: { when: 'Finale vote opens', lines: [
+    { id: 'vote_1', text: "Down to the last few. How we settlin' this?", direction: 'leaning in' },
+  ] },
+  golf: { when: 'Mini golf finale starts', lines: [
+    { id: 'golf_1', text: 'Mini golf. In a saloon. Don’t ask.', direction: 'deadpan' },
+  ] },
+  horse: { when: 'Horse drop finale starts', lines: [
+    { id: 'horse_1', text: 'Up on the roof, cowboys. Mind the horse.', direction: 'amused' },
+  ] },
+  how_vote: { when: 'EXPLAIN: finale vote', lines: [
+    { id: 'how_vote_1', text: 'Pick how we settle it, and which game you play for. Lock it in.', direction: 'clear' },
+  ] },
+  how_golf: { when: 'EXPLAIN: mini golf', lines: [
+    { id: 'how_golf_1', text: 'Drag back to aim, let go to putt. Fewest strokes wins.', direction: 'clear' },
+  ] },
+  how_horse: { when: 'EXPLAIN: horse drop', lines: [
+    { id: 'how_horse_1', text: 'Hold to jump and tuck, let go to open up. Land straight in the saddle.', direction: 'clear' },
   ] },
   how_lobby: { when: 'EXPLAIN (settings.explain): lobby opens', lines: [
     { id: 'how_lobby_1', text: "Pick your look, link your Steam, and wait for the posse.", direction: 'friendly, clear, unhurried' },

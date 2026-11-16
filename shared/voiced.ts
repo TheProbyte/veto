@@ -4,6 +4,7 @@
 export const EXPLAIN_MS: Record<string, number> = {
   how_lobby: 4100, how_nominate: 5400, how_draft: 3900, how_veto: 5600, how_star: 4500,
   how_slide: 5700, how_cylinder: 8100, how_duel: 8300, how_result: 6800,
+  how_vote: 5200, how_golf: 4600, how_horse: 5600,
 };
 
 export const VOICED = new Set<string>([

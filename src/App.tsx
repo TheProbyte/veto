@@ -11,6 +11,8 @@ import Roulette from './phases/Roulette';
 import Result from './phases/Result';
 import Duel from './phases/Duel';
 import Slide from './phases/Slide';
+import Vote from './phases/Vote';
+import Mini from './phases/Mini';
 import type { RoomProps } from './props';
 
 function getName(): string | null {
@@ -26,13 +28,13 @@ export default function App() {
 function Room({ code }: { code: string }) {
   const [name, setName] = useState<string | null>(getName());
   const { state, me, send, connected, error, skew, on } = useRoom(code, name);
-  useWakeLock(state?.phase === 'veto' || state?.phase === 'roulette' || state?.phase === 'duel' || state?.phase === 'slide');
+  useWakeLock(state?.phase === 'veto' || state?.phase === 'roulette' || state?.phase === 'duel' || state?.phase === 'slide' || state?.phase === 'vote' || state?.phase === 'mini');
   if (!name) {
     return <><ContextMenu /><NameGate code={code} onJoin={(n) => { try { localStorage.setItem('nah.name', n); } catch {} setName(n); }} /></>;
   }
   if (!state) return <div className="loading">Pushing open the saloon doors…</div>;
   const p: RoomProps = { state, me, send, skew, on };
-  const Phase = { lobby: Lobby, nominate: Nominate, veto: Veto, roulette: Roulette, duel: Duel, slide: Slide, result: Result }[state.phase];
+  const Phase = { lobby: Lobby, nominate: Nominate, veto: Veto, roulette: Roulette, duel: Duel, slide: Slide, vote: Vote, mini: Mini, result: Result }[state.phase];
   return (
     <>
       <Saloon {...p}><Phase {...p} /></Saloon>

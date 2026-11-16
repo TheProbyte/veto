@@ -1,5 +1,5 @@
 // Shared contract between the Durable Object (server) and the React client.
-export type Phase = 'lobby' | 'nominate' | 'veto' | 'roulette' | 'duel' | 'slide' | 'result';
+export type Phase = 'lobby' | 'nominate' | 'veto' | 'vote' | 'roulette' | 'mini' | 'duel' | 'slide' | 'result';
 
 export interface SteamInfo {
   steamid: string;
@@ -85,7 +85,58 @@ export interface Settings {
 }
 export const DEFAULT_SETTINGS: Settings = { turnSecs: 30, picks: 3, finale: 'slide', cylinderAt: 3, nominations: 'browse', sheriff: false, explain: true };
 
-/** Whiskey Slide finale: each finalist game has a champion who slides a glass down the bar; closest to the mark without going off the end wins. */
+/**
+ * FINALE (in-game, not a setting): when the table is down to settings.cylinderAt games, everyone votes how to settle it
+ * and picks which finalist they play for. Most votes wins (ties broken at random).
+ */
+export type FinaleKind = 'revolver' | 'slide' | 'golf' | 'horse';
+export const FINALES: Record<FinaleKind, { label: string; blurb: string }> = {
+  revolver: { label: 'Revolver', blurb: 'The cylinder picks. Pure luck.' },
+  slide: { label: 'Whiskey Slide', blurb: 'Slide your glass to the chalk.' },
+  golf: { label: 'Mini Golf', blurb: 'Fewest strokes wins.' },
+  horse: { label: 'Horse Drop', blurb: 'Flip off the roof, land the saddle.' },
+};
+export const FINALE_KINDS: FinaleKind[] = ['revolver', 'slide', 'golf', 'horse'];
+
+export interface FinaleVote {
+  games: number[];                       // the finalist appids (2–3)
+  votes: Record<string, FinaleKind>;     // player id -> locked-in vote (humans; bots vote too)
+  backs: Record<string, number>;         // player id -> finalist appid they play for (defaults to their own pick)
+  deadline: number;                      // ms epoch: unvoted players are ignored after this
+  picked?: FinaleKind;                   // set once decided (shown ~2.5 s before the finale starts)
+  pickedAt?: number;
+}
+
+/**
+ * Skill finale everyone plays at once (phase 'mini'). Each player plays for state.mini.backs[pid]; the best score's game wins.
+ * score: HIGHER IS BETTER for every kind (the server computes it):
+ *  - slide: 1000 − |dist − mark|·1000 (0 if it fell off the end). Server-authoritative from {t:'slide', power}.
+ *  - golf:  10000 − strokes·1000 − min(999, seconds·5). Client sends {t:'golfDone', strokes, ms}. DNF (deadline) = 0.
+ *  - horse: client physics landing score 0..100 → ×10. Client sends {t:'horseDone', score, inputs}. Miss = 0.
+ */
+export interface Mini {
+  kind: 'slide' | 'golf' | 'horse';
+  games: number[];
+  backs: Record<string, number>;
+  players: string[];                     // everyone playing (connected humans + bots at start)
+  startedAt: number;                     // ms epoch: play opens (after the intro / explanation)
+  deadline: number;                      // ms epoch: unfinished players score 0
+  seed: number;                          // shared randomness (golf course pick, wind, horse positions...)
+  map?: number;                          // golf: course 0..4
+  mark?: number;                         // slide: target 0..1 along the bar (bar end = 1.0)
+  results: Record<string, MiniResult>;   // finished players
+  winner?: number;                       // winning appid
+  winnerPid?: string;
+  decidedAt?: number;                    // result phase follows ~3.5 s later
+}
+export interface MiniResult {
+  score: number;                         // higher is better
+  label: string;                         // human readout, e.g. "3 strokes", "9\" short", "Perfect landing!"
+  at: number;
+  data?: number[];                       // kind-specific replay data (slide: [dist, fell 0/1]; horse: input timeline; golf: [strokes, ms])
+}
+
+/** Whiskey Slide finale (legacy champion version; superseded by Mini kind 'slide'): each finalist game has a champion who slides a glass down the bar; closest to the mark without going off the end wins. */
 export interface Slide {
   games: number[];               // 2–3 finalist appids
   champs: string[];              // champion player id per game (same index; a player may champion more than one)
@@ -265,6 +316,8 @@ export interface RoomState {
   settings: Settings;
   duel?: Duel;
   slide?: Slide;
+  vote?: FinaleVote;  // phase 'vote'
+  mini?: Mini;        // phase 'mini'
   draft?: Draft;     // present during nomination when settings.nominations === 'draft' (hand redacted per player)
   sheriff?: Sheriff; // present during the shootout when settings.sheriff
   launch?: Launch;   // present in the result phase
@@ -324,7 +377,13 @@ export type Intent =
   | { t: 'oust' } // toggle my vote to run the Sheriff out of town
   | { t: 'ready'; status: 'ready' | 'buy' | 'download' } // Saddle Up ready check
   | { t: 'saddleUp' } // host: start the synced 3-2-1 launch
-  | { t: 'resetRecord' }; // host: wipe this table's history + posse record ("Lately at this table") // duel: champ fires; reaction = ms between DRAW appearing on their screen and the tap (client-measured); sent before DRAW = foul
+  | { t: 'resetRecord' } // host: wipe this table's history + posse record ("Lately at this table")
+  | { t: 'finaleVote'; kind: FinaleKind } // lock in my vote for how to settle the finale (can change until everyone's in)
+  | { t: 'back'; appid: number } // which finalist I play for (vote phase, or mini before I've played)
+  | { t: 'golfDone'; strokes: number; ms: number } // mini golf: I holed out
+  | { t: 'horseDone'; score: number; inputs: number[] } // horse drop: my landing score 0..100 + input timeline for replays
+  | { t: 'miniMove'; data: number[] } // transient: my live state for others' ghosts (golf ball rest pos, etc.); relayed as RoomEvent 'mini'
+  | { t: 'skipExplain' }; // I've heard enough: when every connected human skips, the explanation hold ends // duel: champ fires; reaction = ms between DRAW appearing on their screen and the tap (client-measured); sent before DRAW = foul
 
 // server -> client
 export type ServerMsg =
@@ -337,6 +396,7 @@ export type RoomEvent =
   | { t: 'emote'; pid: string; emote: EmoteId; at: number }
   | { t: 'say'; pid: string; text: string; at: number }
   | { t: 'narrate'; id: string; text: string; at: number } // bartender line (see shared/narrator.ts); id matches /voice/<id>.mp3
+  | { t: 'mini'; pid: string; data: number[]; at: number } // relayed miniMove (not stored)
 
 export const TURN_MS = 30_000;
 export const MAX_NOMS = 3;
