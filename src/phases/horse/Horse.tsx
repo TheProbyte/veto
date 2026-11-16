@@ -21,7 +21,8 @@ import {
 } from './art';
 import './horse.css';
 
-const LANE_DX = 4, LANE_DY = 3;   // each depth lane: further right and up (the row receding along the roof edge)
+// each depth lane sits further right and up (the row receding along the roof edge); tighter with more players
+const laneStep = (n: number): [number, number] => { const dx = n > 1 ? Math.max(4, Math.min(8, Math.round(30 / (n - 1)))) : 4; return [dx, Math.max(3, Math.round(dx * 0.7))]; };
 const INTRO_MS = 1900;            // sunny reveal: iris + pan from the stormy saloon
 const TAKEOFF_MS = 120;           // spring off the edge before the tuck/open shape takes over
 const BLEND_MS = 260;
@@ -51,15 +52,16 @@ function standingShot(perf: number, d: Diver, waiting: boolean): Shot {
 }
 
 function flightShot(j: Jump, el: number, perf: number, variant: number): Shot {
-  const f = frameAt(j, Math.min(el, j.landMs));
+  const landMs = j.landMs < 0 ? Infinity : j.landMs; // live jump still in the air
+  const f = frameAt(j, Math.min(el, landMs));
   const shape = mixPose(POSES.open, POSES.tuck, ease(f.tuck));
   let pose: RPose;
   if (el < TAKEOFF_MS) pose = mixPose(POSES.ready, POSES.takeoff, ease(el / TAKEOFF_MS));
   else if (el < BLEND_MS) pose = mixPose(POSES.takeoff, shape, ease((el - TAKEOFF_MS) / (BLEND_MS - TAKEOFF_MS)));
   else pose = shape;
   const tail = (perf + (variant % 3000)) % 2700;
-  if (el < j.landMs) return { x: f.x, y: f.y, deg: f.deg, pose, farLeg: true, horse: 'idle', horseFrame: tail < 260 ? 1 : tail < 520 ? 2 : 0, horseDx: 0, dust: -1, landed: false, straddled: false };
-  const tl = Math.min(20000, el - j.landMs);
+  if (el < landMs) return { x: f.x, y: f.y, deg: f.deg, pose, farLeg: true, horse: 'idle', horseFrame: tail < 260 ? 1 : tail < 520 ? 2 : 0, horseDx: 0, dust: -1, landed: false, straddled: false };
+  const tl = Math.min(20000, el - landMs);
   if (j.straddled) {
     const settle = Math.exp(-tl / 230);
     const deg = 360 + j.err * settle * Math.cos(tl / 75);
@@ -256,12 +258,13 @@ export default function Horse(p: RoomProps) {
       P = Math.max(1, Math.min(Math.floor(sh / 150), Math.floor(sw / 120)));
       const W = Math.ceil(sw / P), H = Math.ceil(sh / P);
       const lanes = Math.max(1, ds.length);
-      const ox = Math.max(18, Math.round(W / 2 - (24 + 2 * (lanes - 1))));
+      const [ldx, ldy] = laneStep(lanes);
+      const ox = Math.max(18, Math.round(W / 2 - (24 + (ldx * (lanes - 1)) / 2)));
       const oy = H - Math.max(10, Math.round(H * 0.08));
       const key = `${W}x${H}x${lanes}x${ox}x${oy}`;
       if (key !== geoKey) {
         geoKey = key;
-        geo = { W, H, ox, oy, lanes, dx: LANE_DX, dy: LANE_DY };
+        geo = { W, H, ox, oy, lanes, dx: ldx, dy: ldy };
         back = renderBackdrop(geo, ROOF);
         cv.width = W; cv.height = H;
         cv.style.width = `${W * P}px`; cv.style.height = `${H * P}px`;
