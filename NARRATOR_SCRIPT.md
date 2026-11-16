@@ -289,59 +289,161 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 |---|---|---|
 | `burn_1.mp3` | Into the stove it goes. |  |
 
+## vote: Finale vote opens
+
+| File | Line | Direction |
+|---|---|---|
+| `vote_1.mp3` | Down to the last few. How we settlin' this? | leaning in |
+
+## golf: Mini golf finale starts
+
+| File | Line | Direction |
+|---|---|---|
+| `golf_1.mp3` | Mini golf. In a saloon. Don’t ask. | deadpan |
+
+## horse: Horse drop finale starts
+
+| File | Line | Direction |
+|---|---|---|
+| `horse_1.mp3` | Up on the roof, cowboys. Mind the horse. | amused |
+
+## vote_revolver: Vote picked the revolver
+
+| File | Line | Direction |
+|---|---|---|
+| `vote_revolver_1.mp3` | Leavin' it to luck. Brave. | dry |
+
+## vote_slide: Vote picked the whiskey slide
+
+| File | Line | Direction |
+|---|---|---|
+| `vote_slide_1.mp3` | Whiskey it is. Steady hands, gentlemen. | pleased |
+
+## vote_golf: Vote picked mini golf
+
+| File | Line | Direction |
+|---|---|---|
+| `vote_golf_1.mp3` | Fetch the putters. | amused |
+
+## vote_horse: Vote picked the horse drop
+
+| File | Line | Direction |
+|---|---|---|
+| `vote_horse_1.mp3` | To the roof! Somebody warn the horses. | excited |
+
+## horse_perfect: Someone lands a perfect horse drop (95+)
+
+| File | Line | Direction |
+|---|---|---|
+| `horse_perfect_1.mp3` | Now that's how you mount a horse! | impressed |
+
+## horse_miss: Someone misses the horse
+
+| File | Line | Direction |
+|---|---|---|
+| `horse_miss_1.mp3` | Oof. Right in the dirt. | wincing |
+
+## horse_ride: Horse drop decided: the winner rides off
+
+| File | Line | Direction |
+|---|---|---|
+| `horse_ride_1.mp3` | And off they ride! | proud |
+
+## golf_ace: Someone gets a hole in one
+
+| File | Line | Direction |
+|---|---|---|
+| `golf_ace_1.mp3` | Hole in one! Drinks are on you. | delighted |
+
+## golf_water: A golf ball goes in the water (client-reported via miniMove is not enough: optional)
+
+| File | Line | Direction |
+|---|---|---|
+| `golf_water_1.mp3` | Splash. That's a stroke, partner. | dry |
+
+## mini_win: A minigame (slide/golf/horse) is decided
+
+| File | Line | Direction |
+|---|---|---|
+| `mini_win_1.mp3` | And that settles it. | final |
+
+## mini_close: Minigame decided by a hair (top two scores very close)
+
+| File | Line | Direction |
+|---|---|---|
+| `mini_close_1.mp3` | Close one. Real close. | tense |
+
+## how_vote: EXPLAIN: finale vote
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_vote_1.mp3` | Pick how we settle it, and which game you play for. Lock it in. | clear |
+
+## how_golf: EXPLAIN: mini golf
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_golf_1.mp3` | Drag back to aim, let go to putt. Fewest strokes wins. | clear |
+
+## how_horse: EXPLAIN: horse drop
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_horse_1.mp3` | Hold to jump and tuck, let go to open up. Land straight in the saddle. | clear |
+
 ## how_lobby: EXPLAIN (settings.explain): lobby opens
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_lobby_1.mp3` | Pick your look, link your Steam, and wait for the posse. | friendly, clear, unhurried |
+| ✅ `how_lobby_1.mp3` | Pick your look, link your Steam, and wait for the posse. | friendly, clear, unhurried |
 
 ## how_nominate: EXPLAIN: nominations open (browse mode)
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_nom_1.mp3` | Tap the games you want to play. They land on the table. | clear, helpful |
+| ✅ `how_nom_1.mp3` | Tap the games you want to play. They land on the table. | clear, helpful |
 
 ## how_draft: EXPLAIN: nominations open (card draft)
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_draft_1.mp3` | These cards are yours. Play the ones you want. Trade the rest. | clear, helpful |
+| ✅ `how_draft_1.mp3` | These cards are yours. Play the ones you want. Trade the rest. | clear, helpful |
 
 ## how_veto: EXPLAIN: shootout begins
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_veto_1.mp3` | On your turn, aim at a game you DON'T want, and pull the trigger. | clear, slow, emphasis on DON'T |
+| ✅ `how_veto_1.mp3` | On your turn, aim at a game you DON'T want, and pull the trigger. | clear, slow, emphasis on DON'T |
 
 ## how_star: EXPLAIN: a few seconds into the first shootout
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_star_1.mp3` | Tap the badge on a game to protect it. Only you'll know. | sly whisper |
+| ✅ `how_star_1.mp3` | Tap the badge on a game to protect it. Only you'll know. | sly whisper |
 
 ## how_slide: EXPLAIN: whiskey slide starts
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_slide_1.mp3` | Hold your glass, let go to slide it. Closest to the chalk wins. | clear, helpful |
+| ✅ `how_slide_1.mp3` | Hold your glass, let go to slide it. Closest to the chalk wins. | clear, helpful |
 
 ## how_cylinder: EXPLAIN: revolver roulette starts
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_cyl_1.mp3` | Nothing to do but watch. The cylinder picks. | calm |
+| ✅ `how_cyl_1.mp3` | Nothing to do but watch. The cylinder picks. | calm |
 
 ## how_duel: EXPLAIN: quick-draw duel starts
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_duel_1.mp3` | Wait for DRAW. Then tap as fast as you can. Too early, you lose. | tense, clear |
+| ✅ `how_duel_1.mp3` | Wait for DRAW. Then tap as fast as you can. Too early, you lose. | tense, clear |
 
 ## how_result: EXPLAIN: result screen
 
 | File | Line | Direction |
 |---|---|---|
-| 🆕 `how_result_1.mp3` | Mark yourself ready, then saddle up together. | warm |
+| ✅ `how_result_1.mp3` | Mark yourself ready, then saddle up together. | warm |
 
 ## saddle: Synced launch countdown starts
 

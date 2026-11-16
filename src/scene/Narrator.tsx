@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomProps } from '../props';
 import { playVoice, stopNarrator } from '../voice';
+import BarkeepPortrait from '../pixel/BarkeepPortrait';
 
 interface Cap { id: string; text: string; key: number }
 
@@ -44,6 +45,7 @@ function ExplainCard({ state, skew, send }: { state: RoomProps['state']; skew: n
       onPointerDownCapture={(e) => { e.stopPropagation(); e.preventDefault(); }}
       onClickCapture={(e) => { e.stopPropagation(); e.preventDefault(); skip(); }}>
       <div className="xcard-box">
+        <div className="xcard-face"><BarkeepPortrait talking size={4} /></div>
         <div className="xcard-who">The Barkeep</div>
         <div className="xcard-text">{state.explainText}</div>
         <div className="xcard-bar"><span style={{ transform: `scaleX(${left})` }} /></div>
@@ -131,6 +133,8 @@ const CSS = `
 .xcard-text{font-family:'Pixelify Sans','Silkscreen',monospace;font-size:clamp(22px,calc(var(--pt,3px)*11),44px);line-height:1.2;-webkit-font-smoothing:none}
 .xcard-bar{margin:calc(var(--pu,3px)*5) auto 0;height:calc(var(--pu,3px)*2);width:60%;background:#160d08;
   box-shadow:0 0 0 var(--pu,3px) #5a3a22}
+.xcard-face{display:flex;justify-content:center;margin-bottom:calc(var(--pu,3px)*3)}
+.xcard-face:empty{display:none}
 .xcard-skip{margin-top:calc(var(--pu,3px)*3);font-family:'Silkscreen',monospace;font-size:calc(var(--pt,2px)*5);color:#e8d5b5a0;letter-spacing:.1em;text-transform:uppercase}
 .xcard{cursor:var(--cur-pointer,pointer)}
 .xcard-bar span{display:block;height:100%;background:#ffb35c;transform-origin:left center}
