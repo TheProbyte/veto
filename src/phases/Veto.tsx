@@ -201,10 +201,11 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
               className={`cbox ${isC ? 'center' : ''} ${isC && canFire ? 'vt-shootable' : ''}`}
               style={style}
               onPointerDownCapture={(e) => { fromBadge.current = !!(e.target as HTMLElement).closest?.('.vt-badge'); }}
-              onClick={() => {
+              onClick={(e) => {
                 if (swiped.current) { swiped.current = false; return; }
                 if (fromBadge.current) { fromBadge.current = false; return; }
-                if (isC) { if (canFire) fire(); return; }
+                // only the box art itself is a trigger (not the name / byline under it)
+                if (isC) { if (canFire && (e.target as HTMLElement).closest?.('.gbox')) fire(); return; }
                 if (myTurn && !hush) { sfx.whoosh(); send({ t: 'aim', appid: g.appid }); }
               }}
             >

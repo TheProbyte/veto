@@ -245,6 +245,8 @@
 .duel-note { font-family: var(--px-sm); font-size: calc(var(--pt) * 8); color: var(--parch2); opacity: .8; text-align: center; min-height: 14px; }
 .duel-spect { font-family: var(--px-sm); font-size: calc(var(--pt) * 8); letter-spacing: .3em; color: var(--parch2); padding: 6px 12px 4px; }
 
+/* held while the Barkeep explains the vote */
+.fv.held .fv-cards, .fv.held .fv-game { opacity: .7; }
 /* decided */
 .duel-side.win .duel-box { box-shadow: calc(var(--pu) * 4) calc(var(--pu) * 4) 0 rgba(0,0,0,.65), 0 0 0 calc(var(--pu) * 2) var(--ink), 0 0 0 calc(var(--pu) * 4) rgba(255,179,92,.85); }
 .duel-gunflash { position: absolute; z-index: 3; top: 20%; width: 60%; height: auto; aspect-ratio: 1; animation: muzzle .45s steps(4) 3 forwards; transform: translate(-50%, -50%); }
@@ -687,7 +689,7 @@
 /* the protect badge keeps its small look but gets a finger-sized (≥44px) invisible hit area */
 .vt-badge::after { content: ''; position: absolute; inset: 50% auto auto 50%; width: 48px; height: 48px; transform: translate(-50%, -50%); }
 /* my turn: the centered box itself is a trigger (the badge keeps its own cursor + hit area) */
-.vt-shootable, .vt-shootable .gbox, .vt-shootable .cbox-name, .vt-shootable canvas { cursor: var(--cur-aim, crosshair); }
+.vt-shootable .gbox, .vt-shootable .gbox * { cursor: var(--cur-aim, crosshair); }
 .vt-shootable .vt-badge, .vt-shootable .vt-badge * { cursor: var(--cur-pointer); }
 
 /* ================= finale vote: how do we settle it? ================= */
@@ -745,6 +747,8 @@
 .fv-lock { position: absolute; top: -9px; right: 6px; white-space: nowrap; padding: 2px 5px 1px; font-family: var(--px-sm); font-size: 10px; color: var(--ink); background: var(--amber); box-shadow: 0 0 0 var(--pu) var(--ink); animation: fv-lock .25s steps(3) both; }
 @keyframes fv-lock { from { transform: scale(1.5); opacity: 0; } }
 
+/* held while the Barkeep explains the vote */
+.fv.held .fv-cards, .fv.held .fv-game { opacity: .7; }
 /* decided */
 .fv.decided .fv-card.lose { opacity: .4; filter: grayscale(.8); transition: opacity .4s steps(4), filter .4s steps(4); }
 .fv.decided .fv-game { opacity: .85; }
@@ -781,7 +785,9 @@
   .fv-game-name { font-size: 11px; line-height: 1.1; }
   .fv-game .fv-busts { flex-wrap: wrap; }
   .fv-game .fv-bust { width: 18px !important; height: 15px !important; }
-  .fv-games-lbl { display: none; }
+  .fv-games { flex-wrap: wrap; row-gap: 3px; }
+  .fv-games-lbl { flex: 0 0 100%; writing-mode: horizontal-tb; transform: none; font-size: 10px; letter-spacing: .1em; line-height: 1; }
+  .fv-game { flex: 1 1 0; }
   .fv-game-me { top: -9px; right: 3px; font-size: 9px; padding: 2px 3px 1px; }
   .fv-names { display: none; }
   .fv-foot { padding-left: 52px; justify-content: flex-start; } /* the emote button sits bottom-left */
@@ -794,13 +800,30 @@
 }
 /* desktop: sit a little lower so the seated players' nameplates stay clear */
 @media (min-width: 641px) and (min-height: 760px) { .fv { margin-top: clamp(0px, calc(100dvh - var(--stage-top, 300px) - 500px), 56px); } }
-/* landscape phones: everything in a row */
+/* landscape phones: one compact strip under the seats */
 @media (max-height: 500px) and (orientation: landscape) {
-  .fv { gap: 6px; padding: 6px 8px; }
-  .fv-title { font-size: 18px; }
-  .fv-cards { grid-template-columns: repeat(4, 1fr); }
-  .fv-blurb { display: none; }
-  .fv-game-art { width: 28px; }
+  .fv { gap: 4px; padding: 4px 8px; margin: 0 0 0 auto; width: calc(100% - 52px); } /* clear of the emote button, bottom-left */
+  .fv-game-txt { flex-direction: row; align-items: center; gap: 6px; }
+  .fv-head { min-height: 22px; gap: 8px; }
+  .fv-title { font-size: 16px; }
+  .fv-clock { font-size: 14px; min-width: 34px; padding: 1px 4px 0; }
+  .fv-games { gap: 6px; }
+  .fv-games-lbl { font-size: 9px; }
+  .fv-game { padding: 3px; gap: 4px; }
+  .fv-game-art { width: 18px; }
+  .fv-game-name { font-size: 11px; -webkit-line-clamp: 1; }
+  .fv-game-me { top: -8px; font-size: 9px; padding: 1px 3px 0; }
+  .fv-cards { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .fv-card { display: grid; grid-template-columns: 40px 1fr; column-gap: 5px; row-gap: 2px; align-items: center; padding: 4px; }
+  .fv-art { width: 40px; }
+  .fv-tally { grid-column: 1 / -1; min-height: 16px; margin: 0; }
+  .fv-tally b { font-size: 14px; }
+  .fv-blurb, .fv-names { display: none; }
+  .fv-lbl { font-size: 12px; white-space: normal; }
+  .fv-bust { width: 18px !important; height: 15px !important; }
+  .fv-lock { font-size: 9px; top: -8px; }
+  .fv-foot { min-height: 14px; font-size: 9px; }
+  .fv-stamp { font-size: 18px; }
 }
 @media (prefers-reduced-motion: reduce) { .fv-card.win, .fv-clock.hot, .fv-go { animation: none; } .fv-stamp, .fv-lock { animation-duration: .01s; } }
 

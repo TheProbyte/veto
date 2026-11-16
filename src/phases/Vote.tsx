@@ -132,6 +132,21 @@ export default function Vote({ state, me, send, skew }: RoomProps) {
   const [pend, setPend] = useState<{ kind?: FinaleKind; back?: number }>({});
   const voteKey = v ? JSON.stringify(v.votes[me] ?? '') + ':' + (v.backs[me] ?? '') : '';
   useEffect(() => { setPend({}); }, [voteKey]);
+  // the server didn't take it (socket blip / refused): drop the echo so the board shows what really counts
+  useEffect(() => {
+    if (pend.kind === undefined && pend.back === undefined) return;
+    const t = window.setTimeout(() => setPend({}), 2500);
+    return () => clearTimeout(t);
+  }, [pend]);
+  // votes are held while the Barkeep explains the vote: re-render when he's done
+  const [, bump] = useState(0);
+  const heldLeft = state.explainUntil ? state.explainUntil - 200 - (Date.now() + skew) : 0;
+  const held = heldLeft > 0;
+  useEffect(() => {
+    if (!held) return;
+    const t = window.setTimeout(() => bump((x) => x + 1), heldLeft + 30);
+    return () => clearTimeout(t);
+  }, [held, state.explainUntil]); // eslint-disable-line react-hooks/exhaustive-deps
   const myVote = pend.kind ?? v?.votes[me];
   const myBack = pend.back ?? v?.backs[me];
 
@@ -157,32 +172,32 @@ export default function Vote({ state, me, send, skew }: RoomProps) {
   const iVote = state.players.some((p) => p.id === me);
 
   const vote = (k: FinaleKind) => {
-    if (picked || !iVote) return;
+    if (picked || held || !iVote) return;
     sfx.click(); buzz([8]);
     setPend((x) => ({ ...x, kind: k }));
     send({ t: 'finaleVote', kind: k });
   };
   const back = (a: number) => {
-    if (picked || myBack === a) return;
+    if (picked || held || myBack === a) return;
     sfx.cardSlap();
     setPend((x) => ({ ...x, back: a }));
     send({ t: 'back', appid: a });
   };
 
   return (
-    <div className={`fv n${v.games.length} ${picked ? 'decided' : ''}`} role="main" aria-label="Finale vote">
+    <div className={`fv n${v.games.length} ${picked ? 'decided' : ''} ${held ? 'held' : ''}`} role="main" aria-label="Finale vote">
       <div className="fv-head">
         <div className="fv-title">{picked ? <>Settled: <b>{FINALES[picked].label}</b></> : 'How do we settle it?'}</div>
         <Countdown deadline={v.deadline} skew={skew} done={!!picked} />
       </div>
 
       <div className="fv-games" role="radiogroup" aria-label="Play for">
-        <span className="fv-games-lbl">Play for</span>
+        <span className="fv-games-lbl">{held ? 'Listen up…' : 'Play for'}</span>
         {v.games.map((a) => {
           const backers = voters.filter((p) => backs[p.id] === a);
           const mine = myBack === a;
           return (
-            <button key={a} type="button" role="radio" aria-checked={mine} className={`fv-game ${mine ? 'mine' : ''}`} disabled={!!picked} onClick={() => back(a)} onPointerEnter={() => sfx.hover()}>
+            <button key={a} type="button" role="radio" aria-checked={mine} className={`fv-game ${mine ? 'mine' : ''}`} disabled={!!picked || held} onClick={() => back(a)} onPointerEnter={() => sfx.hover()}>
               <span className="fv-game-art"><PixelCover appid={a} name={nameOf(a)} kind="box" /></span>
               <span className="fv-game-txt">
                 <span className="fv-game-name">{nameOf(a)}</span>
@@ -204,7 +219,7 @@ export default function Vote({ state, me, send, skew }: RoomProps) {
               key={k} type="button"
               className={`fv-card fv-${k} ${mine ? 'mine' : ''} ${win ? 'win' : ''} ${lose ? 'lose' : ''}`}
               aria-pressed={mine}
-              disabled={!!picked}
+              disabled={!!picked || held}
               onClick={() => vote(k)}
               onPointerEnter={() => { if (!picked) sfx.hover(); }}
             >

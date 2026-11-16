@@ -481,7 +481,10 @@ export class Room extends DurableObject<Env> {
         if (n.explain !== undefined) {
           if (typeof n.explain !== 'boolean') throw new Bad('Explain on or off.');
           st.explain = n.explain;
-          if (!n.explain) s.explainUntil = undefined; // turned off mid-explanation: let everyone go
+          if (!n.explain) { // turned off mid-explanation: let everyone go, and drop the explanations still queued
+            s.explainUntil = undefined;
+            this.x.jobs = this.x.jobs.filter((j) => !(j.k === 'narr' && j.key?.startsWith('how_')));
+          }
         }
         const flip = st.nominations !== s.settings.nominations;
         s.settings = st;
