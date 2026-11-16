@@ -95,11 +95,11 @@ export default function Narrator({ on, state, skew }: RoomProps) {
 const CSS = `
 .narr{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 12px);transform:translateX(-50%);z-index:60;
   max-width:min(560px,calc(100vw - 140px));pointer-events:none;display:flex;flex-direction:column;gap:2px;
-  padding:7px 12px 8px;background:#160d08ee;color:#e8d5b5;font-family:'Pixelify Sans','Silkscreen',monospace;
-  font-size:15px;line-height:1.25;text-align:center;
-  box-shadow:0 -2px 0 #5a3a22,0 2px 0 #5a3a22,-2px 0 0 #5a3a22,2px 0 0 #5a3a22,0 0 0 4px #0b0705,0 6px 0 4px #0008;
+  padding:calc(var(--pu,2px)*3) calc(var(--pu,2px)*5);background:#160d08ee;color:#e8d5b5;font-family:'Pixelify Sans','Silkscreen',monospace;
+  font-size:calc(var(--pt,2px)*8);line-height:1.25;-webkit-font-smoothing:none;text-align:center;
+  box-shadow:0 calc(var(--pu,2px)*-1) 0 #5a3a22,0 var(--pu,2px) 0 #5a3a22,calc(var(--pu,2px)*-1) 0 0 #5a3a22,var(--pu,2px) 0 0 #5a3a22,0 0 0 calc(var(--pu,2px)*2) #0b0705,0 calc(var(--pu,2px)*3) 0 calc(var(--pu,2px)*2) #0008;
   animation:narr-in .22s steps(4) both}
-.narr-who{font-family:'Silkscreen',monospace;font-size:10px;letter-spacing:.12em;color:#ffb35c;text-transform:uppercase}
+.narr-who{font-family:'Silkscreen',monospace;font-size:calc(var(--pt,2px)*5);letter-spacing:.12em;color:#ffb35c;text-transform:uppercase}
 .narr-ghost{opacity:0}
 @keyframes narr-in{from{opacity:0;transform:translate(-50%,-6px)}to{opacity:1;transform:translate(-50%,0)}}
 
@@ -108,9 +108,9 @@ const CSS = `
    so it never sits on anyone's face */
 @media (max-width:640px){
   .narr{top:calc(env(safe-area-inset-top,0px) + 8px);left:64px;right:64px;transform:none;max-width:none;
-    font-size:12px;line-height:1.2;padding:4px 8px 5px;gap:1px;
+    font-size:calc(var(--pt,2px)*7);line-height:1.2;padding:calc(var(--pu,2px)*2) calc(var(--pu,2px)*4);gap:1px;
     display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
-  .narr-who{display:inline;font-size:8px;margin-right:4px}
+  .narr-who{display:inline;font-size:calc(var(--pt,2px)*4);margin-right:4px}
   .narr-text{display:inline}
   .narr.narr-low{top:auto}
   @keyframes narr-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}

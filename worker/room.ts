@@ -459,6 +459,7 @@ export class Room extends DurableObject<Env> {
         if (n.explain !== undefined) {
           if (typeof n.explain !== 'boolean') throw new Bad('Explain on or off.');
           st.explain = n.explain;
+          if (!n.explain) s.explainUntil = undefined; // turned off mid-explanation: let everyone go
         }
         const flip = st.nominations !== s.settings.nominations;
         s.settings = st;
