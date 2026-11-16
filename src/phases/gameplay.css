@@ -892,3 +892,6 @@
 @media (min-width: 641px) {
   .vt .veto-head { position: relative; z-index: 2; padding: 6px 18px 4px; background: rgba(11,7,5,.72); box-shadow: 0 0 0 var(--pu) rgba(11,7,5,.5); }
 }
+
+/* the protect badge keeps its small look but gets a finger-sized (≥44px) invisible hit area */
+.vt-badge::after { content: ''; position: absolute; inset: 50% auto auto 50%; width: 48px; height: 48px; transform: translate(-50%, -50%); }
