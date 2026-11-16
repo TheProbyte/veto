@@ -66,7 +66,12 @@ const ART_FILES: Record<string, string> = {
 /** Proxies Steam art with CORS so the client can pixel-process it. Cached at the edge + 7 days in browsers. */
 async function art(appid: number, kind: string): Promise<Response> {
   const src = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appid}/${ART_FILES[kind]}`;
-  const r = await fetch(src, { cf: { cacheTtl: 60 * 60 * 24 * 7, cacheEverything: true } } as RequestInit);
+  let r: Response;
+  try {
+    r = await fetch(src, { cf: { cacheTtl: 60 * 60 * 24 * 7, cacheEverything: true } } as RequestInit);
+  } catch {
+    r = new Response(null, { status: 502 });
+  }
   const headers = new Headers({
     'access-control-allow-origin': '*',
     'cache-control': r.ok ? 'public, max-age=604800, immutable' : 'public, max-age=3600',
