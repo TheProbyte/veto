@@ -56,7 +56,7 @@ export function useRoom(code: string, name: string | null) {
         if (msg.t === 'state') {
           setSkew(msg.state.now - Date.now());
           setState(msg.state);
-        } else if (msg.t === 'emote' || msg.t === 'say' || msg.t === 'narrate') {
+        } else if (msg.t === 'emote' || msg.t === 'say' || msg.t === 'narrate' || msg.t === 'mini') {
           for (const fn of listeners.current) { try { fn(msg); } catch {} }
         } else if (msg.t === 'error') {
           setError(msg.message);
