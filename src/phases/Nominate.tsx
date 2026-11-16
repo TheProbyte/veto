@@ -46,9 +46,10 @@ const SIZE_CLASSES: [string, (w: number, h: number) => boolean][] = [
 ];
 
 /** Sizes the nominate panel to exactly the space below the seated players' nameplates and above the dock (no page scroll). */
-function useTableFit(ref: React.RefObject<HTMLElement>, key: string) {
+export function useTableFit(ref: React.RefObject<HTMLElement>, key: string, on = true) {
   useLayoutEffect(() => {
     const el = ref.current;
+    if (!on) { el?.style.removeProperty('--nm-push'); el?.style.removeProperty('--nm-h'); return; }
     const front = el?.closest('.saloon-front') as HTMLElement | null;
     if (!el || !front) return;
     const saloon = el.closest('.saloon');
@@ -97,7 +98,7 @@ function useTableFit(ref: React.RefObject<HTMLElement>, key: string) {
     // the dock and nameplates change size with the board / seats; a cheap re-check keeps the fit honest
     const iv = window.setInterval(() => { if (!document.hidden) later(); }, 1500);
     return () => { ro.disconnect(); window.removeEventListener('resize', later); cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); clearInterval(iv); };
-  }, [ref, key]);
+  }, [ref, key, on]);
 }
 
 /* ---------------- pagination: as many cards as fit, never a scrollbar ---------------- */
@@ -145,7 +146,7 @@ export function usePages(n: number, size: CellSize, resetKey: string) {
   return { ref, cols, rows, per, pages, page: cur, go, jump, dir, style, start: cur * per, cellH: rowH };
 }
 
-/** the paged card table: the grid plus big ◀ ▶ buttons and a pip row; swipe on touch, arrow keys on desktop */
+/** the paged card table: the grid plus a pip row with small ◀ ▶; swipe on touch, arrow keys + mouse wheel on desktop */
 export function PagedDeck({ pager, children, label, className = '', empty }: {
   pager: ReturnType<typeof usePages>; children: ReactNode; label: string; className?: string; empty?: ReactNode;
 }) {
@@ -176,23 +177,36 @@ export function PagedDeck({ pager, children, label, className = '', empty }: {
     if (Math.abs(dx) > 36 && Math.abs(dx) > Math.abs(dy) * 1.3) { swiped.current = true; go(dx < 0 ? 1 : -1); }
   };
   const clickCapture = (e: MouseEvent) => { if (swiped.current) { swiped.current = false; e.stopPropagation(); e.preventDefault(); } };
+  // mouse wheel / trackpad: one notch (or a flick) turns one page, then a short cooldown
+  const wheel = useRef({ acc: 0, until: 0 });
+  const onWheel = (e: React.WheelEvent) => {
+    if (pages < 2 || e.ctrlKey || document.querySelector('.nm-modal')) return;
+    const w = wheel.current;
+    const now = performance.now();
+    const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (now < w.until) { w.acc = 0; return; }
+    w.acc += e.deltaMode === 1 ? d * 30 : d;
+    if (Math.abs(w.acc) < 40) return;
+    go(w.acc > 0 ? 1 : -1);
+    w.acc = 0; w.until = now + 320;
+  };
   return (
     <div className={`nm-deck ${pages > 1 ? 'has-pages' : ''} ${className}`}>
       <div className="nm-deck-row">
-        <button type="button" className="nm-page nm-page-prev" disabled={page <= 0} onClick={() => go(-1)} aria-label="Previous page" hidden={pages < 2}><i aria-hidden>◀</i></button>
         <div className="nm-grid" ref={ref} style={style} aria-label={label} role="group"
-          onPointerDown={down} onPointerUp={up} onPointerCancel={() => { sw.current = null; }} onClickCapture={clickCapture}>
+          onPointerDown={down} onPointerUp={up} onPointerCancel={() => { sw.current = null; }} onClickCapture={clickCapture} onWheel={onWheel}>
           <div key={page} className={`nm-grid-in ${dir > 0 ? 'from-r' : dir < 0 ? 'from-l' : ''}`}>{children}</div>
           {empty}
         </div>
-        <button type="button" className="nm-page nm-page-next" disabled={page >= pages - 1} onClick={() => go(1)} aria-label="Next page" hidden={pages < 2}><i aria-hidden>▶</i></button>
       </div>
       {pages > 1 && (
         <div className="nm-pips" role="group" aria-label={`Page ${page + 1} of ${pages}`}>
+          <button type="button" className="nm-pg nm-pg-prev" disabled={page <= 0} onClick={() => go(-1)} aria-label="Previous page"><i aria-hidden>◀</i></button>
           {pages <= 12 && Array.from({ length: pages }, (_, i) => (
             <button key={i} type="button" className={`nm-pip-b ${i === page ? 'on' : ''}`} aria-label={`Page ${i + 1}`} aria-current={i === page} onClick={() => jump(i)} />
           ))}
-          <span className="nm-pager-n">page {page + 1}/{pages}</span>
+          <span className="nm-pager-n">{page + 1}/{pages}</span>
+          <button type="button" className="nm-pg nm-pg-next" disabled={page >= pages - 1} onClick={() => go(1)} aria-label="Next page"><i aria-hidden>▶</i></button>
         </div>
       )}
     </div>
@@ -222,7 +236,7 @@ export function PickSlots({ mine, max, me, send, slotsRef }: { mine: BoardGame[]
 }
 
 /** table rules live behind a small button: a pixel dialog over the saloon */
-function RulesButton({ state, isHost, send }: Pick<RoomProps, 'state' | 'send'> & { isHost: boolean }) {
+export function RulesButton({ state, isHost, send }: Pick<RoomProps, 'state' | 'send'> & { isHost: boolean }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -406,7 +420,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
       <header className="nm-head">
         <div className="nm-titles">
           <h2 className="nm-title">{drafting ? 'Play your hand' : 'Toss your games on the table'}</h2>
-          <p className="nm-how">{drafting ? `Play up to ${MAX_NOMS}. Burn a dud or trade.` : `Tap games you want to play. Up to ${MAX_NOMS}.`}</p>
+          <p className="nm-how">{drafting ? `Play up to ${MAX_NOMS}. Burn or trade.` : `Pick up to ${MAX_NOMS}.`}</p>
         </div>
         <PickSlots mine={mine} max={MAX_NOMS} me={me} send={send} slotsRef={slotsRef} />
         {state.phase === 'nominate' && <RulesButton state={state} isHost={isHost} send={send} />}

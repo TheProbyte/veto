@@ -5,6 +5,7 @@ import { sfx } from '../sfx';
 import { DockActions } from '../scene/Dock';
 import BustPreview from '../pixel/BustPreview';
 import CharacterCreator from './CharacterCreator';
+import { RulesButton, useTableFit } from './Nominate';
 import './panels.css';
 
 export function Avatar({ p, size = 32 }: { p?: Player; size?: number }) {
@@ -21,22 +22,14 @@ function Status({ p }: { p: Player }) {
   if (!p.connected) return <span className="nh-chip off">Offline</span>;
   if (p.linking) return <span className="nh-chip wait"><i className="nh-spin" /> Checking…</span>;
   if (p.steam?.private) return <span className="nh-chip warn">Private ⚠</span>;
-  if (p.steam) return <span className="nh-chip ok">{p.steam.gameCount} games ✓</span>;
+  if (p.steam) return <span className="nh-chip ok">{p.steam.gameCount}<span className="nh-chip-long"> games</span> ✓</span>;
   return <span className="nh-chip none">Not linked</span>;
 }
 
-const FINALES: { v: Settings['finale']; label: string; short: string }[] = [
-  { v: 'slide', label: 'Whiskey slide', short: 'Whiskey slide' },
-  { v: 'cylinder', label: 'Revolver roulette', short: 'Roulette' },
-  { v: 'duel', label: 'Quick-draw duel', short: 'Duel' },
-  { v: 'last', label: 'Last one standing', short: 'Last one standing' },
-];
 export const settingsOf = (state: Pick<RoomState, 'settings'>): Settings => ({ ...DEFAULT_SETTINGS, ...(state.settings || {}) });
-const finaleAt = (f: Settings['finale']) => f === 'slide' || f === 'cylinder';
+/** one line: the finale itself is voted in-game, so only when it starts is a rule */
 export function rulesSummary(s: Settings) {
-  const short = FINALES.find((f) => f.v === s.finale)?.short ?? 'Whiskey slide';
-  const fin = finaleAt(s.finale) ? `${short} at ${s.cylinderAt}` : short;
-  const parts = [`${s.turnSecs}s`, `${s.picks} pick${s.picks === 1 ? '' : 's'}`, fin];
+  const parts = [`${s.turnSecs}s`, `${s.picks} pick${s.picks === 1 ? '' : 's'}`, `Finale at ${s.cylinderAt}`];
   if (s.nominations === 'draft') parts.push('Card draft');
   if (s.sheriff) parts.push('Sheriff');
   if (!s.explain) parts.push('Quiet barkeep');
@@ -59,7 +52,7 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
   };
   useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
   // follow the server unless I have an edit in flight
-  const sk = `${server.turnSecs}|${server.picks}|${server.finale}|${server.cylinderAt}|${server.nominations}|${server.sheriff}|${server.explain}`;
+  const sk = `${server.turnSecs}|${server.picks}|${server.cylinderAt}|${server.nominations}|${server.sheriff}|${server.explain}`;
   useEffect(() => { if (!pend.current) setDraft(server); }, [sk]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (patch: Partial<Settings>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -95,16 +88,7 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
               ))}
             </div>
           </div>
-          <div className="nh-rule-row nh-rule-wide">
-            <span className="nh-rule-name">Finale</span>
-            <div className="nh-seg nh-seg-wrap" role="group" aria-label="Finale">
-              {FINALES.map((f) => (
-                <button key={f.v} type="button" className={s.finale === f.v ? 'on' : ''} aria-pressed={s.finale === f.v} onClick={() => { sfx.click(); set({ finale: f.v }); }}>{f.label}</button>
-              ))}
-            </div>
-          </div>
-          {finaleAt(s.finale) && (
-            <div className="nh-rule-row">
+          <div className="nh-rule-row">
               <span className="nh-rule-name">Finale at</span>
               <div className="nh-seg" role="group" aria-label="Start the finale when this many games are left">
                 {([3, 2] as const).map((n) => (
@@ -112,7 +96,6 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
                 ))}
               </div>
             </div>
-          )}
           <div className="nh-rule-row nh-rule-wide">
             <span className="nh-rule-name">Nominations</span>
             <div className="nh-seg nh-seg-wrap" role="group" aria-label="How games get nominated">
@@ -201,6 +184,21 @@ function PosseRecordCard({ state }: { state: RoomState }) {
   );
 }
 
+const DESK = '(min-width: 1024px) and (min-height: 600px)';
+/** desktop: the lobby is one wide, short strip under the nameplates (no scroll) */
+function useDesk() {
+  const get = () => { try { return matchMedia(DESK).matches; } catch { return false; } };
+  const [on, setOn] = useState(get);
+  useEffect(() => {
+    let mq: MediaQueryList;
+    try { mq = matchMedia(DESK); } catch { return; }
+    const f = () => setOn(mq.matches);
+    mq.addEventListener?.('change', f);
+    return () => mq.removeEventListener?.('change', f);
+  }, []);
+  return on;
+}
+
 export default function Lobby({ state, me, send }: RoomProps) {
   const mine = state.players.find((p) => p.id === me);
   const host = state.players.find((p) => p.host);
@@ -211,6 +209,9 @@ export default function Lobby({ state, me, send }: RoomProps) {
   useEffect(() => () => clearTimeout(copyT.current), []);
   // step 1 is the character creator until I've picked a look; local state so the save echo doesn't yank it mid hat-tip
   const [dressing, setDressing] = useState(() => !mine?.style);
+  const desk = useDesk();
+  const panelRef = useRef<HTMLDivElement>(null);
+  useTableFit(panelRef, `${dressing}|${state.players.length}`, desk && !dressing);
 
   const copy = async () => {
     sfx.unlock(); sfx.click();
@@ -292,8 +293,29 @@ export default function Lobby({ state, me, send }: RoomProps) {
       </section>
   );
 
+  const posseSec = (
+      <section className="nh-sec nh-lb-posse-sec">
+      <div className="nh-label">The posse <span className="nh-count">{state.players.length}</span></div>
+      <ul className="nh-posse">
+        {state.players.map((p) => (
+          <li key={p.id} className={`${p.connected || p.bot ? '' : 'is-off'} ${p.id === me ? 'is-me' : ''} ${p.bot ? 'is-bot' : ''}`}>
+            {p.style ? <span className="nh-posse-bust"><BustPreview look={p.style} scale={1} /></span> : <Avatar p={p} size={32} />}
+            <span className="nh-pname">
+              {p.name}{p.id === me && <small> (you)</small>}
+              {p.host && <span className="nh-tag">HOST</span>}
+            </span>
+            {!p.style && <span className="nh-dressed" title="Still choosing an outfit">… dressing</span>}
+            <Status p={p} />
+            {isHost && p.id !== me && (p.bot || !p.connected) && <KickBtn name={p.name} onKick={() => send({ t: 'kick', pid: p.id })} />}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+  const canEditRules = isHost || !state.players.some((p) => p.host && p.connected);
+
   return (
-    <div className="nh-panel nh-wood nh-lobby">
+    <div className={`nh-panel nh-wood nh-lobby ${desk && !dressing ? 'is-strip' : ''}`} ref={panelRef}>
       <i className="nh-nail tl" /><i className="nh-nail tr" /><i className="nh-nail bl" /><i className="nh-nail br" />
       {dressing ? (
         <>
@@ -303,15 +325,24 @@ export default function Lobby({ state, me, send }: RoomProps) {
           </header>
           <CharacterCreator initial={mine?.style} first={!mine?.style} stats={mine?.stats ?? emptyStats()}
             onSave={(style) => send({ t: 'style', style })} onDone={() => { setDressing(false); document.querySelector('.saloon-front')?.scrollTo({ top: 0 }); }} />
+          {posseSec}
         </>
       ) : (
         <>
       <header className="nh-head">
         <div className="nh-kicker">Table {state.code}</div>
         <h2 className="nh-h">Round up the posse</h2>
+        {desk && (
+          <div className="nh-lb-rules">
+            <span className="nh-rules-k">Rules</span><span className="nh-rules-sum">{rulesSummary(settingsOf(state))}</span>
+            {canEditRules && <RulesButton state={state} isHost={isHost} send={send} />}
+          </div>
+        )}
       </header>
 
-      {steam ? <>{outfitSec}{steamSec}</> : <>{steamSec}{outfitSec}</>}
+      <div className="nh-lb-grid">
+        <div className="nh-lb-col nh-lb-you">{steam ? <>{outfitSec}{steamSec}</> : <>{steamSec}{outfitSec}</>}{desk && <PosseRecordCard state={state} />}</div>
+        <div className="nh-lb-col nh-lb-inv">
       <section className="nh-sec">
         <div className="nh-label">Invite your crew</div>
         <div className={`nh-invite ${canShare ? 'can-share' : ''}`}>
@@ -322,11 +353,9 @@ export default function Lobby({ state, me, send }: RoomProps) {
         </div>
       </section>
 
-      <TableRules state={state} isHost={isHost} send={send} />
-
       {isHost && (
         <section className="nh-sec nh-practice">
-          <div className="nh-label">Practice table</div>
+          <div className="nh-label">Practice bots</div>
           <div className="nh-practice-row">
             <div className="nh-seg" role="group" aria-label="Hire practice bots">
               <span className="nh-seg-k">Hire</span>
@@ -336,34 +365,20 @@ export default function Lobby({ state, me, send }: RoomProps) {
             </div>
             {bots > 0 && (
               <button type="button" className="nh-btn nh-btn-sm nh-bots-home" onClick={() => { sfx.unlock(); sfx.whoosh(); send({ t: 'bots', n: 0 }); }}>
-                Send bots home ({bots})
+                Send home <span className="nh-chip-long">({bots})</span>
               </button>
             )}
           </div>
         </section>
       )}
 
-      <PosseRecordCard state={state} />
+      {!desk && <PosseRecordCard state={state} />}
+        </div>
+        {!desk && <TableRules state={state} isHost={isHost} send={send} />}
+        <div className="nh-lb-col nh-lb-posse">{posseSec}</div>
+      </div>
         </>
       )}
-
-      <section className="nh-sec">
-        <div className="nh-label">The posse <span className="nh-count">{state.players.length}</span></div>
-        <ul className="nh-posse">
-          {state.players.map((p) => (
-            <li key={p.id} className={`${p.connected || p.bot ? '' : 'is-off'} ${p.id === me ? 'is-me' : ''} ${p.bot ? 'is-bot' : ''}`}>
-              {p.style ? <span className="nh-posse-bust"><BustPreview look={p.style} scale={1} /></span> : <Avatar p={p} size={32} />}
-              <span className="nh-pname">
-                {p.name}{p.id === me && <small> (you)</small>}
-                {p.host && <span className="nh-tag">HOST</span>}
-              </span>
-              <span className={`nh-dressed ${p.style ? 'on' : ''}`} title={p.style ? 'Dressed' : 'Still choosing an outfit'}>{p.style ? '✓ dressed' : '… dressing'}</span>
-              <Status p={p} />
-              {isHost && p.id !== me && (p.bot || !p.connected) && <KickBtn name={p.name} onKick={() => send({ t: 'kick', pid: p.id })} />}
-            </li>
-          ))}
-        </ul>
-      </section>
 
       {!dressing && (
         <DockActions>
@@ -372,9 +387,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
               <button type="button" className="nh-btn nh-btn-big" disabled={!canStart} onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'start' }); }}>
                 Deal 'em in →
               </button>
-              <div className="nh-hint">
-                {canStart ? `${ready.length}/${state.players.length} linked` : 'Link a public Steam library first'}
-              </div>
+              {!canStart && <div className="nh-hint">Link a public Steam library first</div>}
             </div>
           ) : (
             <div className="nh-waiting"><i className="nh-spin" /> Waiting on {host?.name ?? 'the host'} to deal…</div>
