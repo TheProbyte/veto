@@ -1,9 +1,12 @@
 import { TURN_MS } from '../../shared/types';
 import { useCallback, useEffect, useRef, type CSSProperties } from 'react';
+import { PixelArt, PixelSprite } from '../pixel/PixelCanvas';
+import { crosshairDraw } from '../pixel/sprites';
+import { PAL } from '../pixel/palette';
+import { bayer } from '../pixel/dither';
 import type { RoomProps } from '../props';
 import { useNow } from '../net';
 import { sfx } from '../sfx';
-import GameArt from '../scene/GameArt';
 import TinStar from '../scene/TinStar';
 
 export default function Veto({ state, me, send, skew }: RoomProps) {
@@ -96,9 +99,10 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
               }}
             >
               <div className="cbox-bob">
-                <div className="gbox">
-                  <GameArt appid={g.appid} name={g.name} />
-                  <div className="gbox-sheen" />
+                <div className={`gbox ${g.cracks ? 'cracked' : ''}`}>
+                  <PixelArt appid={g.appid} name={g.name} holes={g.cracks ? 1 : 0} cracked={!!g.cracks} />
+                  {g.tier === 'pitch' && <span className="gbox-pitch">PITCH</span>}
+                  {!!g.cracks && <span className="gbox-more">1 more</span>}
                   {g.shieldedBy && <TinStar size={46} className="gbox-star" />}
                 </div>
                 {d === 0 && <div className="cbox-name">{g.name}</div>}
@@ -115,13 +119,13 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
       <div className="veto-controls">
         {myTurn && (
           <>
-            <button className="btn-arrow" onClick={() => aimAt(-1)} aria-label="Aim left">◀</button>
-            <button className="btn-fire" onClick={fire}>FIRE</button>
-            <button className="btn-arrow" onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
+            <button className="btn-arrow px-btn" onPointerEnter={() => sfx.hover()} onClick={() => aimAt(-1)} aria-label="Aim left">◀</button>
+            <button className="btn-fire px-btn" onPointerEnter={() => sfx.hover()} onClick={fire}>FIRE</button>
+            <button className="btn-arrow px-btn" onPointerEnter={() => sfx.hover()} onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
           </>
         )}
         {canShield && (
-          <button className="btn-shield" onClick={() => send({ t: 'shield', appid: center.appid })} title="One per player. A shot at this game will ricochet.">
+          <button className="btn-shield px-btn" onClick={() => send({ t: 'shield', appid: center.appid })} title="One per player. A shot at this game will ricochet.">
             <TinStar size={20} /> Pin tin star on {center.name}
           </button>
         )}
@@ -134,7 +138,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
           <div className="graveyard-row">
             {dead.map((g, i) => (
               <div className="grave" key={g.appid} style={{ '--r': `${((i * 47) % 14) - 7}deg` } as CSSProperties}>
-                <div className="grave-art"><GameArt appid={g.appid} name={g.name} /><span className="mini-stamp">NAH.</span></div>
+                <div className="grave-art"><PixelArt appid={g.appid} name={g.name} w={24} h={36} holes={g.tier === 'pitch' ? 2 : 1} /><span className="mini-stamp">NAH.</span></div>
                 <div className="grave-by">{nameOf(g.killedBy)}</div>
               </div>
             ))}
@@ -145,53 +149,63 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
   );
 }
 
+const CROSS_COLD = crosshairDraw('rgba(232,213,181,.7)');
+const CROSS_HOT = crosshairDraw('#ff3b2f');
+
 function Crosshair({ hot }: { hot: boolean }) {
-  return (
-    <svg className={`crosshair ${hot ? 'hot' : ''}`} viewBox="0 0 100 100" aria-hidden>
-      <circle cx="50" cy="50" r="30" fill="none" strokeWidth="1.8" />
-      <circle cx="50" cy="50" r="3" />
-      <path d="M50 8 V30 M50 70 V92 M8 50 H30 M70 50 H92" strokeWidth="1.8" />
-    </svg>
-  );
+  return <PixelSprite draw={hot ? CROSS_HOT : CROSS_COLD} w={33} h={33} className={`crosshair ${hot ? 'hot' : ''}`} />;
 }
 
-const ROPE = 'M' + Array.from({ length: 61 }, (_, i) => { const x = 20 + i * 5; return `${x} ${(22 + 6 * Math.sin((x - 20) / 24)).toFixed(2)}`; }).join(' L');
+const FW = 96, FH = 12;
 
 function Fuse({ deadline, skew, mine }: { deadline: number; skew: number; mine: boolean }) {
   const now = useNow(skew);
   const rem = Math.min(TURN_MS, Math.max(0, deadline - now));
   const secs = Math.ceil(rem / 1000);
   const frantic = rem > 0 && rem < 10_000;
-  const total = 30_000;
-  const frac = Math.max(0, Math.min(1, rem / total));
+  const frac = Math.max(0, Math.min(1, rem / TURN_MS));
 
   useEffect(() => { if (secs > 0 && secs <= 5) sfx.tick(); }, [secs]);
   const hiss = mine && frantic;
   useEffect(() => { sfx.fuse(hiss); return () => sfx.fuse(false); }, [hiss]);
 
-  // fuse path: wavy rope from left to right, burning from the right end
-  const L = 300;
-  const burnX = 20 + L * frac;
-  const wy = (x: number) => 22 + 6 * Math.sin((x - 20) / 24);
+  const ref = useRef<HTMLCanvasElement>(null);
+  const frame = Math.floor(now / 70);
+  useEffect(() => {
+    const c = ref.current?.getContext('2d');
+    if (!c) return;
+    c.clearRect(0, 0, FW, FH);
+    const x0 = 9, len = FW - x0 - 4;
+    const burnX = Math.round(x0 + len * frac);
+    const wy = (x: number) => Math.round(6 + 2 * Math.sin((x - x0) / 6));
+    // keg
+    c.fillStyle = PAL.ink; c.fillRect(0, 1, 9, 10);
+    c.fillStyle = PAL.wood3; c.fillRect(1, 2, 7, 8);
+    c.fillStyle = PAL.metal2; c.fillRect(1, 3, 7, 1); c.fillRect(1, 8, 7, 1);
+    c.fillStyle = PAL.wood4; c.fillRect(2, 2, 1, 8);
+    for (let x = x0; x < x0 + len; x++) {
+      const y = wy(x);
+      if (x < burnX) {
+        c.fillStyle = (x >> 1) % 2 ? PAL.parch2 : (frantic ? PAL.lamp3 : PAL.parch3);
+        c.fillRect(x, y, 1, 2);
+        c.fillStyle = PAL.wood0; c.fillRect(x, y + 2, 1, 1);
+      } else if (bayer(x, y) > 0.45) { c.fillStyle = PAL.wood2; c.fillRect(x, y + 1, 1, 1); }
+    }
+    if (rem > 0) {
+      const y = wy(burnX);
+      for (let k = 0; k < 7; k++) {
+        const a = k * 0.9 + frame * 1.7, r = 2 + ((k + frame) % 4);
+        c.fillStyle = k % 2 ? PAL.lamp1 : PAL.lamp2;
+        c.fillRect(Math.round(burnX + Math.cos(a) * r), Math.round(y + Math.sin(a) * r * 0.8), 1, 1);
+      }
+      c.fillStyle = PAL.lamp0; c.fillRect(burnX - 1, y - 1, 3, 3);
+      c.fillStyle = PAL.white; c.fillRect(burnX, y, 1, 1);
+    }
+  }, [frame, frac, frantic, rem]);
+
   return (
     <div className={`fuse ${frantic ? 'frantic' : ''}`}>
-      <svg viewBox="0 0 360 40" className="fuse-svg" aria-hidden>
-        <defs>
-          <clipPath id="fuse-clip"><rect x="0" y="0" width={burnX} height="40" /></clipPath>
-        </defs>
-        <path d={ROPE} className="fuse-ash" />
-        <path d={ROPE} className="fuse-rope" clipPath="url(#fuse-clip)" />
-        <rect x="4" y="12" width="18" height="20" rx="3" className="fuse-keg" />
-        {rem > 0 && (
-          <g transform={`translate(${burnX} ${wy(burnX)})`} className="fuse-spark">
-            <circle r="7" fill="#ff8a3d" opacity=".35" />
-            <circle r="3.5" fill="#fff3c4" />
-            {Array.from({ length: 6 }, (_, i) => (
-              <line key={i} x1="0" y1="0" x2={Math.cos(i + now / 90) * 11} y2={Math.sin(i * 1.7 + now / 70) * 11} stroke="#ffb35c" strokeWidth="1.5" />
-            ))}
-          </g>
-        )}
-      </svg>
+      <canvas ref={ref} width={FW} height={FH} className="fuse-cv" aria-hidden />
       <div className="fuse-num">{secs}<small>s</small></div>
     </div>
   );

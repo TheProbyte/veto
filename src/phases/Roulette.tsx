@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, type CSSProperties } from 'react';
 import type { RoomProps } from '../props';
 import type { Roulette as R } from '../../shared/types';
-import { boxArt, headerArt } from '../../shared/types';
+import { PixelArt, PixelSprite } from '../pixel/PixelCanvas';
+import { PAL } from '../pixel/palette';
+import { bayer, circle, ellipse } from '../pixel/dither';
+import type { DrawFn } from '../pixel/sprites';
 import { useNow } from '../net';
 import { sfx } from '../sfx';
 
@@ -19,11 +22,61 @@ export default function Roulette({ state, skew }: RoomProps) {
       <div className="roulette-title">The cylinder decides</div>
       <Cylinder r={r} skew={skew} nameOf={nameOf} />
       <ul className="finalists">
-        {finalists.map((a) => <li key={a}>{nameOf(a)}</li>)}
+        {finalists.map((a) => <li className="px-box" key={a}>{nameOf(a)}</li>)}
       </ul>
     </div>
   );
 }
+
+const drawCylinder: DrawFn = (c, w) => {
+  const cx = (w - 1) / 2, R = w / 2 - 1;
+  for (let y = 0; y < w; y++) for (let x = 0; x < w; x++) {
+    const dx = x - cx, dy = y - cx, d = Math.hypot(dx, dy);
+    if (d > R) continue;
+    // lit from top-left: dithered gunmetal bands
+    const l = 0.32 - (dx + dy) / (w * 1.6) - (d / R) * 0.2 + (bayer(x, y) - 0.5) * 0.18;
+    const col = d > R - 1.2 ? PAL.metal0 : l > 0.72 ? PAL.metal4 : l > 0.5 ? PAL.metal3 : l > 0.26 ? PAL.metal2 : l > 0.04 ? PAL.metal1 : PAL.metal0;
+    c.fillStyle = col; c.fillRect(x, y, 1, 1);
+  }
+  // flutes between chambers
+  for (let k = 0; k < 6; k++) {
+    const a = ((k * 60 + 30) * Math.PI) / 180;
+    for (let r = R * 0.62; r < R - 1; r += 0.5) {
+      const x = Math.round(cx + Math.sin(a) * r), y = Math.round(cx - Math.cos(a) * r);
+      c.fillStyle = PAL.metal0; c.fillRect(x - 1, y - 1, 3, 3);
+      c.fillStyle = PAL.metal2; c.fillRect(x - 1, y - 1, 1, 1);
+    }
+  }
+  // chamber sockets
+  for (let k = 0; k < 6; k++) {
+    const a = (k * 60 * Math.PI) / 180;
+    circle(c, Math.round(cx + Math.sin(a) * w * 0.28), Math.round(cx - Math.cos(a) * w * 0.28), Math.round(w * 0.135), PAL.metal0);
+  }
+  circle(c, Math.round(cx), Math.round(cx), Math.round(w * 0.09), PAL.metal0);
+  circle(c, Math.round(cx), Math.round(cx), Math.round(w * 0.06), PAL.metal2);
+  c.fillStyle = PAL.metal4; c.fillRect(Math.round(cx) - 1, Math.round(cx) - 1, 1, 1);
+};
+
+const ringDraw = (col: string, hi: string): DrawFn => (c, w) => {
+  const cx = (w - 1) / 2;
+  for (let y = 0; y < w; y++) for (let x = 0; x < w; x++) {
+    const d = Math.hypot(x - cx, y - cx);
+    if (d > w / 2 - 2.2 && d <= w / 2) { c.fillStyle = (x + y) < w * 0.8 ? hi : col; c.fillRect(x, y, 1, 1); }
+  }
+};
+const RING = ringDraw(PAL.metal0, PAL.metal1);
+const RING_WIN = ringDraw(PAL.lamp2, PAL.lamp0);
+
+const drawHammer: DrawFn = (c) => {
+  c.fillStyle = PAL.metal0; c.fillRect(3, 0, 10, 3); c.fillRect(4, 3, 8, 12);
+  c.fillStyle = PAL.metal2; c.fillRect(4, 0, 8, 2); c.fillRect(5, 3, 6, 11);
+  c.fillStyle = PAL.metal3; c.fillRect(5, 3, 2, 11);
+  for (let y = 0; y < 2; y++) for (let x = 4; x < 12; x += 2) { c.fillStyle = PAL.metal1; c.fillRect(x + y, y, 1, 1); }
+  ellipse(c, 8, 15, 3, 1, PAL.metal1);
+};
+const drawNotch: DrawFn = (c) => {
+  for (let y = 0; y < 4; y++) { c.fillStyle = y === 0 ? PAL.lamp0 : PAL.lamp1; c.fillRect(y, y, 7 - y * 2, 1); }
+};
 
 function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number) => string }) {
   const now = useNow(skew);
@@ -31,6 +84,7 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
   const end = -(r.target * 60 + TURNS * 360);
   const angle = end * ease(p);
   const done = p >= 1;
+  const q = Math.round(angle / 6) * 6; // rotate in 6deg steps for a pixel feel
 
   const passed = Math.floor(-angle / 60 + 0.5);
   const lastPassed = useRef(passed);
@@ -43,92 +97,36 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
     if (done && !wasDone.current) sfx.cock();
     wasDone.current = done;
   }, [done]);
+  // ratchet spin sound once at the start (not when joining mid-spin)
+  useEffect(() => {
+    const dt = r.startedAt - (Date.now() + skew);
+    if (dt < -600) return;
+    const t = window.setTimeout(() => sfx.spin(), Math.max(0, dt));
+    return () => clearTimeout(t);
+  }, [r.startedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const winner = r.chambers[r.target];
   return (
     <div className={`cyl-wrap ${done ? 'done' : ''}`}>
-      <svg className="cyl" viewBox="-200 -230 400 430" aria-label="revolver cylinder">
-        <defs>
-          <radialGradient id="cyl-metal" cx="38%" cy="32%" r="75%">
-            <stop offset="0" stopColor="#8a8f96" />
-            <stop offset=".35" stopColor="#4a4f56" />
-            <stop offset=".75" stopColor="#24272b" />
-            <stop offset="1" stopColor="#0e0f11" />
-          </radialGradient>
-          <linearGradient id="cyl-sheen" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#fff" stopOpacity=".35" />
-            <stop offset=".4" stopColor="#fff" stopOpacity="0" />
-          </linearGradient>
-          <radialGradient id="cyl-hole" cx="50%" cy="50%" r="50%">
-            <stop offset=".78" stopColor="#000" stopOpacity="0" />
-            <stop offset="1" stopColor="#000" stopOpacity=".85" />
-          </radialGradient>
-          {r.chambers.map((_, k) => (
-            <clipPath key={k} id={`ch-${k}`}><circle r="44" /></clipPath>
-          ))}
-          <filter id="cyl-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="8" />
-          </filter>
-        </defs>
-
-        {/* hammer */}
-        <g className={`hammer ${done ? 'down' : ''}`}>
-          <path d="M-18 -228 L18 -228 L22 -170 L-22 -170 Z" fill="#2a2d31" stroke="#0b0c0d" strokeWidth="3" />
-          <path d="M-14 -224 L-4 -224 L-6 -176 L-16 -176 Z" fill="#6c727a" opacity=".6" />
-          <path d="M-30 -232 L30 -232 L26 -218 L-26 -218 Z" fill="#1a1c1f" />
-        </g>
-
-        <g transform={`rotate(${angle})`}>
-          <circle r="182" fill="url(#cyl-metal)" stroke="#0a0b0c" strokeWidth="5" />
-          {Array.from({ length: 6 }, (_, k) => {
-            const a = ((k * 60 + 30) * Math.PI) / 180;
-            return <path key={k} d={`M${Math.sin(a) * 120} ${-Math.cos(a) * 120} L${Math.sin(a) * 178} ${-Math.cos(a) * 178}`} stroke="#0d0e10" strokeWidth="14" strokeLinecap="round" opacity=".7" />;
-          })}
-          <circle r="182" fill="url(#cyl-sheen)" />
+      <div className="cyl-stage" aria-label="revolver cylinder">
+        <PixelSprite draw={drawHammer} w={16} h={16} className={`hammer ${done ? 'down' : ''}`} />
+        <PixelSprite draw={drawNotch} w={7} h={4} className="cyl-notch" />
+        <div className="cyl-rot" style={{ transform: `rotate(${q}deg)` }}>
+          <PixelSprite draw={drawCylinder} w={72} h={72} className="cyl-body" />
           {r.chambers.map((appid, k) => {
             const a = (k * 60 * Math.PI) / 180;
-            const x = Math.sin(a) * 112, y = -Math.cos(a) * 112;
             const win = done && k === r.target;
+            const style = { left: `${50 + 28 * Math.sin(a)}%`, top: `${50 - 28 * Math.cos(a)}%`, transform: `translate(-50%, -50%) rotate(${-q}deg)` } as CSSProperties;
             return (
-              <g key={k} transform={`translate(${x} ${y}) rotate(${-angle})`}>
-                {win && <circle r="58" fill="#ffb35c" filter="url(#cyl-glow)" className="win-glow" />}
-                <circle r="50" fill="#08090a" stroke={win ? '#ffb35c' : '#15171a'} strokeWidth={win ? 5 : 4} />
-                <ChamberArt appid={appid} k={k} name={nameOf(appid)} />
-                <circle r="44" fill="url(#cyl-hole)" />
-              </g>
+              <div key={k} className={`chamber ${win ? 'win' : ''}`} style={style} title={nameOf(appid)}>
+                <PixelArt appid={appid} name={nameOf(appid)} w={20} h={30} className="chamber-art" />
+                <PixelSprite draw={win ? RING_WIN : RING} w={21} h={21} className="chamber-ring" />
+              </div>
             );
           })}
-          <circle r="34" fill="#1a1c1f" stroke="#0a0b0c" strokeWidth="4" />
-          <circle r="12" fill="#3a3e44" />
-        </g>
-        {/* top pointer notch */}
-        <path d="M-10 -168 L10 -168 L0 -150 Z" fill="#ffb35c" opacity=".9" />
-      </svg>
-      <div className={`cyl-winner ${done ? 'show' : ''}`}>{done ? nameOf(winner) : ' '}</div>
+        </div>
+      </div>
+      <div className={`cyl-winner ${done ? 'show' : ''}`}>{done ? nameOf(winner) : '\u00a0'}</div>
     </div>
-  );
-}
-
-function ChamberArt({ appid, k, name }: { appid: number; k: number; name: string }) {
-  const [fb, setFb] = useState(0); // 0 box art, 1 header art, 2 name only
-  const short = name.length > 14 ? name.slice(0, 13) + '…' : name;
-  if (fb >= 2) {
-    return (
-      <g clipPath={`url(#ch-${k})`}>
-        <rect x="-44" y="-66" width="88" height="132" fill="#2a1a10" />
-        <text textAnchor="middle" y="4" fontFamily="Rye, serif" fontSize="11" fill="#e8d5b5">{short}</text>
-      </g>
-    );
-  }
-  return (
-    <image
-      href={fb ? headerArt(appid) : boxArt(appid)}
-      x="-44" y="-66" width="88" height="132"
-      preserveAspectRatio="xMidYMid slice"
-      clipPath={`url(#ch-${k})`}
-      onError={() => setFb((f) => f + 1)}
-    >
-      <title>{name}</title>
-    </image>
   );
 }

@@ -103,7 +103,7 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   E(24, 17, 10, 10, sk1);
   E(24, 25, 7, 3, sk1); // jaw
   // brim shadow over upper face (face mostly in shadow)
-  const brimShadow = L.hat === 4 ? 12 : 17;
+  const brimShadow = L.hat === 4 ? 13 : 19;
   for (let y = X(6); y < X(brimShadow + 3); y++) for (let x = X(13); x < X(36); x++) {
     const t = (X(brimShadow + 3) - y) / Math.max(1, X(5));
     if (y < X(brimShadow) || t > bayer(x, y)) { c.fillStyle = sk0; if (inHead(x / s, y / s)) c.fillRect(x, y, 1, 1); }

@@ -20,7 +20,7 @@ export function computeLayout(vw: number, vh: number): Layout {
   vw = Math.max(200, vw); vh = Math.max(200, vh);
   const P = Math.max(2, Math.min(6, Math.round(Math.min(vw / 300, vh / 170))));
   const W = Math.ceil(vw / P), H = Math.ceil(vh / P);
-  const s = Math.max(0.62, Math.min(1, W / 320));
+  const s = Math.max(W < H ? 0.78 : 0.62, Math.min(1, W / 320));
   const tableTop = Math.round(Math.min(H * 0.3, 34 + 60 * s));
   const rx = Math.round(W * 0.75);
   const ry = Math.round(Math.min(H * 0.5, W * 0.3));
@@ -40,7 +40,7 @@ export function edgeY(L: Layout, x: number) {
 export function seatGeom(L: Layout, seat: number): SeatGeom {
   const k = SLOT[Math.max(0, Math.min(7, seat | 0))];
   const th = Math.PI * (0.93 - (0.86 * k) / 7);
-  const x = Math.round(L.cx + L.W * 0.45 * Math.cos(th));
+  const x = Math.round(L.cx + L.W * (L.W < L.H ? 0.4 : 0.45) * Math.cos(th));
   const depth = Math.sin(th);
   const scale = L.s * (1.06 - 0.26 * depth);
   const w = Math.round(BUST_W * scale), h = Math.round(BUST_H * scale);
@@ -304,7 +304,7 @@ export class SceneRenderer {
     if (!cv) {
       let look = this.looks.get(p.id + p.look);
       if (!look) { look = bustLook(p.look, p.id); this.looks.set(p.id + p.look, look); }
-      cv = renderBust(look, { scale: g.scale, blink, lit, rimRight, dim: lit ? 1.1 : dimQ, ghost: !p.connected });
+      cv = renderBust(look, { scale: g.scale, blink, lit, rimRight, dim: lit ? 0.95 : dimQ, ghost: !p.connected });
       if (this.sprites.size > 96) this.sprites.clear();
       this.sprites.set(key, cv);
     }
@@ -361,7 +361,7 @@ export class SceneRenderer {
     const img = c.getImageData(0, 0, W, H);
     const d = img.data;
     const flick = 0.9 + 0.1 * Math.sin(sec * 9.3) * Math.sin(sec * 3.1 + 1) + (rnd(Math.floor(t / 80), 7) > 0.93 ? -0.18 : 0);
-    const amb = (D.shooter ? 0.36 : 0.5) * D.dimAll;
+    const amb = (D.shooter ? 0.42 : 0.52) * D.dimAll;
     const R = W * 0.55;
     const tanA = Math.tan(a);
     const flash = shotAge < 140 ? 1.6 * (1 - shotAge / 140) : 0;
@@ -389,7 +389,7 @@ export class SceneRenderer {
         if (sp) {
           const sdx = x - sp.x, sdy = (y - sp.y) * 0.8;
           const v = 1 - Math.sqrt(sdx * sdx + sdy * sdy) / sp.r;
-          if (v > 0) lamp += v * 0.7;
+          if (v > 0) lamp += v * 0.42;
         }
         if (flash > 0) {
           const v = 1 - Math.hypot(x - fX, y - fY) / (W * 0.5);

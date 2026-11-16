@@ -2,18 +2,7 @@ import { useEffect, useMemo } from 'react';
 import type { RoomProps } from '../props';
 import { heroArt } from '../../shared/types';
 import { sfx } from '../sfx';
-import GameArt from '../scene/GameArt';
-
-// jagged torn-paper outline, deterministic
-const TORN = (() => {
-  const pts: string[] = [];
-  const j = (i: number, m: number) => ((Math.abs(Math.sin(i * 12.9898 + 1.3) * 43758.5453) % 1) * m);
-  for (let i = 0; i <= 20; i++) pts.push(`${i * 5}% ${j(i, 1.8).toFixed(2)}%`);
-  for (let i = 1; i <= 20; i++) pts.push(`${(100 - j(i + 40, 2.2)).toFixed(2)}% ${i * 5}%`);
-  for (let i = 19; i >= 0; i--) pts.push(`${i * 5}% ${(100 - j(i + 80, 1.6)).toFixed(2)}%`);
-  for (let i = 19; i >= 1; i--) pts.push(`${j(i + 120, 2.2).toFixed(2)}% ${i * 5}%`);
-  return `polygon(${pts.join(',')})`;
-})();
+import { PixelArt, PixelPanel } from '../pixel/PixelCanvas';
 
 export default function Result({ state, me, send }: RoomProps) {
   const res = state.result;
@@ -50,21 +39,21 @@ export default function Result({ state, me, send }: RoomProps) {
     <div className="result">
       <div className="result-backdrop" style={{ backgroundImage: `url(${heroArt(res.appid)})` }} />
       <div className="poster-wrap">
-        <div className="poster" style={{ clipPath: TORN }}>
+        <div className="poster">
+          <PixelPanel kind="paper" size={4} />
           <div className="poster-wanted">WANTED</div>
           <div className="poster-sub">— TONIGHT —</div>
-          <div className="poster-art"><GameArt appid={res.appid} name={res.name} /></div>
+          <div className="poster-art"><PixelArt appid={res.appid} name={res.name} w={48} h={72} /></div>
           <div className="poster-name">{res.name}</div>
           <div className="poster-reward">REWARD: one good night with the posse</div>
           {res.repeatCount >= 2 && (
             <div className="poster-repeat">You played this the last {res.repeatCount} times</div>
           )}
         </div>
-        <i className="nail n1" /><i className="nail n2" /><i className="nail n3" /><i className="nail n4" />
       </div>
 
       <div className="result-actions">
-        <a className="btn-launch" href={`steam://run/${res.appid}`}>LAUNCH</a>
+        <a className="btn-launch px-btn" href={`steam://run/${res.appid}`}>LAUNCH</a>
         <a className="store-link" href={`https://store.steampowered.com/app/${res.appid}`} target="_blank" rel="noreferrer">
           Don't own it? Store page
         </a>
@@ -72,12 +61,12 @@ export default function Result({ state, me, send }: RoomProps) {
 
       {stats.length > 0 && (
         <div className="stat-chips">
-          {stats.map((s) => <div className="chip" key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
+          {stats.map((s) => <div className="chip px-box" key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
         </div>
       )}
 
       {hist.length > 0 && (
-        <div className="history">
+        <div className="history px-box">
           <div className="history-label">Lately at this table</div>
           <ol>
             {hist.map((h) => (
@@ -88,7 +77,7 @@ export default function Result({ state, me, send }: RoomProps) {
       )}
 
       {amHost ? (
-        <button className="btn-again" onClick={() => send({ t: 'again' })}>Another round</button>
+        <button className="btn-again px-btn" onClick={() => send({ t: 'again' })}>Another round</button>
       ) : (
         <div className="wait-host">The host can call another round.</div>
       )}
