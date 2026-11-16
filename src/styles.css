@@ -120,11 +120,79 @@ canvas { image-rendering: pixelated; }
   font-family: var(--px-sm); font-size: 9px; color: var(--parch2); background: rgba(11,7,5,.8); padding: 1px 4px; white-space: nowrap;
 }
 
+/* UI column over the scene: [fixed top spacer (phones)] [scroller .saloon-front] [dock] */
+.saloon-ui { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; pointer-events: none; }
+.saloon-ui > * { pointer-events: auto; }
+.front-top { display: none; flex: none; pointer-events: none !important; }
 .saloon-front {
-  position: absolute; inset: 0; z-index: 10; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
-  padding: max(var(--stage-top, 30vh), calc(env(safe-area-inset-top) + 8px)) env(safe-area-inset-right) 48px env(safe-area-inset-left); /* 48px bottom: panels.css sticky footers rely on it */
+  position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  padding: max(var(--stage-top, 30vh), calc(env(safe-area-inset-top) + 8px)) env(safe-area-inset-right) 32px env(safe-area-inset-left);
   -webkit-overflow-scrolling: touch;
 }
+/* dock: the dealer's table (lobby + nominate) */
+.dock { position: relative; flex: none; z-index: 20; background: #160d08; box-shadow: 0 -4px 0 0 var(--ink), inset 0 2px 0 0 var(--wood3), 0 -14px 24px rgba(0,0,0,.45); }
+.dock::before { content: ''; position: absolute; left: 0; right: 0; top: 2px; height: 4px; background: repeating-linear-gradient(90deg, #1f3a26 0 6px, #19301f 6px 12px); opacity: .9; }
+.dock-in {
+  width: min(960px, 94vw); margin: 0 auto; display: flex; align-items: center; gap: 18px;
+  padding: 12px 0 calc(10px + env(safe-area-inset-bottom)); font-family: var(--px);
+}
+.dock-board { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.dock-label { flex: none; display: flex; flex-direction: column; align-items: center; font-family: var(--px-sm); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--amber); line-height: 1.2; text-align: center; width: 54px; }
+.dock-label b { font-family: 'Rye', serif; font-weight: 400; font-size: 18px; color: var(--parch); letter-spacing: 0; }
+.dock-empty { font-family: var(--px-sm); font-size: 12px; color: rgba(232,213,181,.5); padding: 8px 0; }
+.dock-row {
+  display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 4px 4px 4px; min-width: 0;
+  scroll-snap-type: x proximity; overscroll-behavior-x: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.dock-row::-webkit-scrollbar { display: none; }
+.dock-card { --cw: 44px; flex: none; width: var(--cw); display: flex; flex-direction: column; align-items: center; gap: 3px; scroll-snap-align: start; animation: dock-drop .3s steps(4, end) both; }
+.dock-card.is-landed { animation: none; }
+.dock-card-art { position: relative; width: var(--cw); height: calc(var(--cw) * 1.5); overflow: hidden; background: var(--wood0); box-shadow: 0 0 0 2px var(--ink), 3px 3px 0 rgba(0,0,0,.5); }
+.dock-card.is-mine .dock-card-art { box-shadow: 0 0 0 2px var(--ink), 0 0 0 4px var(--amber), 3px 3px 0 rgba(0,0,0,.5); }
+.dock-card.is-pitch .dock-card-art { box-shadow: 0 0 0 2px #12324a, 0 0 0 4px #8fd0ff, 3px 3px 0 rgba(0,0,0,.5); }
+.dock-card-art > .pxcover, .dock-card-art > img, .dock-card-art > canvas, .dock-card-art > .nh-art-miss { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+.dock-ptag { position: absolute; top: 2px; left: 2px; font-family: var(--px-sm); font-size: 9px; line-height: 1; padding: 1px 3px; background: #12324a; color: #8fd0ff; }
+.dock-card-by { display: flex; gap: 1px; min-height: 14px; align-items: center; }
+.dock-card-by .nh-av { box-shadow: none; }
+.dock-card-by small { font-family: var(--px-sm); font-size: 8px; color: rgba(232,213,181,.55); }
+.dock-card.is-leaving { animation: dock-leave .34s steps(4, end) forwards; pointer-events: none; }
+.dock-ghost { animation: none !important; }
+@keyframes dock-drop { from { transform: translateY(-14px) rotate(-6deg); opacity: 0 } 70% { transform: translateY(2px) } to { transform: none; opacity: 1 } }
+@keyframes dock-leave { to { transform: translateY(-26px) rotate(8deg); opacity: 0 } }
+.dock-actions { flex: none; display: flex; justify-content: center; margin-left: auto; }
+.dock-actions:empty { display: none; }
+.dock-act { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.dock-act-row { flex-direction: row; gap: 14px; }
+.dock-act .nh-btn-big { min-height: 52px; padding: 10px 26px; font-size: 22px; white-space: nowrap; }
+.dock-act .nh-hint { max-width: 340px; font-size: 11px; }
+.dock .nh-waiting { font-size: 14px; min-height: 52px; }
+.dock-in:not(:has(.dock-board)) .dock-actions { margin: 0 auto; }
+
+/* phase change: pixel iris wipe (opacity tiles) + DRAW! slam */
+.wipe { position: fixed; inset: 0; z-index: 85; pointer-events: none; overflow: hidden; }
+.wipe i {
+  position: absolute; background: #050302; opacity: 0;
+  animation: wipe-in 1ms steps(1, end) var(--d1) both, wipe-out 1ms steps(1, end) var(--d2) forwards;
+}
+@keyframes wipe-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes wipe-out { from { opacity: 0 } to { opacity: 0 } }
+.draw-title {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  animation: draw-out var(--wo) steps(3, end) calc(var(--wc) + var(--wh)) forwards;
+}
+.draw-title span {
+  font-family: 'Rye', serif; font-size: clamp(64px, 20vw, 180px); color: #ffe2b0; letter-spacing: .04em;
+  text-shadow: 4px 4px 0 var(--red), 8px 8px 0 #000; opacity: 0;
+  animation: draw-slam .34s steps(4, end) var(--wc) forwards;
+}
+.wipe.is-instant .draw-title { animation-delay: 700ms; }
+.wipe.is-instant .draw-title span { animation-delay: 0ms; }
+@keyframes draw-slam { 0% { opacity: 0; transform: scale(3) rotate(-8deg) } 60% { opacity: 1; transform: scale(.92) rotate(2deg) } 100% { opacity: 1; transform: scale(1) rotate(-3deg) } }
+@keyframes draw-out { to { opacity: 0; transform: scale(1.15) } }
+
+/* nameplate pops in when someone sits down */
+.seat.fresh .seat-plate { animation: plate-pop .5s steps(5, end) .25s both; }
+@keyframes plate-pop { 0% { transform: translateX(-50%) scale(0); } 60% { transform: translateX(-50%) scale(1.25); } 100% { transform: translateX(-50%) scale(1); } }
 .saloon-stage { position: relative; width: min(960px, 94vw); margin: 0 auto; }
 
 /* sound button + popover */
@@ -464,7 +532,7 @@ canvas { image-rendering: pixelated; }
   .fx-banner { top: calc(10vh + env(safe-area-inset-top)); }
 
   /* roulette */
-  .phase-roulette .saloon-front, .phase-result .saloon-front { padding-top: var(--front-top); }
+  .phase-roulette .saloon-front, .phase-result .saloon-front { padding-top: 0; } /* the .front-top spacer takes --front-top */
   .phase-roulette { --cyl: min(86vw, 52dvh, 460px); --front-top: clamp(calc(env(safe-area-inset-top) + 52px), calc(100dvh - var(--cyl) * 1.12 - 196px), var(--stage-top)); }
   .roulette { margin-top: 0; gap: 6px; }
   .roulette-title { font-size: 26px; }
@@ -562,7 +630,65 @@ canvas { image-rendering: pixelated; }
   .btn-launch { display: grid; place-items: center; width: 100%; min-height: 60px; font-size: 28px; padding: 12px 8px 8px; }
 }
 
+/* ---------- phones: fixed top scene, scrolling middle, dock at the bottom ---------- */
+@media (max-width: 640px) and (min-height: 501px) {
+  .saloon { --top-h: max(var(--front-top, var(--stage-top)), calc(env(safe-area-inset-top) + 8px)); }
+  .saloon.has-dock { --top-h: max(calc(var(--stage-top) + 8px), calc(env(safe-area-inset-top) + 8px)); }
+  .front-top { display: block; height: var(--top-h); }
+  .saloon-front { padding: 0 env(safe-area-inset-right) 24px env(safe-area-inset-left); }
+  .has-dock .saloon-front {
+    padding-bottom: 16px;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px); mask-image: linear-gradient(to bottom, transparent 0, #000 22px);
+  }
+  .has-dock .saloon-stage { width: min(960px, calc(100vw - 16px)); }
+  .has-dock .saloon-stage > .nh-panel { margin-top: 14px; }
+  .dock-in { width: 100%; flex-direction: column; align-items: stretch; gap: 6px; padding: 10px max(10px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
+  .dock-board { gap: 6px; }
+  .dock-label { width: 44px; font-size: 9px; }
+  .dock-card { --cw: 34px; }
+  .dock-actions { margin: 0; }
+  .dock-act { width: 100%; }
+  .dock-act .nh-btn-big { width: 100%; max-width: 420px; font-size: 20px; padding: 10px 14px; }
+  .dock-act-row { gap: 10px; }
+  .dock-act-row .nh-btn-big { flex: 1 1 auto; width: auto; }
+  .dock-act-row .nh-waiting { flex: 1 1 auto; justify-content: center; }
+  .dock .nh-waiting { font-size: 13px; min-height: 48px; padding: 4px; }
+  .dock-act .nh-hint { font-size: 10.5px; line-height: 1.25; }
+}
+@media (max-width: 640px) and (min-height: 760px) {
+  /* tall phones: a little more saloon above the content */
+  .saloon.has-dock { --top-h: max(calc(var(--stage-top) + 8px), 32dvh, calc(env(safe-area-inset-top) + 8px)); }
+  .dock-card { --cw: 38px; }
+}
+@media (max-width: 640px) and (min-height: 501px) and (max-height: 640px) {
+  .dock-in { padding-top: 8px; gap: 4px; }
+  .dock-card { --cw: 28px; }
+  .dock-card-by { display: none; }
+  .dock-act .nh-hint { display: none; }
+  .dock-act .nh-btn-big { min-height: 46px; font-size: 18px; padding: 8px 12px; }
+}
+
+/* landscape phones: lobby/nominate split, scene on the left half, panel + dock on the right */
+@media (max-height: 500px) and (orientation: landscape) {
+  .phase-veto { --front-top: 0px; }
+  .is-split .scene { right: 50%; }
+  .is-split .seat-name { max-width: 6ch; }
+  .is-split .saloon-ui { left: 50%; box-shadow: -4px 0 0 0 var(--ink); background: rgba(11,7,5,.35); }
+  .is-split .saloon-front { padding: calc(env(safe-area-inset-top) + 8px) max(8px, env(safe-area-inset-right)) 12px 8px; }
+  .is-split .saloon-stage { width: 100%; }
+  .is-split .sound, body:has(.is-split) .snd-root { right: auto; left: calc(50% - 52px); }
+  .is-split .dock-in { width: 100%; padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) 8px; gap: 8px; flex-wrap: wrap; }
+  .is-split .dock-card { --cw: 26px; }
+  .is-split .dock-card-by, .is-split .dock-label { display: none; }
+  .is-split .dock-act .nh-hint { display: none; }
+  .is-split .dock-act .nh-btn-big { min-height: 44px; font-size: 17px; padding: 6px 14px; }
+  .is-split .dock .nh-waiting { min-height: 44px; font-size: 12px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .dock-card, .dock-card.is-leaving, .seat.fresh .seat-plate { animation: none !important; }
+  .dock-card.is-leaving { opacity: 0; }
+  .wipe i { display: none; }
   .center .cbox-bob, .crosshair, .seat-order.now, .btn-fire, .btn-launch, .gbox-more, .your-shot,
   .fuse.frantic .fuse-num, .fuse.frantic .fuse-cv, .gbox-star, .chamber.win .chamber-ring, .seat { animation: none !important; }
   .fx-whole, .fx-shudder, .fx-sparks i, .fx-smoke, .fx-muzzle { animation-duration: .01s !important; }

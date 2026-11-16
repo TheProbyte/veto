@@ -1,9 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { boxArt, headerArt } from '../../shared/types';
 import { PAL, hashStr, rnd } from './palette';
 import { bayer, makeCanvas, px } from './dither';
 import { computeLayout, SceneRenderer, type Layout, type SceneData } from './scene';
 import { drawCrack, holeAt, type DrawFn } from './sprites';
+import { peekPixelized, pixelize, type Pixelized } from './pixelize';
+import './pixel.css';
 
 /* ================= viewport layout ================= */
 
@@ -87,31 +88,6 @@ export const PixelSprite = memo(function PixelSprite({ draw, w, h, className = '
 
 /* ================= box art ================= */
 
-type Art = { img: HTMLImageElement; wide: boolean } | null;
-const artCache = new Map<number, Promise<Art>>();
-function loadImg(url: string): Promise<HTMLImageElement | null> {
-  return new Promise((res) => {
-    const im = new Image();
-    im.decoding = 'async';
-    im.onload = () => res(im);
-    im.onerror = () => res(null);
-    im.src = url;
-  });
-}
-function getArt(appid: number): Promise<Art> {
-  let p = artCache.get(appid);
-  if (!p) {
-    p = (async () => {
-      const a = await loadImg(boxArt(appid));
-      if (a) return { img: a, wide: false };
-      const b = await loadImg(headerArt(appid));
-      return b ? { img: b, wide: true } : null;
-    })();
-    artCache.set(appid, p);
-  }
-  return p;
-}
-
 function frameBox(c: CanvasRenderingContext2D, w: number, h: number) {
   // case edges + highlight
   c.fillStyle = 'rgba(255,240,210,.35)'; c.fillRect(1, 1, w - 2, 1); c.fillRect(1, 1, 1, h - 2);
@@ -132,7 +108,7 @@ function placeholder(c: CanvasRenderingContext2D, w: number, h: number, seed: nu
 }
 
 /** Steam box art downsampled to a tiny canvas and upscaled with nearest-neighbour. */
-export const PixelArt = memo(function PixelArt({ appid, name, w = 40, h = 60, className = '', holes = 0, cracked = false, style }: {
+export const PixelArt = memo(function PixelArt({ appid, name, w = 36, h = 54, className = '', holes = 0, cracked = false, style }: {
   appid: number; name: string; w?: number; h?: number; className?: string; holes?: number; cracked?: boolean; style?: CSSProperties;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -144,11 +120,10 @@ export const PixelArt = memo(function PixelArt({ appid, name, w = 40, h = 60, cl
     let alive = true;
     const seed = hashStr(String(appid)) % 997;
     const finish = () => {
-      // pixel dither shading: darker toward the bottom + warm cast
-      for (let y = Math.floor(h * 0.55); y < h; y++) for (let x = 0; x < w; x++) {
-        if (((y - h * 0.55) / (h * 0.45)) * 0.7 > bayer(x, y) + 0.25) { c.fillStyle = 'rgba(11,7,5,.5)'; c.fillRect(x, y, 1, 1); }
+      // light dithered shade at the very bottom (sits on the table)
+      for (let y = Math.floor(h * 0.8); y < h; y++) for (let x = 0; x < w; x++) {
+        if (((y - h * 0.8) / (h * 0.2)) * 0.5 > bayer(x, y) + 0.2) { c.fillStyle = 'rgba(11,7,5,.45)'; c.fillRect(x, y, 1, 1); }
       }
-      c.fillStyle = 'rgba(255,170,90,.07)'; c.fillRect(0, 0, w, h);
       for (let k = 0; k < holes; k++) {
         const hx = 6 + Math.floor(rnd(seed, k, 3) * (w - 12)), hy = 8 + Math.floor(rnd(seed, k, 4) * (h - 16));
         holeAt(c, hx, hy);
@@ -157,26 +132,27 @@ export const PixelArt = memo(function PixelArt({ appid, name, w = 40, h = 60, cl
       frameBox(c, w, h);
     };
     c.imageSmoothingEnabled = false;
-    placeholder(c, w, h, seed);
-    frameBox(c, w, h);
-    setMissing(false);
-    getArt(appid).then((a) => {
-      if (!alive) return;
+    const paint = (a: Pixelized | null | undefined) => {
       c.clearRect(0, 0, w, h);
-      if (!a) { placeholder(c, w, h, seed); setMissing(true); finish(); return; }
-      c.imageSmoothingEnabled = true; // average the downsample, then everything else is hard pixels
-      c.imageSmoothingQuality = 'medium';
-      const iw = a.img.naturalWidth || 1, ih = a.img.naturalHeight || 1;
-      const sc = Math.max(w / iw, h / ih);
-      const dw = iw * sc, dh = ih * sc;
-      c.drawImage(a.img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-      c.imageSmoothingEnabled = false;
+      if (!a) { placeholder(c, w, h, seed); setMissing(a === null); finish(); return; }
+      c.drawImage(a.cv, 0, 0, w, h);
+      setMissing(false);
       finish();
-    });
-    return () => { alive = false; };
+    };
+    const hit = peekPixelized(appid, 'box', w, h);
+    paint(hit);
+    if (hit !== undefined) return () => { alive = false; };
+    const go = () => pixelize(appid, 'box', w, h).then((a) => { if (alive) paint(a); });
+    let io: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver === 'undefined' || !cv.parentElement) go();
+    else {
+      io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io?.disconnect(); go(); } }, { rootMargin: '200px' });
+      io.observe(cv.parentElement);
+    }
+    return () => { alive = false; io?.disconnect(); };
   }, [appid, w, h, holes, cracked]);
   return (
-    <div className={`pxart ${className}`} style={style}>
+    <div className={`pxart pxart-v2 ${className}`} style={style}>
       <canvas ref={ref} aria-label={name} role="img" />
       {missing && <span className="pxart-name">{name}</span>}
     </div>
@@ -233,8 +209,10 @@ export function PixelPanel({ kind = 'paper', size = 4 }: { kind?: PanelKind; siz
   useEffect(() => {
     const cv = ref.current; if (!cv) return;
     const paint = () => {
-      const box = cv.parentElement?.getBoundingClientRect();
-      if (!box) return;
+      // layout size (ignores transforms, so a scaling entrance animation doesn't paint a tiny texture)
+      const par = cv.parentElement as HTMLElement | null;
+      if (!par) return;
+      const box = { width: par.offsetWidth, height: par.offsetHeight };
       const w = Math.max(4, Math.ceil(box.width / size)), h = Math.max(4, Math.ceil(box.height / size));
       if (cv.width === w && cv.height === h) return;
       cv.width = w; cv.height = h;

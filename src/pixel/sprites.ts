@@ -1,3 +1,4 @@
+import type { Look } from '../../shared/types';
 import { PAL, hashStr, hexRgb, rnd } from './palette';
 import { bayer, circle, ellipse, line, makeCanvas, px } from './dither';
 
@@ -8,41 +9,74 @@ type Ctx = CanvasRenderingContext2D;
 export const BUST_W = 48;
 export const BUST_H = 56;
 
-const HAT_COLS = ['#3b2416', '#1a1310', '#5a3a22', '#2c2620', '#6b4a2a', '#24180f', '#3d2b22', '#4a3524'];
-const HAT_BANDS = [PAL.red2, PAL.wood0, PAL.lamp3, PAL.blue1, PAL.parch3, PAL.red1, PAL.wood0, PAL.metal2];
-const COATS = ['#3b2416', '#22252b', '#4a2c1a', '#2e2a20', '#3a1a16', '#1e2c3d', '#5a4630', '#26301c'];
-const SCARVES = [PAL.red1, '#b5651d', PAL.blue2, '#7a1414', '#6b1d4a', '#a8841f', PAL.red1, '#2f5d3a'];
+// option palettes, indexed exactly like LOOK_LABELS in shared/types
+const HAT_COLS = ['#7a5a38', '#1c1612', '#7a3418', '#c9b08a', '#4a1418', '#3a4450'];
+const HAT_BANDS = [PAL.wood1, PAL.red1, PAL.wood0, PAL.wood2, PAL.parch3, PAL.metal1];
+const COATS = ['#6b5032', '#1c1d22', '#4a2c1a', '#1e2c4a', '#45454a', '#8a6440'];
+const SCARVES: (string | null)[] = [null, '#a81d1d', '#24345e', '#1a1412', '#b8891d', '#2f6a3a'];
 const SKINS: [string, string, string][] = [
-  [PAL.skin0, PAL.skin1, PAL.skin2],
+  ['#9a6a52', '#d9a383', '#f0c9a8'],
   [PAL.skin1, PAL.skin2, PAL.skin3],
-  ['#3e271a', PAL.skin0, PAL.skin1],
-  [PAL.skin0, PAL.skin2, PAL.skin3],
+  ['#6e4428', '#a8703f', '#cf9662'],
+  [PAL.skin0, PAL.skin1, PAL.skin2],
+  ['#2e1a10', '#4f3020', '#76492e'],
 ];
-const HAIRS = ['#1a110b', '#3b2416', '#6e4a2a', '#8a8580', '#a0522d', '#0b0705'];
+const HAIRS = ['#120c08', '#4a2c18', '#a0522d', '#c9a050', '#8a8580'];
 const GLINTS = [PAL.lamp1, PAL.parch, PAL.blue3, PAL.lamp0];
 
+/** Internal hat codes: 0 wide brim, 1 bowler, 2 top hat, 3 sombrero, 4 flat cap, 5 no hat (hair), 6 legacy bandana wrap */
 export interface BustLook {
-  hat: number; // 0 cattleman, 1 bowler, 2 top hat, 3 sombrero, 4 bandana wrap
-  hatCol: string; band: string; coat: string; scarf: string;
-  skin: [string, string, string]; hair: string; facial: number; glint: string;
+  hat: number;
+  hatCol: string; band: string; coat: string; scarf: string | null;
+  skin: [string, string, string]; hair: string;
+  facial: number; // LOOK_LABELS.face order: 0 clean, 1 stubble, 2 moustache, 3 full beard, 4 goatee, 5 scarred
+  glint: string;
 }
 
-export function bustLook(look: number, id: string): BustLook {
-  const l = ((look % 8) + 8) % 8;
-  const h = hashStr(id || String(look));
-  const HAT_BY_LOOK = [0, 1, 2, 3, 0, 4, 2, 0];
+const wrap = (v: number, n: number) => ((Math.floor(v) % n) + n) % n;
+
+/** Character-creator choices -> renderer palette. */
+export function lookFromStyle(st: Look, id = ''): BustLook {
+  const g = GLINTS[hashStr(id || 'x') % 4];
   return {
-    hat: (h >>> 20) % 5 === 0 ? (HAT_BY_LOOK[l] + 1 + ((h >>> 3) % 4)) % 5 : HAT_BY_LOOK[l],
-    hatCol: HAT_COLS[(l + (h & 1)) % 8],
-    band: HAT_BANDS[(l + (h >>> 5)) % 8],
-    coat: COATS[l],
-    scarf: SCARVES[(l + ((h >>> 9) % 3 === 0 ? 3 : 0)) % 8],
-    skin: SKINS[(h >>> 11) % 4],
-    hair: HAIRS[(h >>> 14) % HAIRS.length],
-    facial: (h >>> 17) % 4, // 0 beard, 1 stubble, 2 moustache, 3 clean
-    glint: GLINTS[(h >>> 23) % 4],
+    hat: wrap(st.hat, 6),
+    hatCol: HAT_COLS[wrap(st.hatColor, HAT_COLS.length)],
+    band: HAT_BANDS[wrap(st.hatColor, HAT_BANDS.length)],
+    coat: COATS[wrap(st.coat, COATS.length)],
+    scarf: SCARVES[wrap(st.bandana, SCARVES.length)],
+    skin: SKINS[wrap(st.skin, SKINS.length)],
+    hair: HAIRS[wrap(st.hair, HAIRS.length)],
+    facial: wrap(st.face, 6),
+    glint: g,
   };
 }
+
+/** Legacy outfit number + hash of the player id -> a full Look (the default before someone uses the creator). */
+export function legacyStyle(look: number, id: string): Look {
+  const l = wrap(look, 8);
+  const h = hashStr(id || String(look));
+  const HAT_BY_LOOK = [0, 1, 2, 3, 0, 4, 2, 0];
+  const hat = (h >>> 20) % 6 === 0 ? (HAT_BY_LOOK[l] + 1 + ((h >>> 3) % 4)) % 6 : HAT_BY_LOOK[l];
+  return {
+    hat,
+    hatColor: (l + (h & 1)) % 6,
+    skin: (h >>> 11) % 5,
+    face: [3, 1, 2, 0, 4, 5][(h >>> 17) % 6],
+    hair: (h >>> 14) % 5,
+    bandana: 1 + ((l + ((h >>> 9) % 3 === 0 ? 3 : 0)) % 5),
+    coat: l % 6,
+  };
+}
+
+/** Back-compat: legacy look number + id. */
+export function bustLook(look: number, id: string): BustLook { return lookFromStyle(legacyStyle(look, id), id); }
+
+/** The bust for a player: their creator style when set, else the old hash-of-id default. */
+export function bustFor(p: { id: string; look: number; style?: Look }): BustLook {
+  return lookFromStyle(p.style ?? legacyStyle(p.look, p.id), p.id);
+}
+export const styleSig = (p: { look: number; style?: Look }) =>
+  p.style ? `s${p.style.hat}.${p.style.hatColor}.${p.style.skin}.${p.style.face}.${p.style.hair}.${p.style.bandana}.${p.style.coat}` : `l${p.look}`;
 
 export interface BustOpts {
   scale: number; // 1 = 48x56
@@ -51,14 +85,25 @@ export interface BustOpts {
   lit: boolean; // current shooter
   dim: number; // 0..1 multiplier for distance darkening
   ghost: boolean;
+  /** hat offset in bust pixels (negative = above the head) for drop / tip animations */
+  hatDy?: number;
+  hatDx?: number;
+  /** hand raised to the brim (hat tip) */
+  hand?: boolean;
+  /** revolver: 0 none, 1 raised (aiming), 2 recoil */
+  gun?: number;
+  /** extra empty rows above the bust (so dropping hats aren't clipped) */
+  padTop?: number;
 }
 
 /** Draws a bust into a fresh offscreen canvas. Rim light computed from the silhouette. */
 export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   const s = o.scale;
+  const pad = Math.round((o.padTop ?? 0) * s);
   const W = Math.max(8, Math.round(BUST_W * s));
-  const H = Math.max(8, Math.round(BUST_H * s));
+  const H = Math.max(8, Math.round(BUST_H * s) + pad);
   const [cv, c] = makeCanvas(W, H);
+  c.translate(0, pad);
   const X = (v: number) => Math.round(v * s);
   const R = (x: number, y: number, w: number, h: number, col: string) => {
     c.fillStyle = col;
@@ -66,6 +111,7 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   };
   const E = (cx: number, cy: number, rx: number, ry: number, col: string) => ellipse(c, X(cx), X(cy), Math.max(1, X(rx)), Math.max(1, X(ry)), col);
   const [sk0, sk1, sk2] = L.skin;
+  const noHat = L.hat === 5;
 
   // --- coat / shoulders
   for (let y = 29; y < 56; y++) {
@@ -73,46 +119,48 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
     const hw = Math.round(9 + 14 * Math.sqrt(t));
     R(24 - hw, y, hw * 2, 1, L.coat);
   }
-  // coat shading: darker under-chest dither
   const coatD = shade(L.coat, 0.55);
   c.fillStyle = coatD;
-  for (let y = X(38); y < H; y++) for (let x = 0; x < W; x++) {
-    const t = (y - X(38)) / Math.max(1, H - X(38));
+  const y38 = X(38), Hb = Math.round(BUST_H * s);
+  for (let y = y38; y < Hb; y++) for (let x = 0; x < W; x++) {
+    const t = (y - y38) / Math.max(1, Hb - y38);
     const yy = y / s, tt = Math.min(1, (yy - 29) / 7), hw = 9 + 14 * Math.sqrt(Math.max(0, tt));
     if (t * 1.3 > bayer(x, y) && Math.abs(x / s - 24) < hw - 0.5) c.fillRect(x, y, 1, 1);
   }
-  // lapels + shirt
   R(21, 30, 6, 14, '#1a120c');
   R(22, 31, 4, 12, PAL.parch3);
   line(c, X(19), X(30), X(22), X(46), PAL.ink);
   line(c, X(29), X(30), X(26), X(46), PAL.ink);
-  // buttons / badge pocket glint
   R(24, 39, 1, 1, PAL.metal3);
-  // raised collar
   R(15, 28, 4, 4, L.coat); R(29, 28, 4, 4, L.coat);
-  // neck
   R(20, 24, 8, 6, sk0);
 
-  // --- bandana (neck wrap + triangle)
-  R(17, 27, 14, 2, L.scarf);
-  for (let i = 0; i < 7; i++) R(18 + i, 29 + i, Math.max(1, 12 - i * 2), 1, L.scarf);
-  R(19, 29, 10, 1, PAL.red2);
-  R(24, 31, 1, 3, PAL.red2);
+  // --- bandana (neck wrap + triangle) or open shirt collar
+  if (L.scarf) {
+    const sd = shade(L.scarf, 0.6);
+    R(17, 27, 14, 2, L.scarf);
+    for (let i = 0; i < 7; i++) R(18 + i, 29 + i, Math.max(1, 12 - i * 2), 1, L.scarf);
+    R(19, 29, 10, 1, sd);
+    R(24, 31, 1, 3, sd);
+    R(20, 27, 1, 1, shade(L.scarf, 1.4));
+  } else {
+    R(19, 28, 4, 3, PAL.parch2); R(25, 28, 4, 3, PAL.parch2);
+    R(23, 29, 2, 3, sk0);
+    R(19, 28, 4, 1, PAL.parch);
+  }
 
   // --- head
   E(24, 17, 10, 10, sk1);
-  E(24, 25, 7, 3, sk1); // jaw
-  // brim shadow over upper face (face mostly in shadow)
-  const brimShadow = L.hat === 4 ? 13 : 19;
+  E(24, 25, 7, 3, sk1);
+  const brimShadow = noHat ? 12 : L.hat === 6 ? 13 : L.hat === 4 ? 16 : 19;
   for (let y = X(6); y < X(brimShadow + 3); y++) for (let x = X(13); x < X(36); x++) {
     const t = (X(brimShadow + 3) - y) / Math.max(1, X(5));
     if (y < X(brimShadow) || t > bayer(x, y)) { c.fillStyle = sk0; if (inHead(x / s, y / s)) c.fillRect(x, y, 1, 1); }
   }
-  // cheek highlight (very subtle)
   R(17, 21, 2, 1, sk2);
-  // nose
+  if (noHat) { R(20, 14, 2, 1, sk2); R(27, 13, 3, 1, sk2); }
   R(24, 18, 1, 3, sk2); R(25, 21, 1, 1, sk0);
-  // eyes
+  // eyes + brows
   if (!o.blink) {
     R(19, 16, 3, 1, PAL.ink); R(27, 16, 3, 1, PAL.ink);
     R(o.rimRight ? 21 : 19, 16, 1, 1, L.glint);
@@ -120,36 +168,56 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   } else {
     R(19, 17, 3, 1, '#2a1a10'); R(27, 17, 3, 1, '#2a1a10');
   }
-  // facial hair
-  if (L.facial === 0) {
-    E(24, 25, 8, 4, L.hair);
-    R(16, 19, 2, 6, L.hair); R(31, 19, 2, 6, L.hair);
-    R(21, 23, 7, 1, PAL.ink);
-  } else if (L.facial === 1) {
-    for (let y = X(21); y < X(29); y++) for (let x = X(16); x < X(33); x++) {
-      if (inHead(x / s, y / s) && rnd(x, y, 7) > 0.55) px(c, x, y, L.hair);
-    }
-    R(22, 24, 5, 1, PAL.ink);
-  } else if (L.facial === 2) {
-    R(20, 22, 9, 2, L.hair); R(19, 23, 1, 2, L.hair); R(29, 23, 1, 2, L.hair);
-    R(22, 25, 5, 1, PAL.ink);
-  } else {
-    R(22, 24, 5, 1, sk0);
+  if (noHat || L.hat === 4) { R(19, 14, 3, 1, L.hair); R(27, 14, 3, 1, L.hair); }
+  // facial hair (LOOK_LABELS.face order)
+  switch (L.facial) {
+    case 1: // stubble
+      for (let y = X(21); y < X(29); y++) for (let x = X(16); x < X(33); x++) {
+        if (inHead(x / s, y / s) && rnd(x, y, 7) > 0.55) px(c, x, y, L.hair);
+      }
+      R(22, 24, 5, 1, PAL.ink);
+      break;
+    case 2: // moustache
+      R(20, 22, 9, 2, L.hair); R(19, 23, 1, 2, L.hair); R(29, 23, 1, 2, L.hair);
+      R(22, 25, 5, 1, PAL.ink);
+      break;
+    case 3: // full beard
+      E(24, 25, 8, 4, L.hair);
+      R(16, 19, 2, 6, L.hair); R(31, 19, 2, 6, L.hair);
+      R(21, 23, 7, 1, PAL.ink);
+      R(22, 27, 1, 1, shade(L.hair, 1.5));
+      break;
+    case 4: // goatee + thin moustache
+      R(21, 22, 7, 1, L.hair);
+      E(24, 27, 3, 2, L.hair); R(23, 29, 3, 1, L.hair);
+      R(22, 24, 5, 1, PAL.ink);
+      break;
+    case 5: // scar across the right eye
+      R(22, 24, 5, 1, sk0);
+      line(c, X(26), X(12), X(31), X(21), '#d98a7a');
+      line(c, X(27), X(12), X(32), X(21), shade(sk0, 0.8));
+      for (let k = 0; k < 3; k++) R(27 + k * 1.6, 14 + k * 2.6, 2, 1, '#d98a7a');
+      break;
+    default:
+      R(22, 24, 5, 1, sk0);
   }
-  // hair at temples
-  if (L.hat !== 4) { R(14, 12, 2, 6, L.hair); R(32, 12, 2, 6, L.hair); }
+  if (L.hat !== 6 && !noHat) { R(14, 12, 2, 6, L.hair); R(32, 12, 2, 6, L.hair); }
 
-  // --- hat
+  // --- hat (offset for drop / tip animations)
+  const hdy = Math.round((o.hatDy ?? 0) * s), hdx = Math.round((o.hatDx ?? 0) * s);
+  c.save();
+  c.translate(hdx, hdy);
   const hc = L.hatCol;
   const hd = shade(hc, 0.6);
   const hl = shade(hc, 1.45);
+  const scarf = L.scarf ?? PAL.red1;
   switch (L.hat) {
-    case 0: // cattleman, wide brim, pinched crown
+    case 0: // wide brim, pinched crown
       E(24, 12, 21, 3, hd);
       E(24, 11, 21, 2, hc);
       R(15, 2, 18, 9, hc);
       R(17, 1, 6, 1, hc); R(26, 1, 6, 1, hc);
-      R(23, 2, 3, 2, hd); // pinch
+      R(23, 2, 3, 2, hd);
       R(15, 8, 18, 2, L.band);
       R(4, 11, 40, 1, hl);
       break;
@@ -167,7 +235,7 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
       E(24, 12, 14, 2, hd);
       R(11, 11, 26, 1, hl);
       break;
-    case 3: // sombrero-ish
+    case 3: // sombrero
       E(24, 13, 24, 4, hd);
       E(24, 12, 23, 3, hc);
       for (let i = 0; i < 9; i++) R(18 - i * 0.5, 2 + i, 12 + i, 1, hc);
@@ -175,15 +243,52 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
       R(2, 12, 44, 1, hl);
       for (let x = 4; x < 44; x += 4) R(x, 14, 1, 1, L.band);
       break;
-    default: // bandana-only head wrap
-      E(24, 10, 11, 6, L.scarf);
-      R(13, 10, 22, 3, L.scarf);
-      R(13, 12, 22, 1, PAL.red2);
-      R(34, 11, 3, 2, L.scarf); R(35, 13, 2, 3, L.scarf); R(36, 16, 1, 2, PAL.red2);
-      for (let i = 0; i < 5; i++) R(16 + i * 4, 7 + (i % 2), 1, 1, shade(L.scarf, 1.5));
+    case 4: // flat cap
+      E(24, 9, 11, 5, hc);
+      R(13, 9, 22, 3, hc);
+      R(14, 6, 9, 1, hl);
+      R(24, 5, 1, 4, hd);
+      E(24, 13, 12, 2, hd);
+      R(13, 12, 22, 1, hl);
+      R(14, 11, 20, 1, L.band);
+      break;
+    case 5: // no hat: hair
+      E(24, 10, 11, 6, L.hair);
+      R(13, 10, 3, 7, L.hair); R(32, 10, 3, 7, L.hair);
+      R(16, 11, 16, 2, L.hair);
+      R(21, 5, 1, 6, shade(L.hair, 0.6));
+      for (let i = 0; i < 5; i++) R(15 + i * 4, 6 + (i % 2), 2, 1, shade(L.hair, 1.6));
+      R(26, 12, 4, 1, L.hair); R(17, 13, 2, 1, L.hair);
+      break;
+    default: // legacy bandana-only head wrap
+      E(24, 10, 11, 6, scarf);
+      R(13, 10, 22, 3, scarf);
+      R(13, 12, 22, 1, shade(scarf, 0.6));
+      R(34, 11, 3, 2, scarf); R(35, 13, 2, 3, scarf); R(36, 16, 1, 2, shade(scarf, 0.6));
+      for (let i = 0; i < 5; i++) R(16 + i * 4, 7 + (i % 2), 1, 1, shade(scarf, 1.5));
+  }
+  c.restore();
+  // hand at the brim (hat tip)
+  if (o.hand) {
+    const hy = 10 + (o.hatDy ?? 0);
+    R(33, hy, 5, 4, sk1); R(33, hy, 5, 1, sk2); R(34, hy + 4, 3, 6, L.coat); R(37, hy + 1, 1, 3, sk0);
+  }
+  // revolver, held up by the shooter
+  if (o.gun) {
+    const rc = o.gun === 2 ? -2 : 0; // recoil kicks the barrel up
+    const gx = 34, gy = 33 + rc;
+    R(gx - 2, gy + 4, 6, 8, L.coat); // forearm
+    R(gx - 1, gy + 2, 5, 4, sk1); R(gx - 1, gy + 2, 5, 1, sk2); // fist
+    R(gx + 1, gy - 6 - rc, 3, 9 + rc, PAL.metal1); // barrel, pointing up/forward
+    R(gx + 1, gy - 6 - rc, 1, 9 + rc, PAL.metal3);
+    R(gx + 1, gy - 7 - rc, 3, 1, PAL.metal0);
+    R(gx, gy - 1, 5, 3, PAL.metal2); // cylinder
+    R(gx, gy - 1, 5, 1, PAL.metal4);
+    R(gx + 3, gy + 2, 2, 3, PAL.wood3); // grip
   }
 
   // --- post pass: rim light, back light, dim/ghost
+  c.setTransform(1, 0, 0, 1, 0, 0);
   const img = c.getImageData(0, 0, W, H);
   const d = img.data;
   const dir = o.rimRight ? 1 : -1;

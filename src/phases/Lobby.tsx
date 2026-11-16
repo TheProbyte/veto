@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Player } from '../../shared/types';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
+import { DockActions } from '../scene/Dock';
+import BustPreview from '../pixel/BustPreview';
+import CharacterCreator from './CharacterCreator';
 import './panels.css';
 
 export function Avatar({ p, size = 32 }: { p?: Player; size?: number }) {
@@ -29,6 +32,8 @@ export default function Lobby({ state, me, send }: RoomProps) {
   const [profile, setProfile] = useState('');
   const copyT = useRef(0);
   useEffect(() => () => clearTimeout(copyT.current), []);
+  // step 1 is the character creator until I've picked a look; local state so the save echo doesn't yank it mid hat-tip
+  const [dressing, setDressing] = useState(() => !mine?.style);
 
   const copy = async () => {
     sfx.unlock(); sfx.click();
@@ -64,26 +69,19 @@ export default function Lobby({ state, me, send }: RoomProps) {
   const canStart = ready.length >= 1;
   const steam = mine?.steam;
 
-  return (
-    <div className="nh-panel nh-wood nh-lobby">
-      <i className="nh-nail tl" /><i className="nh-nail tr" /><i className="nh-nail bl" /><i className="nh-nail br" />
-      <header className="nh-head">
-        <div className="nh-kicker">Table {state.code}</div>
-        <h2 className="nh-h">Round up the posse</h2>
-      </header>
-
+  const outfitSec = (
       <section className="nh-sec">
-        <div className="nh-label">Invite your crew</div>
-        <div className={`nh-invite ${canShare ? 'can-share' : ''}`}>
-          <span className="nh-invite-code" aria-label={`Table code ${state.code}`}>{state.code}</span>
-          <input className="nh-input nh-input-mono nh-invite-url" readOnly value={location.href} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link" />
-          <button type="button" className={`nh-btn nh-btn-sm nh-copy ${copied ? 'is-done' : ''}`} onClick={copy}>{copied ? 'Copied!' : 'Copy invite'}</button>
-          {canShare && <button type="button" className="nh-btn nh-btn-sm nh-share" onClick={share}>Share</button>}
+        <div className="nh-label">Your outfit</div>
+        <div className="nh-me nh-me-look">
+          {mine?.style ? <BustPreview look={mine.style} scale={1} className="nh-me-bust" /> : <Avatar p={mine} size={44} />}
+          <div className="nh-me-txt"><b>{mine?.name}</b><span>{mine?.style ? 'Dressed for the occasion' : 'Still in travelling clothes'}</span></div>
+          <button type="button" className="nh-btn nh-btn-sm" onClick={() => { sfx.unlock(); sfx.click(); setDressing(true); }}>Change outfit</button>
         </div>
       </section>
-
+  );
+  const steamSec = (
       <section className="nh-sec">
-        <div className="nh-label">Your Steam</div>
+        <div className="nh-label">{steam ? 'Your Steam' : <>Step 2 of 2 <span className="nh-label-q">Link your Steam</span></>}</div>
         {!steam ? (
           <form className="nh-link" onSubmit={link}>
             <input className="nh-input" value={profile} onChange={(e) => setProfile(e.target.value)}
@@ -115,39 +113,77 @@ export default function Lobby({ state, me, send }: RoomProps) {
           </div>
         )}
       </section>
+  );
+
+  return (
+    <div className="nh-panel nh-wood nh-lobby">
+      <i className="nh-nail tl" /><i className="nh-nail tr" /><i className="nh-nail bl" /><i className="nh-nail br" />
+      {dressing ? (
+        <>
+          <header className="nh-head">
+            <div className="nh-kicker">Table {state.code} <span className="nh-step">Step 1 of 2</span></div>
+            <h2 className="nh-h">Who are you, stranger?</h2>
+            <div className="nh-sub">Pick your look. Everyone at the table sees it.</div>
+          </header>
+          <CharacterCreator initial={mine?.style} first={!mine?.style}
+            onSave={(style) => send({ t: 'style', style })} onDone={() => { setDressing(false); document.querySelector('.saloon-front')?.scrollTo({ top: 0 }); }} />
+        </>
+      ) : (
+        <>
+      <header className="nh-head">
+        <div className="nh-kicker">Table {state.code}</div>
+        <h2 className="nh-h">Round up the posse</h2>
+      </header>
+
+      {steam ? <>{outfitSec}{steamSec}</> : <>{steamSec}{outfitSec}</>}
+      <section className="nh-sec">
+        <div className="nh-label">Invite your crew</div>
+        <div className={`nh-invite ${canShare ? 'can-share' : ''}`}>
+          <span className="nh-invite-code" aria-label={`Table code ${state.code}`}>{state.code}</span>
+          <input className="nh-input nh-input-mono nh-invite-url" readOnly value={location.href} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link" />
+          <button type="button" className={`nh-btn nh-btn-sm nh-copy ${copied ? 'is-done' : ''}`} onClick={copy}>{copied ? 'Copied!' : 'Copy invite'}</button>
+          {canShare && <button type="button" className="nh-btn nh-btn-sm nh-share" onClick={share}>Share</button>}
+        </div>
+      </section>
+
+        </>
+      )}
 
       <section className="nh-sec">
         <div className="nh-label">The posse <span className="nh-count">{state.players.length}</span></div>
         <ul className="nh-posse">
           {state.players.map((p) => (
             <li key={p.id} className={`${p.connected ? '' : 'is-off'} ${p.id === me ? 'is-me' : ''}`}>
-              <Avatar p={p} size={32} />
+              {p.style ? <span className="nh-posse-bust"><BustPreview look={p.style} scale={1} /></span> : <Avatar p={p} size={32} />}
               <span className="nh-pname">
                 {p.name}{p.id === me && <small> (you)</small>}
                 {p.host && <span className="nh-tag">HOST</span>}
               </span>
+              <span className={`nh-dressed ${p.style ? 'on' : ''}`} title={p.style ? 'Dressed' : 'Still choosing an outfit'}>{p.style ? '✓ dressed' : '… dressing'}</span>
               <Status p={p} />
             </li>
           ))}
         </ul>
       </section>
 
-      <footer className={`nh-foot ${isHost ? 'nh-foot-sticky' : ''}`}>
-        {isHost ? (
-          <>
-            <button type="button" className="nh-btn nh-btn-big" disabled={!canStart} onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'start' }); }}>
-              Deal 'em in →
-            </button>
-            <div className="nh-hint">
-              {canStart
-                ? `${ready.length} of ${state.players.length} ready. Stragglers can still link later.`
-                : 'Somebody needs a linked, public Steam library before we deal.'}
+      {!dressing && (
+        <DockActions>
+          {isHost ? (
+            <div className="dock-act">
+              <button type="button" className="nh-btn nh-btn-big" disabled={!canStart} onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'start' }); }}>
+                Deal 'em in →
+              </button>
+              <div className="nh-hint">
+                {canStart
+                  ? `${ready.length} of ${state.players.length} ready. Stragglers can still link later.`
+                  : 'Somebody needs a linked, public Steam library before we deal.'}
+              </div>
             </div>
-          </>
-        ) : (
-          <div className="nh-waiting"><i className="nh-spin" /> Waiting on {host?.name ?? 'the host'} to deal…</div>
-        )}
-      </footer>
+          ) : (
+            <div className="nh-waiting"><i className="nh-spin" /> Waiting on {host?.name ?? 'the host'} to deal…</div>
+          )}
+        </DockActions>
+      )}
     </div>
   );
 }

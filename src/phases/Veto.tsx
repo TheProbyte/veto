@@ -73,6 +73,25 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
 
   const canShield = !!mine && !mine.shieldUsed && !!center && !center.shieldedBy;
 
+  // tin star spins in and pins on when a shield lands (not for stars already pinned when we arrived)
+  const starSeen = useRef<Set<number> | null>(null);
+  const [pinning, setPinning] = useState<Set<number>>(() => new Set());
+  const shieldKey = state.board.filter((g) => g.shieldedBy).map((g) => g.appid).join(',');
+  useEffect(() => {
+    const now = new Set(state.board.filter((g) => g.shieldedBy).map((g) => g.appid));
+    if (starSeen.current) {
+      const fresh = [...now].filter((a) => !starSeen.current!.has(a));
+      if (fresh.length) {
+        setPinning(new Set(fresh));
+        const t1 = window.setTimeout(() => (sfx as any).clink?.(), 480);
+        const t2 = window.setTimeout(() => setPinning(new Set()), 900);
+        starSeen.current = now;
+        return () => { clearTimeout(t1); clearTimeout(t2); };
+      }
+    }
+    starSeen.current = now;
+  }, [shieldKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className={`veto ${myTurn ? 'my-turn' : ''}`}>
       <div className="veto-head">
@@ -112,7 +131,9 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
                   <PixelArt appid={g.appid} name={g.name} holes={g.cracks ? 1 : 0} cracked={!!g.cracks} />
                   {g.tier === 'pitch' && <span className="gbox-pitch">PITCH</span>}
                   {!!g.cracks && <span className="gbox-more">1 more</span>}
-                  {g.shieldedBy && <TinStar size={46} className="gbox-star" />}
+                  {g.shieldedBy && (pinning.has(g.appid)
+                    ? <span className="px-star-wrap px-star-pin"><TinStar size={46} className="gbox-star" /></span>
+                    : <TinStar size={46} className="gbox-star" />)}
                 </div>
                 {d === 0 && <div className="cbox-name">{g.name}</div>}
                 {d === 0 && g.shieldedBy && <div className="cbox-shield">protected by {nameOf(g.shieldedBy)}'s tin star</div>}

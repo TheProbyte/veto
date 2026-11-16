@@ -1,6 +1,7 @@
 import { PAL, hexRgb, rnd } from './palette';
 import { bayer, circle, ditherBands, ellipse, line, makeCanvas, px } from './dither';
-import { BUST_H, BUST_W, bustLook, renderBust, shade, type BustLook } from './sprites';
+import type { Look } from '../../shared/types';
+import { BUST_H, BUST_W, bustFor, renderBust, shade, styleSig, type BustLook } from './sprites';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -303,7 +304,7 @@ function drawTable(c: Ctx, L: Layout) {
 
 /* ================= runtime scene ================= */
 
-export interface ScenePlayer { id: string; seat: number; look: number; connected: boolean }
+export interface ScenePlayer { id: string; seat: number; look: number; style?: Look; connected: boolean }
 export interface SceneData {
   players: ScenePlayer[];
   shooter?: string;
@@ -346,18 +347,24 @@ export class SceneRenderer {
     for (let i = 0; i < (opts.motes ?? 34); i++) this.motes.push({ x: rnd(i, 1, 9) * W, y: rnd(i, 2, 9) * H * 0.8, vx: (rnd(i, 3, 9) - 0.5) * 2, vy: -0.4 - rnd(i, 4, 9) * 1.2, p: rnd(i, 5, 9) * 6.28 });
   }
 
-  sprite(p: ScenePlayer, g: SeatGeom, blink: boolean, lit: boolean, rimRight: boolean) {
+  sprite(p: ScenePlayer, g: SeatGeom, blink: boolean, lit: boolean, rimRight: boolean, gun = 0) {
     const dimQ = Math.round((1.08 - 0.32 * g.depth) * 4) / 4;
-    const key = `${p.id}|${p.look}|${g.scale.toFixed(3)}|${+blink}|${+lit}|${+rimRight}|${dimQ}|${+!p.connected}`;
+    const sig = styleSig(p);
+    const key = `${p.id}|${sig}|${g.scale.toFixed(3)}|${+blink}|${+lit}|${+rimRight}|${dimQ}|${+!p.connected}|${gun}`;
     let cv = this.sprites.get(key);
     if (!cv) {
-      let look = this.looks.get(p.id + p.look);
-      if (!look) { look = bustLook(p.look, p.id); this.looks.set(p.id + p.look, look); }
-      cv = renderBust(look, { scale: g.scale, blink, lit, rimRight, dim: lit ? 0.95 : dimQ, ghost: !p.connected });
+      let look = this.looks.get(p.id + sig);
+      if (!look) { look = bustFor(p); this.looks.set(p.id + sig, look); }
+      cv = renderBust(look, { scale: g.scale, blink, lit, rimRight, dim: lit ? 0.95 : dimQ, ghost: !p.connected, gun });
       if (this.sprites.size > 96) this.sprites.clear();
       this.sprites.set(key, cv);
     }
     return cv;
+  }
+
+  /** where the shooter's revolver barrel ends, in scene pixels */
+  muzzle(g: SeatGeom) {
+    return { x: Math.round(g.x - g.w / 2 + 36 * g.scale), y: Math.round(g.top + 26 * g.scale) };
   }
 
   frame(c: Ctx, t: number, D: SceneData) {
@@ -392,8 +399,16 @@ export class SceneRenderer {
       const bob = !this.reduce && Math.sin(sec * 1.6 + ph) > 0.2 ? 1 : 0;
       const blink = ((sec + ph * 1.7) % 4.3) < 0.16;
       const lit = p.id === D.shooter;
-      const cv = this.sprite(p, g, blink, lit, g.x < lx);
-      c.drawImage(cv, Math.round(g.x - cv.width / 2), g.top + bob);
+      const isActor = !!D.shot && D.shot.actor === p.id;
+      const gun = (lit || (isActor && shotAge < 1500)) && !this.reduce ? (isActor && shotAge < 220 && D.shot!.kind !== 'ricochet' ? 2 : 1) : lit ? 1 : 0;
+      // everyone else flinches for a moment on each shot
+      let jx = 0, jy = 0;
+      if (!isActor && shotAge < 260 && !this.reduce) {
+        const k = shotAge < 90 ? 2 : 1;
+        jx = (rnd(p.seat, Math.floor(shotAge / 70), 5) > 0.5 ? 1 : -1) * k; jy = shotAge < 130 ? 1 : 0;
+      }
+      const cv = this.sprite(p, g, blink, lit, g.x < lx, gun);
+      c.drawImage(cv, Math.round(g.x - cv.width / 2) + jx, g.top + bob + jy + (gun === 2 ? 1 : 0));
     }
     c.drawImage(this.table, 0, 0);
 
@@ -416,7 +431,8 @@ export class SceneRenderer {
     const tanA = Math.tan(a);
     const flash = shotAge < 140 ? 1.6 * (1 - shotAge / 140) : 0;
     const flashAct = D.shot && flash > 0 ? geoms.find((x) => x.p.id === D.shot!.actor) : undefined;
-    const fX = flashAct ? flashAct.g.x : cx, fY = flashAct ? flashAct.g.edge - 4 : L.tableTop;
+    const fM = flashAct ? this.muzzle(flashAct.g) : null;
+    const fX = fM ? fM.x : cx, fY = fM ? fM.y : L.tableTop;
     const sp = shooterG ? { x: shooterG.g.x, y: shooterG.g.top + shooterG.g.h * 0.45, r: shooterG.g.h * 0.75 } : null;
     const lampK = D.dimAll;
     for (let y = 0; y < H; y++) {
@@ -487,7 +503,8 @@ export class SceneRenderer {
     if (D.shot && shotAge < 2200) {
       const act = geoms.find((x) => x.p.id === D.shot!.actor);
       if (act) {
-        const gx = act.g.x, gy = act.g.edge - 2;
+        const mz = this.muzzle(act.g);
+        const gx = mz.x, gy = mz.y - 1;
         if (shotAge < 130 && D.shot.kind !== 'ricochet') {
           const r = shotAge < 60 ? 7 : 5;
           for (let k = 0; k < 8; k++) { const an = k * 0.785 + 0.3; line(c, gx, gy, gx + Math.cos(an) * r * (k % 2 ? 0.6 : 1), gy + Math.sin(an) * r * (k % 2 ? 0.6 : 1), PAL.lamp1); }

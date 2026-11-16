@@ -1,14 +1,34 @@
-import { memo, useEffect, useRef, type CSSProperties } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { RoomProps } from '../props';
 import type { Roulette as R } from '../../shared/types';
 import { PixelArt, PixelSprite } from '../pixel/PixelCanvas';
 import { PAL } from '../pixel/palette';
 import { bayer, circle, ellipse } from '../pixel/dither';
-import type { DrawFn } from '../pixel/sprites';
+import { drawFlash, type DrawFn } from '../pixel/sprites';
+import { PixelCover } from '../pixel/PixelCover';
+import '../pixel/pixel.css';
 import { useNow } from '../net';
 import { sfx } from '../sfx';
 
 const TURNS = 6;
+
+/** "3 left": the carousel boxes slide away and the cylinder slides in (only when we arrive at the start of the spin). */
+function Intro({ r, skew, finalists, nameOf }: { r: R; skew: number; finalists: number[]; nameOf: (a: number) => string }) {
+  const [show] = useState(() => Date.now() + skew - r.startedAt < 600);
+  const [on, setOn] = useState(show);
+  useEffect(() => {
+    if (!show) return;
+    (sfx as any).cylinderOpen?.();
+    const t = window.setTimeout(() => setOn(false), 800);
+    return () => clearTimeout(t);
+  }, [show]);
+  if (!on) return null;
+  return (
+    <div className="px-intro-boxes" aria-hidden>
+      {finalists.slice(0, 3).map((a) => <div key={a}><PixelArt appid={a} name={nameOf(a)} /></div>)}
+    </div>
+  );
+}
 const ease = (p: number) => 1 - Math.pow(1 - p, 4);
 
 export default function Roulette({ state, skew }: RoomProps) {
@@ -19,6 +39,7 @@ export default function Roulette({ state, skew }: RoomProps) {
   return (
     <div className={`roulette n${finalists.length}`}>
       <div className="roulette-spot" />
+      <Intro r={r} skew={skew} finalists={finalists} nameOf={nameOf} />
       <div className="roulette-title">The cylinder decides</div>
       <Cylinder r={r} skew={skew} nameOf={nameOf} />
       <ul className="finalists">
@@ -41,7 +62,7 @@ const drawCylinder: DrawFn = (c, w) => {
   // flutes between chambers
   for (let k = 0; k < 6; k++) {
     const a = ((k * 60 + 30) * Math.PI) / 180;
-    for (let r = R * 0.62; r < R - 1; r += 0.5) {
+    for (let r = R * 0.86; r < R - 1; r += 0.5) {
       const x = Math.round(cx + Math.sin(a) * r), y = Math.round(cx - Math.cos(a) * r);
       c.fillStyle = PAL.metal0; c.fillRect(x - 1, y - 1, 3, 3);
       c.fillStyle = PAL.metal2; c.fillRect(x - 1, y - 1, 1, 1);
@@ -50,7 +71,7 @@ const drawCylinder: DrawFn = (c, w) => {
   // chamber sockets
   for (let k = 0; k < 6; k++) {
     const a = (k * 60 * Math.PI) / 180;
-    circle(c, Math.round(cx + Math.sin(a) * w * 0.28), Math.round(cx - Math.cos(a) * w * 0.28), Math.round(w * 0.135), PAL.metal0);
+    circle(c, Math.round(cx + Math.sin(a) * w * 0.33), Math.round(cx - Math.cos(a) * w * 0.33), Math.round(w * 0.155), PAL.metal0);
   }
   circle(c, Math.round(cx), Math.round(cx), Math.round(w * 0.09), PAL.metal0);
   circle(c, Math.round(cx), Math.round(cx), Math.round(w * 0.06), PAL.metal2);
@@ -93,8 +114,16 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
     lastPassed.current = passed;
   }, [passed]);
   const wasDone = useRef(done);
+  const [landed, setLanded] = useState(false);
   useEffect(() => {
-    if (done && !wasDone.current) sfx.cock();
+    if (done && !wasDone.current) {
+      sfx.cock();
+      (sfx as any).drawSting?.();
+      setLanded(true);
+      const t = window.setTimeout(() => setLanded(false), 600);
+      wasDone.current = done;
+      return () => clearTimeout(t);
+    }
     wasDone.current = done;
   }, [done]);
   // ratchet spin sound once at the start (not when joining mid-spin)
@@ -106,31 +135,39 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
   }, [r.startedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const winner = r.chambers[r.target];
+  const under = ((passed % 6) + 6) % 6; // chamber under the hammer right now
+  const spinning = p > 0 && !done;
   return (
-    <div className={`cyl-wrap ${done ? 'done' : ''}`}>
-      <div className="cyl-stage" aria-label="revolver cylinder">
+    <div className={`cyl-wrap px-cyl ${done ? 'done' : ''}`}>
+      <div className={`px-readout ${done ? 'locked' : spinning && passed % 2 ? 'flick' : ''}`} aria-live={done ? 'polite' : 'off'}>
+        <span className="arrow">▶</span>{nameOf(done ? winner : r.chambers[under])}
+      </div>
+      <div className="cyl-stage px-cyl-in" aria-label="revolver cylinder">
         <PixelSprite draw={drawHammer} w={16} h={16} className={`hammer ${done ? 'down' : ''}`} />
         <PixelSprite draw={drawNotch} w={7} h={4} className="cyl-notch" />
-        <Chambers chambers={r.chambers} q={q} win={done ? r.target : -1} nameOf={nameOf} />
+        {landed && <PixelSprite draw={drawFlash} w={21} h={21} className="px-hammer-flash" />}
+        <Chambers chambers={r.chambers} q={q} win={done ? r.target : -1} under={done ? -1 : under} nameOf={nameOf} />
       </div>
+      {landed && <div className="px-cyl-flash" />}
       <div className={`cyl-winner ${done ? 'show' : ''}`}>{done ? nameOf(winner) : '\u00a0'}</div>
     </div>
   );
 }
 
 /** Everything that turns with the cylinder. Memoised so the per-frame clock above only re-renders it on 6deg steps. */
-const Chambers = memo(function Chambers({ chambers, q, win, nameOf }: { chambers: number[]; q: number; win: number; nameOf: (a: number) => string }) {
+const Chambers = memo(function Chambers({ chambers, q, win, under, nameOf }: { chambers: number[]; q: number; win: number; under: number; nameOf: (a: number) => string }) {
   return (
     <div className="cyl-rot" style={{ transform: `rotate(${q}deg)` }}>
-      <PixelSprite draw={drawCylinder} w={72} h={72} className="cyl-body" />
+      <PixelSprite draw={drawCylinder} w={96} h={96} className="cyl-body" />
       {chambers.map((appid, k) => {
         const a = (k * 60 * Math.PI) / 180;
         const isWin = k === win;
-        const style = { left: `${50 + 28 * Math.sin(a)}%`, top: `${50 - 28 * Math.cos(a)}%`, transform: `translate(-50%, -50%) rotate(${-q}deg)` } as CSSProperties;
+        const style = { left: `${50 + 33 * Math.sin(a)}%`, top: `${50 - 33 * Math.cos(a)}%`, transform: `translate(-50%, -50%) rotate(${-q}deg)` } as CSSProperties;
         return (
-          <div key={k} className={`chamber ${isWin ? 'win' : ''}`} style={style} title={nameOf(appid)}>
-            <PixelArt appid={appid} name={nameOf(appid)} w={20} h={30} className="chamber-art" />
-            <PixelSprite draw={isWin ? RING_WIN : RING} w={21} h={21} className="chamber-ring" />
+          <div key={k} className={`px-chamber ${isWin ? 'win' : ''} ${k === under ? 'under' : ''}`} style={style} title={nameOf(appid)}>
+            <div className="px-chamber-art"><PixelCover appid={appid} name={nameOf(appid)} kind="square" /></div>
+            <PixelSprite draw={isWin ? RING_WIN : RING} w={25} h={25} className="px-chamber-ring" />
+            <span className="px-chamber-label">{nameOf(appid)}</span>
           </div>
         );
       })}

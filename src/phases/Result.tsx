@@ -1,13 +1,39 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RoomProps } from '../props';
 import { heroArt } from '../../shared/types';
 import { sfx } from '../sfx';
-import { PixelArt, PixelPanel } from '../pixel/PixelCanvas';
+import { PixelArt, PixelPanel, PixelSprite } from '../pixel/PixelCanvas';
+import { PAL } from '../pixel/palette';
+import type { DrawFn } from '../pixel/sprites';
+import '../pixel/pixel.css';
+
+const drawNail: DrawFn = (c) => {
+  c.fillStyle = 'rgba(42,26,16,.55)'; c.fillRect(2, 5, 5, 2);
+  c.fillStyle = PAL.metal0; c.fillRect(1, 1, 5, 5);
+  c.fillStyle = PAL.metal2; c.fillRect(1, 1, 4, 4);
+  c.fillStyle = PAL.metal3; c.fillRect(2, 2, 2, 2);
+  c.fillStyle = PAL.metal4; c.fillRect(2, 2, 1, 1);
+};
+const NAILS: [string, string][] = [['8px', '8px'], ['calc(100% - 22px)', '8px'], ['calc(50% - 7px)', '4px']];
 import { BUZZ, buzz } from '../scene/haptics';
 
 export default function Result({ state, me, send }: RoomProps) {
   const res = state.result;
   useEffect(() => { sfx.win(); buzz(BUZZ.win); }, []);
+  // the winning chamber zooms in, becomes the poster, then gets nailed up (3 hits)
+  const [nails, setNails] = useState(0);
+  const posterRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const reduce = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
+    if (reduce) { setNails(3); return; }
+    const ts = [950, 1250, 1550].map((ms, i) => window.setTimeout(() => {
+      setNails(i + 1);
+      (sfx as any).hammerNail?.();
+      const el = posterRef.current;
+      if (el) { el.classList.remove('px-poster-thunk'); void el.offsetWidth; el.classList.add('px-poster-thunk'); }
+    }, ms));
+    return () => ts.forEach(clearTimeout);
+  }, []);
   const amHost = !!state.players.find((p) => p.id === me)?.host;
   const nameOf = (id: string) => state.players.find((p) => p.id === id)?.name ?? '???';
 
@@ -40,7 +66,8 @@ export default function Result({ state, me, send }: RoomProps) {
     <div className="result">
       <div className="result-backdrop" style={{ backgroundImage: `url(${heroArt(res.appid)})` }} />
       <div className="poster-wrap">
-        <div className="poster">
+        <div className="poster px-poster-in" ref={posterRef}>
+          {NAILS.map(([l, t], i) => <PixelSprite key={i} draw={drawNail} w={7} h={7} className={`px-nail ${nails > i ? 'on' : ''}`} style={{ left: l, top: t }} />)}
           <PixelPanel kind="paper" size={4} />
           <div className="poster-wanted">WANTED</div>
           <div className="poster-sub">— TONIGHT —</div>

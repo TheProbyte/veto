@@ -1,18 +1,21 @@
-import { useMemo, useState } from 'react';
-
-const CAP = 12; // cards per tier before "Show more" (keeps the DOM light on phones)
-import { boxArt, headerArt, MAX_NOMS, type PoolGame, type Player } from '../../shared/types';
+import { useMemo, useState, type MouseEvent } from 'react';
+import { MAX_NOMS, type PoolGame, type Player } from '../../shared/types';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import { Avatar } from './Lobby';
 import Pitches from './Pitches';
+import Cover from '../scene/Cover';
+import { DockActions, launchCard, play } from '../scene/Dock';
 import './panels.css';
 
-function Art({ appid, kind }: { appid: number; kind: 'box' | 'header' }) {
-  const [stage, setStage] = useState(kind === 'box' ? 0 : 1); // 0 box, 1 header, 2 hidden
-  if (stage === 2) return <span className="nh-art-miss" />;
-  return <img className="nh-art" loading="lazy" decoding="async" alt="" src={stage === 0 ? boxArt(appid) : headerArt(appid)}
-    onError={() => setStage((s) => s + 1)} />;
+const CAP = 12; // cards per tier before "Show more" (keeps the DOM light on phones)
+
+/** nominate toggle with the thematic bits: my new pick flies onto the dock, a take-back slides off */
+export function tossOrTake(appid: number, mineNow: boolean, from: Element | null, send: RoomProps['send']) {
+  sfx.unlock();
+  if (mineNow) { if (!play('cardSlide')) sfx.whoosh(); }
+  else { launchCard(appid, from); play('swish'); }
+  send({ t: 'nominate', appid });
 }
 
 function hrs(h: number) {
@@ -52,12 +55,10 @@ export default function Nominate({ state, me, send }: RoomProps) {
     );
   };
 
-  const toggle = (g: PoolGame) => {
+  const toggle = (g: PoolGame, e: MouseEvent<HTMLElement>) => {
     const mineNow = (nomBy.get(g.appid) || []).includes(me);
     if (!mineNow && myCount >= MAX_NOMS) { sfx.click(); return; }
-    sfx.unlock();
-    if (mineNow) sfx.whoosh(); else sfx.stamp();
-    send({ t: 'nominate', appid: g.appid });
+    tossOrTake(g.appid, mineNow, e.currentTarget.querySelector('.nh-game-art') ?? e.currentTarget, send);
   };
 
   const card = (g: PoolGame) => {
@@ -67,8 +68,8 @@ export default function Nominate({ state, me, send }: RoomProps) {
     const full = !mine && myCount >= MAX_NOMS;
     return (
       <button key={g.appid} type="button" className={`nh-game ${mine ? 'is-mine' : ''} ${by.length ? 'is-nom' : ''} ${full ? 'is-full' : ''}`}
-        onClick={() => toggle(g)} aria-pressed={mine} title={g.name}>
-        <div className="nh-game-art"><Art appid={g.appid} kind="header" />
+        onClick={(e) => toggle(g, e)} aria-pressed={mine} title={g.name}>
+        <div className="nh-game-art"><Cover appid={g.appid} name={g.name} kind="header" />
           {mine && <span className="nh-ribbon">YOURS</span>}
           {g.discount ? <span className="nh-disc">-{g.discount}%</span> : null}
         </div>
@@ -152,35 +153,18 @@ export default function Nominate({ state, me, send }: RoomProps) {
 
       <Pitches state={state} me={me} send={send} />
 
-      <section className="nh-board">
-        <div className="nh-label">On the table <span className="nh-count">{state.board.length}</span></div>
-        {state.board.length === 0 ? <div className="nh-board-empty">Felt's bare. Toss something in.</div> : (
-          <div className="nh-strip">
-            {state.board.map((b) => (
-              <div key={b.appid} className={`nh-box ${b.tier === 'pitch' ? 'is-pitch' : ''}`} title={b.name}>
-                <div className="nh-box-art"><Art appid={b.appid} kind="box" /><span className="nh-box-name">{b.name}</span>
-                  {b.tier === 'pitch' && <span className="nh-ptag">PITCH</span>}</div>
-                <div className="nh-box-by">
-                  {b.by.length ? b.by.map((id) => <Avatar key={id} p={byId.get(id)} size={16} />) : <small>house</small>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <footer className="nh-foot nh-foot-sticky nh-nom-foot">
-        <div className="nh-foot-row">
+      <DockActions>
+        <div className="dock-act dock-act-row">
           <span className={`nh-mycount ${myCount >= MAX_NOMS ? 'is-full' : ''}`} aria-label={`Your picks: ${myCount} of ${MAX_NOMS}`}>
             Your picks <b>{myCount}/{MAX_NOMS}</b>
           </span>
           {isHost ? (
             <button type="button" className="nh-btn nh-btn-big nh-btn-red" disabled={state.poolLoading && state.board.length === 0}
+              title="Empty spots get dealt by the house (top shared games)."
               onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'beginVeto' }); }}>To the guns →</button>
           ) : <div className="nh-waiting"><i className="nh-spin" /> Waiting on the host…</div>}
         </div>
-        {isHost && <div className="nh-hint">Empty spots get dealt by the house (top shared games).</div>}
-      </footer>
+      </DockActions>
     </div>
   );
 }
