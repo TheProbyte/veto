@@ -1,13 +1,13 @@
 import { TURN_MS } from '../../shared/types';
-import { useCallback, useEffect, useRef, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { PixelArt, PixelSprite } from '../pixel/PixelCanvas';
 import { crosshairDraw } from '../pixel/sprites';
 import { PAL } from '../pixel/palette';
 import { bayer } from '../pixel/dither';
 import type { RoomProps } from '../props';
-import { useNow } from '../net';
 import { sfx } from '../sfx';
 import TinStar from '../scene/TinStar';
+import { BUZZ, buzz } from '../scene/haptics';
 
 export default function Veto({ state, me, send, skew }: RoomProps) {
   const alive = state.board.filter((g) => g.alive);
@@ -22,7 +22,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
   const mine = state.players.find((p) => p.id === me);
   const nameOf = (id?: string) => state.players.find((p) => p.id === id)?.name ?? '???';
 
-  useEffect(() => { if (myTurn) sfx.cock(); }, [myTurn, state.turnIdx]);
+  useEffect(() => { if (myTurn) { sfx.cock(); buzz(BUZZ.myTurn); } }, [myTurn, state.turnIdx]);
 
   const aimAt = useCallback((delta: number) => {
     if (!myTurn || n < 2) return;
@@ -51,16 +51,25 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // swipe
-  const sx = useRef<number | null>(null);
+  // swipe (touch, pen or mouse): ~30px horizontal flick aims; any real drag cancels the tap-to-fire click
+  const drag = useRef<{ x: number; y: number; id: number } | null>(null);
   const swiped = useRef(false);
-  const onDown = (e: React.PointerEvent) => { sx.current = e.clientX; swiped.current = false; };
-  const onUp = (e: React.PointerEvent) => {
-    if (sx.current == null) return;
-    const dx = e.clientX - sx.current;
-    sx.current = null;
-    if (Math.abs(dx) > 40) { swiped.current = true; aimAt(dx < 0 ? 1 : -1); }
+  const onDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    drag.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    swiped.current = false;
   };
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) swiped.current = true;
+    if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+      drag.current = null;
+      aimAt(dx < 0 ? 1 : -1);
+    }
+  };
+  const onEnd = (e: React.PointerEvent) => { if (drag.current?.id === e.pointerId) drag.current = null; };
 
   const canShield = !!mine && !mine.shieldUsed && !!center && !center.shieldedBy;
 
@@ -76,7 +85,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
         {state.turnDeadline > 0 && <Fuse deadline={state.turnDeadline} skew={skew} mine={myTurn} />}
       </div>
 
-      <div className="carousel" onPointerDown={onDown} onPointerUp={onUp}>
+      <div className="carousel" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onEnd} onPointerCancel={onEnd}>
         {alive.map((g, i) => {
           let d = i - ci;
           if (n > 2) { d = ((d % n) + n) % n; if (d > n / 2) d -= n; }
@@ -94,7 +103,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
               className={`cbox ${d === 0 ? 'center' : ''}`}
               style={style}
               onClick={() => {
-                if (swiped.current) return;
+                if (swiped.current) { swiped.current = false; return; }
                 if (d === 0) fire(); else if (myTurn) { sfx.whoosh(); send({ t: 'aim', appid: g.appid }); }
               }}
             >
@@ -116,25 +125,28 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
         {n === 0 && <div className="veto-empty">Smoke clears…</div>}
       </div>
 
-      <div className="veto-controls">
-        {myTurn && (
-          <>
-            <button className="btn-arrow px-btn" onPointerEnter={() => sfx.hover()} onClick={() => aimAt(-1)} aria-label="Aim left">◀</button>
-            <button className="btn-fire px-btn" onPointerEnter={() => sfx.hover()} onClick={fire}>FIRE</button>
-            <button className="btn-arrow px-btn" onPointerEnter={() => sfx.hover()} onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
-          </>
-        )}
-        {canShield && (
-          <button className="btn-shield px-btn" onClick={() => send({ t: 'shield', appid: center.appid })} title="One per player. A shot at this game will ricochet.">
-            <TinStar size={20} /> Pin tin star on {center.name}
-          </button>
-        )}
-      </div>
+      {(myTurn || canShield) && (
+        <div className={`veto-controls ${myTurn ? '' : 'idle'}`}>
+          <button className="btn-arrow turn-btn px-btn" disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(-1)} aria-label="Aim left">◀</button>
+          <button className="btn-fire turn-btn px-btn" disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={fire}>{myTurn ? 'FIRE' : 'WAIT'}</button>
+          <button className="btn-arrow turn-btn px-btn" disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
+          {canShield && (
+            <button
+              className="btn-shield px-btn"
+              onClick={() => send({ t: 'shield', appid: center.appid })}
+              title="One per player. A shot at this game will ricochet."
+              aria-label={`Pin tin star on ${center.name}`}
+            >
+              <TinStar size={20} /><span className="lbl-long">Pin tin star on {center.name}</span><span className="lbl-short">Star</span>
+            </button>
+          )}
+        </div>
+      )}
       {myTurn && <div className="veto-hint">← → to aim · Space to fire · swipe on mobile</div>}
 
       {dead.length > 0 && (
         <div className="graveyard">
-          <div className="graveyard-label">Boot Hill</div>
+          <div className="graveyard-label">Boot Hill <small>{dead.length}</small></div>
           <div className="graveyard-row">
             {dead.map((g, i) => (
               <div className="grave" key={g.appid} style={{ '--r': `${((i * 47) % 14) - 7}deg` } as CSSProperties}>
@@ -158,8 +170,18 @@ function Crosshair({ hot }: { hot: boolean }) {
 
 const FW = 96, FH = 12;
 
+/** ~14 renders/s is plenty for the fuse sparkle and seconds (a per-rAF clock would re-render 60x/s). */
+function useTick(skew: number, ms = 70) {
+  const [now, setNow] = useState(() => Date.now() + skew);
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now() + skew), ms);
+    return () => clearInterval(id);
+  }, [skew, ms]);
+  return now;
+}
+
 function Fuse({ deadline, skew, mine }: { deadline: number; skew: number; mine: boolean }) {
-  const now = useNow(skew);
+  const now = useTick(skew);
   const rem = Math.min(TURN_MS, Math.max(0, deadline - now));
   const secs = Math.ceil(rem / 1000);
   const frantic = rem > 0 && rem < 10_000;

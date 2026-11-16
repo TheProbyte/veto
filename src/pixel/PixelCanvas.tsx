@@ -24,8 +24,18 @@ export function usePixelLayout(): Layout {
 /* ================= main scene canvas ================= */
 
 const FPS = 13;
+const FPS_LOW = 10;
 
-/** One canvas, its own rAF loop at ~13fps. Scene data is read from a ref, so React never re-renders per frame. */
+/** Narrow or weak devices get a slower loop and fewer dust motes. Evaluated once per mount. */
+export function motionProfile() {
+  const mq = (q: string) => { try { return !!window.matchMedia?.(q).matches; } catch { return false; } };
+  const reduce = mq('(prefers-reduced-motion: reduce)');
+  const cores = navigator.hardwareConcurrency || 8;
+  const low = window.innerWidth < 600 || cores <= 4;
+  return { reduce, low, fps: reduce ? 4 : low ? FPS_LOW : FPS, motes: reduce ? 6 : low ? 17 : 34 };
+}
+
+/** One canvas, its own rAF loop (~10-13fps). Scene data is read from a ref, so React never re-renders per frame. Pauses while the tab is hidden. */
 export function PixelScene({ layout, data }: { layout: Layout; data: SceneData }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const dataRef = useRef(data);
@@ -37,20 +47,24 @@ export function PixelScene({ layout, data }: { layout: Layout; data: SceneData }
     const c = cv.getContext('2d', { willReadFrequently: true });
     if (!c) return;
     c.imageSmoothingEnabled = false;
+    const prof = motionProfile();
     let r: SceneRenderer | null = null;
-    try { r = new SceneRenderer(layout); } catch (e) { console.error(e); return; }
+    try { r = new SceneRenderer(layout, { motes: prof.motes, reduce: prof.reduce }); } catch (e) { console.error(e); return; }
     let raf = 0, last = 0, dead = false;
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    const step = 1000 / (reduce ? 4 : FPS);
+    const step = 1000 / prof.fps;
     const tick = (t: number) => {
-      if (dead) return;
+      raf = 0;
+      if (dead || document.hidden) return;
       raf = requestAnimationFrame(tick);
       if (t - last < step) return;
       last = t;
       try { r!.frame(c, t, dataRef.current); } catch (e) { console.error(e); dead = true; }
     };
-    raf = requestAnimationFrame(tick);
-    return () => { dead = true; cancelAnimationFrame(raf); };
+    const start = () => { if (!raf && !dead && !document.hidden) { last = 0; raf = requestAnimationFrame(tick); } };
+    const onVis = () => { if (document.hidden) { cancelAnimationFrame(raf); raf = 0; } else start(); };
+    document.addEventListener('visibilitychange', onVis);
+    start();
+    return () => { dead = true; cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis); };
   }, [layout]);
   const style: CSSProperties = { width: layout.W * layout.P, height: layout.H * layout.P };
   return <canvas ref={ref} className="px-scene" style={style} aria-hidden />;

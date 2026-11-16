@@ -14,30 +14,47 @@ export interface Layout {
   tableTop: number; rx: number; ry: number; cy: number;
   s: number; // sprite scale
   lampLen: number;
+  portrait: boolean; // phone-ish portrait: big busts in rows instead of an arc
 }
+
+/** Biggest internal canvas we light per frame; P grows past this so huge screens stay cheap. */
+const MAX_PIXELS = 150_000;
 
 export function computeLayout(vw: number, vh: number): Layout {
   vw = Math.max(200, vw); vh = Math.max(200, vh);
-  const P = Math.max(2, Math.min(6, Math.round(Math.min(vw / 300, vh / 170))));
+  let P = Math.max(2, Math.min(6, Math.round(Math.min(vw / 300, vh / 170))));
+  while (Math.ceil(vw / P) * Math.ceil(vh / P) > MAX_PIXELS && P < 12) P++;
   const W = Math.ceil(vw / P), H = Math.ceil(vh / P);
-  const s = Math.max(W < H ? 0.78 : 0.62, Math.min(1, W / 320));
+  const portrait = W < H;
+  const s = Math.max(portrait ? 0.78 : 0.62, Math.min(1, W / 320));
   const tableTop = Math.round(Math.min(H * 0.3, 34 + 60 * s));
   const rx = Math.round(W * 0.75);
   const ry = Math.round(Math.min(H * 0.5, W * 0.3));
-  return { vw, vh, P, W, H, cx: Math.floor(W / 2), tableTop, rx, ry, cy: tableTop + ry, s, lampLen: Math.max(8, Math.round(tableTop * 0.24)) };
+  // portrait: busts are tall, so the lamp hangs short to stay clear of their hats
+  const lampLen = portrait ? Math.max(6, Math.round(tableTop * 0.1)) : Math.max(8, Math.round(tableTop * 0.24));
+  return { vw, vh, P, W, H, cx: Math.floor(W / 2), tableTop, rx, ry, cy: tableTop + ry, s, lampLen, portrait };
 }
 
 /** visual slot for a seat: fill from the middle of the arc outward */
 const SLOT = [3, 4, 2, 5, 1, 6, 0, 7];
 
-export interface SeatGeom { x: number; top: number; base: number; edge: number; w: number; h: number; depth: number; scale: number }
+export interface SeatGeom { x: number; top: number; base: number; edge: number; w: number; h: number; depth: number; scale: number; back?: boolean; slot?: number }
 
 export function edgeY(L: Layout, x: number) {
   const k = (x - L.cx) / L.rx;
   return L.cy - L.ry * Math.sqrt(Math.max(0, 1 - k * k));
 }
 
-export function seatGeom(L: Layout, seat: number): SeatGeom {
+/**
+ * Where a seat's bust goes. `seats` is every occupied seat (the same list must be passed by the
+ * canvas and the DOM nameplates). Portrait screens use rows of big busts: the first four to sit
+ * get the front row, anyone else peeks from a slightly higher, smaller back row.
+ */
+export function seatGeom(L: Layout, seat: number, seats?: readonly number[]): SeatGeom {
+  if (L.portrait && seats && seats.length) {
+    const all = [...new Set(seats)].sort((a, b) => a - b);
+    if (all.includes(seat)) return rowSeat(L, seat, all);
+  }
   const k = SLOT[Math.max(0, Math.min(7, seat | 0))];
   const th = Math.PI * (0.93 - (0.86 * k) / 7);
   const x = Math.round(L.cx + L.W * (L.W < L.H ? 0.4 : 0.45) * Math.cos(th));
@@ -47,6 +64,34 @@ export function seatGeom(L: Layout, seat: number): SeatGeom {
   const edge = Math.round(edgeY(L, x));
   const base = edge + Math.round(h * 0.3);
   return { x, top: base - h, base, edge, w, h, depth, scale };
+}
+
+const slotOf = (seat: number) => SLOT[Math.max(0, Math.min(7, seat | 0))];
+
+function rowSeat(L: Layout, seat: number, all: number[]): SeatGeom {
+  const byArc = (a: number, b: number) => slotOf(a) - slotOf(b);
+  const front = all.slice(0, 4).sort(byArc);
+  const backRow = all.slice(4).sort(byArc);
+  const k = front.length;
+  const sp = (L.W * 0.94) / k; // slot width per front bust
+  const fs = Math.min(1.4, (sp * 1.12) / BUST_W);
+  const isBack = !front.includes(seat);
+  const row = isBack ? backRow : front;
+  const i = row.indexOf(seat), kb = row.length;
+  const off = (i - (kb - 1) / 2) * (isBack && kb === 4 ? sp * 0.92 : sp);
+  const x = Math.round(L.cx + off);
+  const edge = Math.round(edgeY(L, x));
+  if (!isBack) {
+    const w = Math.round(BUST_W * fs), h = Math.round(BUST_H * fs);
+    const base = edge + Math.round(h * 0.3);
+    // outer seats sit a touch nearer, so they overlap inward neighbours
+    const depth = 0.45 - 0.15 * Math.min(1, Math.abs(off) / (L.W * 0.5));
+    return { x, top: base - h, base, edge, w, h, depth, scale: fs, slot: sp };
+  }
+  const scale = fs * 0.84;
+  const w = Math.round(BUST_W * scale), h = Math.round(BUST_H * scale);
+  const base = edge + 2; // table edge still hides the cut-off bottom between front busts
+  return { x, top: base - h, base, edge, w, h, depth: 0.92, scale, back: true, slot: sp };
 }
 
 /* ================= static layers ================= */
@@ -276,9 +321,11 @@ export class SceneRenderer {
   looks = new Map<string, BustLook>();
   lampA = 0;
   motes: { x: number; y: number; vx: number; vy: number; p: number }[] = [];
+  reduce: boolean;
 
-  constructor(L: Layout) {
+  constructor(L: Layout, opts: { motes?: number; reduce?: boolean } = {}) {
     this.L = L;
+    this.reduce = !!opts.reduce;
     const { W, H } = L;
     this.emis = new Uint8Array(W * H);
     this.cool = new Float32Array(W * H);
@@ -294,7 +341,7 @@ export class SceneRenderer {
       const d = Math.sqrt(dx * dx + dy * dy);
       this.vig[y * W + x] = Math.max(0.08, 1 - Math.max(0, d - 0.45) * 1.5);
     }
-    for (let i = 0; i < 34; i++) this.motes.push({ x: rnd(i, 1, 9) * W, y: rnd(i, 2, 9) * H * 0.8, vx: (rnd(i, 3, 9) - 0.5) * 2, vy: -0.4 - rnd(i, 4, 9) * 1.2, p: rnd(i, 5, 9) * 6.28 });
+    for (let i = 0; i < (opts.motes ?? 34); i++) this.motes.push({ x: rnd(i, 1, 9) * W, y: rnd(i, 2, 9) * H * 0.8, vx: (rnd(i, 3, 9) - 0.5) * 2, vy: -0.4 - rnd(i, 4, 9) * 1.2, p: rnd(i, 5, 9) * 6.28 });
   }
 
   sprite(p: ScenePlayer, g: SeatGeom, blink: boolean, lit: boolean, rimRight: boolean) {
@@ -318,7 +365,7 @@ export class SceneRenderer {
     const shotAge = D.shot ? t - D.shot.at : 1e9;
     // integer screen shake
     let ox = 0, oy = 0;
-    if (shotAge < 420) {
+    if (shotAge < 420 && !this.reduce) {
       const amp = D.shot!.kind === 'ricochet' ? 1 : shotAge < 160 ? 3 : 2;
       ox = Math.round((rnd(Math.floor(t / 60), 1) - 0.5) * 2 * amp);
       oy = Math.round((rnd(Math.floor(t / 60), 2) - 0.5) * 2 * amp);
@@ -327,19 +374,20 @@ export class SceneRenderer {
     c.fillStyle = PAL.ink; c.fillRect(-4, -4, W + 8, H + 8);
     c.drawImage(this.bg, 0, 0);
 
-    const geoms = D.players.map((p) => ({ p, g: seatGeom(L, p.seat) })).sort((a, b) => b.g.depth - a.g.depth);
+    const seats = D.players.map((p) => p.seat);
+    const geoms = D.players.map((p) => ({ p, g: seatGeom(L, p.seat, seats) })).sort((a, b) => b.g.depth - a.g.depth);
     const shooterG = geoms.find((x) => x.p.id === D.shooter);
 
     // lamp swing (pendulum), biased toward the shooter
     const target = shooterG ? Math.max(-0.35, Math.min(0.35, Math.atan2(shooterG.g.x - cx, L.tableTop * 1.6))) : 0;
-    this.lampA += (target - this.lampA) * 0.08;
-    const a = this.lampA + Math.sin(sec * 1.1) * 0.05 + Math.sin(sec * 2.7) * 0.012;
+    this.lampA += (target - this.lampA) * (this.reduce ? 1 : 0.08);
+    const a = this.reduce ? this.lampA : this.lampA + Math.sin(sec * 1.1) * 0.05 + Math.sin(sec * 2.7) * 0.012;
     const lx = Math.round(cx + Math.sin(a) * L.lampLen), ly = Math.round(Math.cos(a) * L.lampLen);
 
     // players
     for (const { p, g } of geoms) {
       const ph = (p.id.charCodeAt(0) || 0) * 0.37 + p.seat;
-      const bob = Math.sin(sec * 1.6 + ph) > 0.2 ? 1 : 0;
+      const bob = !this.reduce && Math.sin(sec * 1.6 + ph) > 0.2 ? 1 : 0;
       const blink = ((sec + ph * 1.7) % 4.3) < 0.16;
       const lit = p.id === D.shooter;
       const cv = this.sprite(p, g, blink, lit, g.x < lx);
@@ -360,7 +408,7 @@ export class SceneRenderer {
     // ---- lighting pass
     const img = c.getImageData(0, 0, W, H);
     const d = img.data;
-    const flick = 0.9 + 0.1 * Math.sin(sec * 9.3) * Math.sin(sec * 3.1 + 1) + (rnd(Math.floor(t / 80), 7) > 0.93 ? -0.18 : 0);
+    const flick = this.reduce ? 0.95 : 0.9 + 0.1 * Math.sin(sec * 9.3) * Math.sin(sec * 3.1 + 1) + (rnd(Math.floor(t / 80), 7) > 0.93 ? -0.18 : 0);
     const amb = (D.shooter ? 0.42 : 0.52) * D.dimAll;
     const R = W * 0.55;
     const tanA = Math.tan(a);

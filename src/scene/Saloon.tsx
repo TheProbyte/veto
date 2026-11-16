@@ -4,6 +4,7 @@ import type { Player, ShotEvent } from '../../shared/types';
 import { sfx } from '../sfx';
 import TinStar from './TinStar';
 import ShotFX from './ShotFX';
+import { BUZZ, buzz, isPhone, reducedMotion } from './haptics';
 import { PixelScene, usePixelLayout } from '../pixel/PixelCanvas';
 import { seatGeom, type Layout, type SceneData } from '../pixel/scene';
 
@@ -41,16 +42,23 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
     setFx(s);
     const timers: number[] = [];
     const P = layout.P;
+    // phones get a shorter FX (CSS uses --fxd too) and no shake of the scrolling overlay:
+    // a transform there would re-anchor the fixed action bar mid-animation.
+    const phone = isPhone();
+    const dur = phone ? 1600 : 2700;
+    const shake = !phone && !reducedMotion();
     const stepKf = (pts: [number, number][]): Keyframe[] => pts.map(([x, y]) => ({ transform: `translate(${x * P}px, ${y * P}px)`, easing: 'steps(1, end)' }));
     if (s.kind === 'ricochet') {
       sfx.ricochet();
-      frontRef.current?.animate(stepKf([[0, 0], [-1, 0], [1, 0], [-1, 0], [0, 0]]), { duration: 260 });
+      buzz(BUZZ.ricochet);
+      if (shake) frontRef.current?.animate(stepKf([[0, 0], [-1, 0], [1, 0], [-1, 0], [0, 0]]), { duration: 260 });
     } else {
       sfx.shot();
-      frontRef.current?.animate(stepKf([[0, 0], [-3, 2], [3, -2], [-2, 1], [2, -1], [-1, 0], [0, 0]]), { duration: 440 });
-      if (s.kind !== 'crack') timers.push(window.setTimeout(() => sfx.stamp(), 680));
+      buzz(s.kind === 'crack' ? BUZZ.crack : BUZZ.hit);
+      if (shake) frontRef.current?.animate(stepKf([[0, 0], [-3, 2], [3, -2], [-2, 1], [2, -1], [-1, 0], [0, 0]]), { duration: 440 });
+      if (s.kind !== 'crack') timers.push(window.setTimeout(() => sfx.stamp(), Math.round(dur * 0.252)));
     }
-    timers.push(window.setTimeout(() => setFx((f) => (f && f.id === s.id ? null : f)), 2700));
+    timers.push(window.setTimeout(() => setFx((f) => (f && f.id === s.id ? null : f)), dur));
     return () => timers.forEach(clearTimeout);
   }, [state.lastShot?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -65,7 +73,8 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
     dimAll: state.phase === 'roulette' ? 0.45 : state.phase === 'result' ? 0.6 : 1,
   }), [state.players, shooter, state.phase, fx]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const stageTop = layout.tableTop * layout.P + 44;
+  const stageTop = layout.tableTop * layout.P + (layout.portrait ? 30 : 44);
+  const seats = useMemo(() => state.players.map((p) => p.seat), [state.players]);
 
   return (
     <div className={`saloon phase-${state.phase} ${shooter ? 'has-shooter' : ''}`} style={{ '--P': `${layout.P}px`, '--stage-top': `${stageTop}px` } as CSSProperties}>
@@ -73,7 +82,7 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
         <PixelScene layout={layout} data={data} />
         <div className="seats">
           {state.players.map((p) => (
-            <Seat key={p.id} p={p} me={me} L={layout} shooter={shooter} order={veto ? state.turnOrder.indexOf(p.id) : -1} turnIdx={state.turnIdx} n={state.turnOrder.length} />
+            <Seat key={p.id} p={p} me={me} L={layout} seats={seats} shooter={shooter} order={veto ? state.turnOrder.indexOf(p.id) : -1} turnIdx={state.turnIdx} n={state.turnOrder.length} />
           ))}
         </div>
       </div>
@@ -89,8 +98,8 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
   );
 }
 
-function Seat({ p, me, L, shooter, order, turnIdx, n }: { p: Player; me: string; L: Layout; shooter?: string; order: number; turnIdx: number; n: number }) {
-  const g = seatGeom(L, p.seat);
+function Seat({ p, me, L, seats, shooter, order, turnIdx, n }: { p: Player; me: string; L: Layout; seats: number[]; shooter?: string; order: number; turnIdx: number; n: number }) {
+  const g = seatGeom(L, p.seat, seats);
   const lit = shooter === p.id;
   const dark = !!shooter && !lit;
   const rel = order >= 0 && n > 0 ? (order - turnIdx + n) % n : -1;
@@ -101,14 +110,15 @@ function Seat({ p, me, L, shooter, order, turnIdx, n }: { p: Player; me: string;
     width: g.w * P,
     height: (g.edge - g.top) * P,
     zIndex: Math.round((1 - g.depth) * 10) + (lit ? 20 : 0),
+    ...(g.slot ? { '--slot': `${Math.floor(g.slot * P) - 6}px` } : {}),
   } as CSSProperties;
   return (
-    <div className={`seat ${lit ? 'lit' : ''} ${dark ? 'dark' : ''} ${p.connected ? '' : 'ghost'} ${p.id === me ? 'me' : ''}`} style={style}>
+    <div className={`seat ${lit ? 'lit' : ''} ${dark ? 'dark' : ''} ${p.connected ? '' : 'ghost'} ${p.id === me ? 'me' : ''} ${g.back ? 'back' : ''} ${g.slot ? 'row' : ''}`} style={style}>
       {p.steam?.avatar && <img className="seat-avatar" src={p.steam.avatar} alt="" draggable={false} />}
       <div className="seat-plate">
         {!p.shieldUsed && <TinStar size={12} />}
-        <span className="seat-name">{p.name}{p.id === me ? ' (you)' : ''}</span>
-        {p.host && <span className="seat-host">HOST</span>}
+        <span className="seat-name">{p.name}{p.id === me && <span className="seat-you"> (you)</span>}</span>
+        {p.host && <span className="seat-host" title="Host">HOST</span>}
       </div>
       {rel >= 0 && <div className={`seat-order ${rel === 0 ? 'now' : rel === 1 ? 'next' : ''}`}>{rel === 0 ? 'SHOOTING' : rel === 1 ? 'NEXT' : `#${rel + 1}`}</div>}
       {!p.connected && <div className="seat-away">stepped out</div>}

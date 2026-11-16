@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from 'react';
+import { memo, useEffect, useRef, type CSSProperties } from 'react';
 import type { RoomProps } from '../props';
 import type { Roulette as R } from '../../shared/types';
 import { PixelArt, PixelSprite } from '../pixel/PixelCanvas';
@@ -17,7 +17,7 @@ export default function Roulette({ state, skew }: RoomProps) {
   if (!r) return <div className="roulette"><div className="roulette-title">Loading the cylinder…</div></div>;
   const finalists = Array.from(new Set(r.chambers));
   return (
-    <div className="roulette">
+    <div className={`roulette n${finalists.length}`}>
       <div className="roulette-spot" />
       <div className="roulette-title">The cylinder decides</div>
       <Cylinder r={r} skew={skew} nameOf={nameOf} />
@@ -111,22 +111,29 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
       <div className="cyl-stage" aria-label="revolver cylinder">
         <PixelSprite draw={drawHammer} w={16} h={16} className={`hammer ${done ? 'down' : ''}`} />
         <PixelSprite draw={drawNotch} w={7} h={4} className="cyl-notch" />
-        <div className="cyl-rot" style={{ transform: `rotate(${q}deg)` }}>
-          <PixelSprite draw={drawCylinder} w={72} h={72} className="cyl-body" />
-          {r.chambers.map((appid, k) => {
-            const a = (k * 60 * Math.PI) / 180;
-            const win = done && k === r.target;
-            const style = { left: `${50 + 28 * Math.sin(a)}%`, top: `${50 - 28 * Math.cos(a)}%`, transform: `translate(-50%, -50%) rotate(${-q}deg)` } as CSSProperties;
-            return (
-              <div key={k} className={`chamber ${win ? 'win' : ''}`} style={style} title={nameOf(appid)}>
-                <PixelArt appid={appid} name={nameOf(appid)} w={20} h={30} className="chamber-art" />
-                <PixelSprite draw={win ? RING_WIN : RING} w={21} h={21} className="chamber-ring" />
-              </div>
-            );
-          })}
-        </div>
+        <Chambers chambers={r.chambers} q={q} win={done ? r.target : -1} nameOf={nameOf} />
       </div>
       <div className={`cyl-winner ${done ? 'show' : ''}`}>{done ? nameOf(winner) : '\u00a0'}</div>
     </div>
   );
 }
+
+/** Everything that turns with the cylinder. Memoised so the per-frame clock above only re-renders it on 6deg steps. */
+const Chambers = memo(function Chambers({ chambers, q, win, nameOf }: { chambers: number[]; q: number; win: number; nameOf: (a: number) => string }) {
+  return (
+    <div className="cyl-rot" style={{ transform: `rotate(${q}deg)` }}>
+      <PixelSprite draw={drawCylinder} w={72} h={72} className="cyl-body" />
+      {chambers.map((appid, k) => {
+        const a = (k * 60 * Math.PI) / 180;
+        const isWin = k === win;
+        const style = { left: `${50 + 28 * Math.sin(a)}%`, top: `${50 - 28 * Math.cos(a)}%`, transform: `translate(-50%, -50%) rotate(${-q}deg)` } as CSSProperties;
+        return (
+          <div key={k} className={`chamber ${isWin ? 'win' : ''}`} style={style} title={nameOf(appid)}>
+            <PixelArt appid={appid} name={nameOf(appid)} w={20} h={30} className="chamber-art" />
+            <PixelSprite draw={isWin ? RING_WIN : RING} w={21} h={21} className="chamber-ring" />
+          </div>
+        );
+      })}
+    </div>
+  );
+});

@@ -3,10 +3,11 @@ import type { RoomProps } from '../props';
 import { heroArt } from '../../shared/types';
 import { sfx } from '../sfx';
 import { PixelArt, PixelPanel } from '../pixel/PixelCanvas';
+import { BUZZ, buzz } from '../scene/haptics';
 
 export default function Result({ state, me, send }: RoomProps) {
   const res = state.result;
-  useEffect(() => { sfx.win(); }, []);
+  useEffect(() => { sfx.win(); buzz(BUZZ.win); }, []);
   const amHost = !!state.players.find((p) => p.id === me)?.host;
   const nameOf = (id: string) => state.players.find((p) => p.id === id)?.name ?? '???';
 
