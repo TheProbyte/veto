@@ -14,7 +14,6 @@ import Narrator from './Narrator';
 import { playVoice } from '../voice';
 import EmoteBar from './EmoteBar';
 import ContextMenu from './ContextMenu';
-import { useDeskChat } from './ChatPanel';
 import { setSceneScale, textUnit } from '../ui/scale';
 import '../ui/cursors';
 import PixelIcon, { hasPixelIcon } from '../ui/PixelIcon';
@@ -299,10 +298,9 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   const stageTop = layout.tableTop * layout.P + (layout.portrait ? 30 : 44);
   const seats = useMemo(() => state.players.map((p) => p.seat), [state.players]);
   const table = phase === 'lobby' || phase === 'nominate';
-  const chat = useDeskChat(state.phase);
 
   return (
-    <div className={`saloon phase-${phase} ${shooter ? 'has-shooter' : ''} ${table ? 'has-dock' : ''} ${split ? 'is-split' : ''} ${chat.desk ? (chat.open ? 'has-chat' : 'has-chat-tab') : ''}`} style={{ '--P': `${layout.P}px`, '--stage-top': `${stageTop}px` } as CSSProperties}>
+    <div className={`saloon phase-${phase} ${shooter ? 'has-shooter' : ''} ${table ? 'has-dock' : ''} ${split ? 'is-split' : ''}`} style={{ '--P': `${layout.P}px`, '--stage-top': `${stageTop}px` } as CSSProperties}>
       <div className="scene">
         <PixelScene layout={layout} data={data} api={sceneApi} />
         <div className={`seats ${layout.portrait && state.players.length > 4 ? 'has-back' : ''}`}>
@@ -398,7 +396,6 @@ function Seat({ p, me, L, seats, shooter, order, turnIdx, n, fresh, pop }: { p: 
   } as CSSProperties;
   return (
     <div className={`seat ${lit ? 'lit' : ''} ${dark ? 'dark' : ''} ${p.connected ? '' : 'ghost'} ${p.id === me ? 'me' : ''} ${g.back ? 'back' : ''} ${g.slot ? 'row' : ''} ${fresh ? 'fresh' : ''}`} style={style}>
-      {p.steam?.avatar && <img className="seat-avatar" src={p.steam.avatar} alt="" draggable={false} />}
       <div className="seat-plate">
         {!p.shieldUsed && <TinStar size={textUnit(P) * 6} />}
         {p.host && <PixelIcon name="host" className="seat-host" title="Host" />}

@@ -589,8 +589,6 @@
   margin-top: 40px; height: 164px; pointer-events: none;
 }
 .vt-gunbar > * { pointer-events: auto; }
-.vt-arrow { width: 64px; height: 64px; padding: 0; display: grid; place-items: center; font-size: 22px; margin-bottom: 44px; }
-.vt-gunbar.idle .vt-arrow { opacity: .35; }
 .vt-hint {
   position: absolute; left: calc(50% + 100px); bottom: 12px; white-space: nowrap; pointer-events: none;
   font-family: var(--px-sm); font-size: calc(var(--pt) * 8); letter-spacing: .06em; color: var(--parch2); opacity: .7; text-shadow: var(--pt) var(--pt) 0 var(--ink);
@@ -642,11 +640,10 @@
   .saloon.phase-veto .saloon-front { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
   .vt-gunbar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; margin: 0; height: calc(96px + env(safe-area-inset-bottom));
-    justify-content: space-between; align-items: center; gap: 8px; pointer-events: auto;
+    justify-content: center; align-items: center; gap: 8px; pointer-events: auto;
     padding: 0 max(14px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(14px, env(safe-area-inset-left));
     background: #160d08; box-shadow: 0 calc(var(--pu) * -2) 0 0 var(--ink), inset 0 var(--pu) 0 0 var(--wood3);
   }
-  .vt-arrow { width: 64px; height: 64px; margin: 0; font-size: 22px; }
   .vt-gun { --gw: 74px; align-self: stretch; width: 128px; height: 100%; }
   .vt-gun-hit { height: 132px; } /* extends above the bar: the whole raised gun is the trigger */
   .vt-gun-body { bottom: -36px; }
@@ -664,7 +661,6 @@
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; margin: 0; height: 110px; justify-content: flex-start; align-items: flex-end; gap: 12px;
     padding: 0 max(16px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   }
-  .vt-arrow { width: 56px; height: 56px; margin: 0; }
   .vt-gun { --gw: 64px; order: 3; margin-left: auto; width: 110px; height: 110px; }
   .vt-gun-hit { height: 120px; }
   .vt-gun-body { bottom: -26px; }

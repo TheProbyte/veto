@@ -16,7 +16,7 @@ import {
   HIP0, MAX_INPUTS, ROOF, SEAT, X0, cleanInputs, fakeInputsFor, frameAt, horseVariant, judge, saddleX, simulate, type Jump, type Outcome,
 } from './sim';
 import {
-  HORSE_AX, HORSE_AY, POSES, RIDER_C, drawSky, ease, horseSprite, mixPose, renderBackdrop, riderSprite, toScreen,
+  HORSE_AX, HORSE_AY, HORSE_W, POSES, RIDER_C, drawSky, ease, horseSprite, mixPose, renderBackdrop, riderSprite, toScreen,
   type Geo, type HorseMode, type RPose,
 } from './art';
 import './horse.css';
@@ -51,7 +51,38 @@ function lookOf(p: Player | undefined, pid: string) {
 }
 
 /* ---------------- per-diver pose at a moment ---------------- */
-interface Shot { x: number; y: number; deg: number; pose: RPose; farLeg: boolean; horse: HorseMode; horseFrame: number; horseDx: number; dust: number; landed: boolean; straddled: boolean }
+interface Shot {
+  x: number; y: number; deg: number; pose: RPose; farLeg: boolean; horse: HorseMode; horseFrame: number; horseDx: number; dust: number; landed: boolean; straddled: boolean;
+  /** a sound beat to play once when fresh: 'ride' / 'enter' / 'exit' (hoofbeats), 'rear' (yeehaw) */
+  cue?: { k: 'ride' | 'enter' | 'rear' | 'exit'; age: number };
+  /** gallop dust left behind, in world x relative to the saddle (stays where it was kicked up) + its age (ms) */
+  puffs?: [number, number][];
+}
+
+/* ---------------- riding off (presentation only: the sim and scores never see this) ---------------- */
+/** a rider in the saddle settles (and waves, on a clean landing), then the horse gallops off to the right */
+const rideDelay = (score: number) => (score >= 75 ? 1700 : 1150);
+/** horse x travelled after `ms` of galloping from a standstill (world px) */
+const rideDx = (ms: number) => { const r = Math.max(0, ms) / 1000; return 34 * r + 88 * r * r; };
+const PUFF_EVERY = 110, PUFF_LIFE = 460;
+const GALLOP_BOB = [0, 1, 1, 0];
+/** the finale beat for the winner: rear up, then ride off; a winner already gone gallops back in from the left first */
+const REAR_MS = 600, ENTER_MS = 750;
+
+/** seated rider + horse galloping off: `ms` since the gallop started, from horse offset dx0 (relative to the saddle) */
+function ridingShot(riderX: number, pose: RPose, ms: number, dx0: number, cue: 'ride' | 'enter' | 'exit' = 'ride'): Shot {
+  const fr = Math.floor(ms / 70) & 3;
+  const dx = dx0 + rideDx(ms);
+  const puffs: [number, number][] = [];
+  for (let k = Math.max(0, Math.floor((ms - PUFF_LIFE) / PUFF_EVERY) + 1); k * PUFF_EVERY <= ms; k++) {
+    const at = k * PUFF_EVERY;
+    puffs.push([dx0 + rideDx(at) - 13, ms - at]);
+  }
+  return {
+    x: riderX + dx, y: SEAT + GALLOP_BOB[fr], deg: 360, pose: { ...pose, torso: pose.torso + 14, head: pose.head - 6 }, farLeg: false,
+    horse: 'gallop', horseFrame: fr, horseDx: dx, dust: -1, landed: true, straddled: true, cue: { k: cue, age: ms }, puffs,
+  };
+}
 
 function standingShot(perf: number, d: Diver, waiting: boolean): Shot {
   // idle: a little sway; ready crouch-bob while it's go time
@@ -79,6 +110,8 @@ function flightShot(j: Jump, el: number, perf: number, variant: number): Shot {
     const sitIn = ease(tl / 160);
     let p = mixPose(shape, POSES.sit, sitIn);
     if (j.score >= 75 && tl > 600) p = mixPose(POSES.sit, POSES.sitUp, ease(Math.min(1, (tl - 600) / 220)) * (0.75 + 0.25 * Math.sin((tl - 600) / 140)));
+    const rideAt = rideDelay(j.score);
+    if (tl >= rideAt) return ridingShot(f.x, p, tl - rideAt, 0);
     return { x: f.x, y: SEAT - (tl < 140 ? 1 : 0), deg, pose: p, farLeg: tl < 120, horse: tl < 140 ? 'thud' : 'idle', horseFrame: tail < 260 ? 1 : tail < 520 ? 2 : 0, horseDx: 0, dust: tl, landed: true, straddled: true };
   }
   // miss: keep tumbling into the dirt, the horse rears and bolts
@@ -101,6 +134,65 @@ function staticShot(score100: number, variant: number, saddle: number): Shot {
   const j = { ...judge(err, ok ? 0 : 12), frames: [{ t: 0, x: ok ? saddle : saddle - 12, y: SEAT, deg: 360 + err, tuck: 0 }], landMs: 0, err, dx: 0 } as Jump;
   return flightShot(j, 20000, 0, variant);
 }
+
+/**
+ * The winner's finale beat, layered over their normal shot. A: still seated -> rear in place, then ride off.
+ * B: already galloped off / in the dirt -> gallop back in from the left (mounted), rear, ride off.
+ * C: never jumped (no-show, still on the roof) -> the riderless horse rears and bolts.
+ * Nothing changes while the jump is still in the air on this client.
+ */
+function finaleShot(base: Shot, perf: number, decided: number, landPerf: number, score: number, jumped: boolean, enterFrom: number, saddle: number): Shot {
+  const wave = (t: number) => mixPose(POSES.sit, POSES.sitUp, 0.8 + 0.2 * Math.sin(t / 120));
+  const rear = (t: number, riderX: number): Shot => ({
+    ...base, x: riderX, y: SEAT + 1, deg: 360, pose: { ...wave(t), torso: -10 }, farLeg: false,
+    horse: 'rear', horseFrame: 0, horseDx: 0, dust: t < 300 ? t + 200 : -1, landed: true, straddled: true, cue: { k: 'rear', age: t }, puffs: undefined,
+  });
+  if (!jumped) {
+    // riderless: the horse alone
+    const F = decided;
+    if (perf < F) return base;
+    if (perf < F + REAR_MS) return { ...base, horse: 'rear', horseFrame: 0, horseDx: 0 };
+    const r = ridingShot(0, POSES.sit, perf - F - REAR_MS, 0, 'exit');
+    return { ...base, horse: r.horse, horseFrame: r.horseFrame, horseDx: r.horseDx, puffs: r.puffs, cue: r.cue };
+  }
+  if (!base.landed) return base;
+  const F = Math.max(decided, landPerf + 350);
+  const seated = base.straddled && F < landPerf + rideDelay(score);
+  if (seated) {
+    if (perf < F) return base;
+    if (perf < F + REAR_MS) return rear(perf - F, base.x);
+    return ridingShot(base.x, wave(perf), perf - F - REAR_MS, 0, 'exit');
+  }
+  // B: come back for a victory lap (wait until a rider who's mid-ride-off is out of frame)
+  const E = base.straddled ? Math.max(decided, landPerf + rideDelay(score) + 1300) : Math.max(decided, landPerf + 900);
+  if (perf < E) return base;
+  const t = perf - E;
+  if (t < ENTER_MS) {
+    const k = t / ENTER_MS, dx = enterFrom * (1 - k) * (1 - k); // eases to a stop at the saddle
+    const fr = Math.floor(t / (k < 0.75 ? 70 : 110)) & 3;
+    return {
+      ...base, x: saddle + dx, y: SEAT + GALLOP_BOB[fr], deg: 360, pose: { ...POSES.sit, torso: 16, head: -6 }, farLeg: false,
+      horse: k < 0.88 ? 'gallop' : 'idle', horseFrame: fr, horseDx: dx, dust: -1, landed: true, straddled: true, cue: { k: 'enter', age: t },
+      puffs: [0, 1, 2, 3].map((i) => { const at = t - i * 120; return [enterFrom * (1 - at / ENTER_MS) ** 2 - 13, i * 120] as [number, number]; }).filter(([, a], i) => a < PUFF_LIFE && t - i * 120 >= 0),
+    };
+  }
+  if (t < ENTER_MS + REAR_MS) return rear(t - ENTER_MS, saddle);
+  return ridingShot(saddle, wave(perf), t - ENTER_MS - REAR_MS, 0, 'exit');
+}
+
+/* ---------------- sounds for the ride-off ---------------- */
+const hoofTimers = new Set<number>();
+let lastHoof = 0;
+/** a short gallop: ta-ta-TUM x3 (two clicks + a hollow thud), throttled when several riders leave together */
+function hoofbeats() {
+  const t = performance.now();
+  if (t - lastHoof < 700) return;
+  lastHoof = t;
+  const at = (ms: number, f: () => void) => { const id = window.setTimeout(() => { hoofTimers.delete(id); f(); }, ms); hoofTimers.add(id); };
+  for (let b = 0; b < 3; b++) { at(b * 340, () => sfx.click()); at(b * 340 + 70, () => sfx.click()); }
+  at(0, () => sfx.boots()); at(680, () => sfx.boots());
+}
+function stopHoofbeats() { for (const id of hoofTimers) clearTimeout(id); hoofTimers.clear(); }
 
 /* ---------------- drawing ---------------- */
 function drawDust(c: CanvasRenderingContext2D, x: number, y: number, tl: number, big: boolean) {
@@ -150,6 +242,7 @@ export default function Horse(p: RoomProps) {
   const live = useRef({ mini, divers, me, skew });
   live.current = { mini, divers, me, skew };
   const replays = useRef(new Map<string, Replay>());
+  const cuesSeen = useRef(new Set<string>());
   const landedSeen = useRef(new Set<string>());
   const my = useRef<{ phase: MyPhase; inputs: number[]; takeoff: number; held: boolean; sent: boolean }>({ phase: 'ready', inputs: [], takeoff: 0, held: false, sent: false });
   const mountAt = useRef(performance.now());
@@ -330,6 +423,28 @@ export default function Horse(p: RoomProps) {
         } else if (m.results[d.pid]) {
           shot = staticShot(showScore(m.results[d.pid]), d.variant, d.saddle);
         } else shot = standingShot(perf + i * 517, d, go);
+        // the winner's finale beat (anchored to the server's decision time, so a reload doesn't replay it)
+        if (m.winner !== undefined && m.winnerPid === d.pid && m.decidedAt) {
+          const decided = perf - (t - m.decidedAt);
+          const r = replays.current.get(d.pid);
+          const airborne = d.pid === meId && my.current.phase === 'air';
+          const landPerf = airborne ? Infinity : r ? r.start + r.jump.landMs : -Infinity;
+          const res = m.results[d.pid];
+          const jumped = airborne || !!r || (!!res && res.label !== 'No show');
+          const score = r ? r.jump.score : showScore(res);
+          const enterFrom = -(g.ox + d.saddle + d.lane * g.dx + HORSE_W);
+          shot = finaleShot(shot, perf, decided, landPerf, score, jumped, enterFrom, d.saddle);
+        }
+        if (shot.cue) {
+          const ck = `${d.pid}:${shot.cue.k}`;
+          if (!cuesSeen.current.has(ck)) {
+            cuesSeen.current.add(ck);
+            if (shot.cue.age < 350) {
+              if (shot.cue.k === 'rear') { if (d.pid === m.winnerPid && (m.results[d.pid]?.label ?? 'No show') !== 'No show') sfx.yeehaw(); }
+              else hoofbeats();
+            }
+          }
+        }
         // horse
         const hs = horseSprite(d.variant, shot.horse, shot.horseFrame);
         const [hx, hy] = toScreen(g, d.saddle + shot.horseDx, 0, d.lane);
@@ -339,6 +454,10 @@ export default function Horse(p: RoomProps) {
         const [rx, ry] = toScreen(g, shot.x, shot.y, d.lane);
         c.drawImage(sp, Math.round(rx - RIDER_C / 2), Math.round(ry - RIDER_C / 2));
         if (shot.dust >= 0) drawDust(c, rx, toScreen(g, 0, shot.straddled ? 2 : 0, d.lane)[1], shot.dust, !shot.straddled);
+        if (shot.puffs) {
+          const gy = toScreen(g, 0, 1, d.lane)[1];
+          for (const [pdx, age] of shot.puffs) drawDust(c, toScreen(g, d.saddle + pdx, 0, d.lane)[0], gy, age * 1.4, false);
+        }
         if (d.pid === meId && my.current.phase === 'ready' && !m.results[meId]) drawMarker(c, Math.round(rx), Math.round(ry - 24), perf);
       }
       c.restore();
@@ -363,7 +482,7 @@ export default function Horse(p: RoomProps) {
       }
     };
     raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    return () => { cancelAnimationFrame(raf); stopHoofbeats(); };
   }, [send]);
 
   /* ---------------- countdown + timers ---------------- */

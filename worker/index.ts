@@ -1,4 +1,4 @@
-import type { Env } from './steam';
+import { steamImageUrl, storeBits, type Env } from './steam';
 import { STATIC } from './static.gen';
 export { Room } from './room';
 export { Profile } from './profile';
@@ -17,6 +17,14 @@ export default {
     }
     const img = url.pathname.match(/^\/api\/img\/(\d{1,10})\/(box|header|hero|capsule)$/);
     if (img) return art(Number(img[1]), img[2]);
+    if (url.pathname.startsWith('/api/shots/') || url.pathname.startsWith('/api/shotimg/')) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return notFound();
+      const sm = url.pathname.match(/^\/api\/shots\/(\d{1,10})$/);
+      if (sm) return shots(Number(sm[1]), env);
+      const si = url.pathname.match(/^\/api\/shotimg\/(\d{1,10})\/([0-5])$/);
+      if (si) return shotImg(Number(si[1]), Number(si[2]), env);
+      return notFound(); // never the SPA fallback
+    }
     const media = url.pathname.match(/^\/media\/([a-z0-9_-]{1,40}\.(?:mp3|m4a|ogg))$/);
     if (media) return serveMedia(req, media[1], env);
     if (url.pathname === '/api/search') return search(url.searchParams.get('q') ?? '', env);
@@ -112,6 +120,44 @@ async function art(appid: number, kind: string): Promise<Response> {
     'content-type': r.headers.get('content-type') ?? 'image/jpeg',
   });
   return new Response(r.ok ? r.body : null, { status: r.ok ? 200 : 404, headers });
+}
+
+const notFound = () => new Response('Not found', { status: 404, headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=300' } }); // short: may be a Steam blip
+
+/** GET /api/shots/<appid>: up to 6 same-origin screenshot URLs (thumbnails, proxied by /api/shotimg). [] when Steam has none or is down. */
+async function shots(appid: number, env: Env): Promise<Response> {
+  const b = appid > 0 ? await storeBits(env, appid, false) : null;
+  const list = (b?.shots ?? []).slice(0, 6).flatMap((u, n) => (steamImageUrl(u) ? [`/api/shotimg/${appid}/${n}`] : [])); // n = index in the cached list
+  return new Response(JSON.stringify(list), {
+    headers: {
+      'content-type': 'application/json',
+      'access-control-allow-origin': '*',
+      // a Steam outage isn't cached for a day
+      'cache-control': b ? 'public, max-age=86400' : 'public, max-age=300',
+    },
+  });
+}
+
+/** GET /api/shotimg/<appid>/<n>: proxies screenshot n (Steam CDN hosts only) with CORS, edge-cached, 7 days in browsers. */
+async function shotImg(appid: number, n: number, env: Env): Promise<Response> {
+  const b = appid > 0 ? await storeBits(env, appid, false) : null;
+  const src = b?.shots?.[n];
+  if (!src || !steamImageUrl(src)) return notFound();
+  let r: Response;
+  try {
+    r = await fetch(src, { cf: { cacheTtl: 60 * 60 * 24 * 7, cacheEverything: true } } as RequestInit);
+  } catch {
+    return notFound();
+  }
+  const type = r.headers.get('content-type') ?? '';
+  if (!r.ok || !type.startsWith('image/')) return notFound();
+  return new Response(r.body, {
+    headers: {
+      'access-control-allow-origin': '*',
+      'cache-control': 'public, max-age=604800, immutable',
+      'content-type': type,
+    },
+  });
 }
 
 // Large audio (music tracks) lives in KV under "media:<file>" (uploaded once with `wrangler kv key put`),

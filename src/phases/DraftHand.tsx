@@ -3,6 +3,7 @@ import { DRAFT_BURNS, DRAFT_HAND, type Draft, type Player, type PoolGame } from 
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import Cover from '../scene/Cover';
+import { ShotArt } from '../ui/ShotFlip';
 import { launchCard, play } from '../scene/Dock';
 import { Avatar, settingsOf } from './Lobby';
 import { units } from './Nominate';
@@ -19,7 +20,7 @@ export function CardBacks({ n, max = 5, big }: { n: number; max?: number; big?: 
   const shown = Math.max(0, Math.min(max, n));
   return (
     <span className={`dh-backs ${big ? 'is-big' : ''} ${n === 0 ? 'is-empty' : ''}`} aria-hidden>
-      {shown === 0 ? <i className="dh-back is-ghost" /> : Array.from({ length: shown }, (_, i) => <i key={i} className="dh-back" style={{ '--i': i } as CSSProperties} />)}
+      {shown === 0 ? <i className="dh-back is-ghost" /> : Array.from({ length: shown }, (_, i) => <i key={i} className="dh-back deck-back" style={{ '--i': i } as CSSProperties} />)}
     </span>
   );
 }
@@ -192,10 +193,10 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
         aria-label={`${name}${g ? `, ${g.hours > 0 ? `${hrs(g.hours)} hours together` : 'nobody has played it'}` : ''}${missing.length ? `, ${missing.length} short` : ''}`}>
         <span className="dh-face">
           <span className="dh-pip" aria-hidden>{SUITS[appid % 4]}</span>
-          <span className="dh-card-art"><Cover appid={appid} name={name} kind="box" />
+          <ShotArt appid={appid} className="dh-card-art"><Cover appid={appid} name={name} kind="box" />
             <span className="dh-art-hrs" aria-hidden>{g ? (g.hours > 0 ? `${hrs(g.hours)}h` : 'New') : '$'}</span>
             {missing.length > 0 && <span className="dh-art-short" aria-hidden title={`Short: ${missing.map((p) => p.name).join(', ')}`}>-{missing.length}</span>}
-          </span>
+          </ShotArt>
           <span className="dh-card-name">{name}</span>
           <span className="dh-card-meta">
             <b>{g ? (g.hours > 0 ? `${hrs(g.hours)}h` : 'Fresh') : '$ Pitch'}</b>

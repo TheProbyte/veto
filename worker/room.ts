@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { BadgeId, BoardGame, FinaleKind, Intent, Launch, Mini, MiniResult, Phase, Player, PoolGame, PosseRecord, ProfileStats, RoomEvent, RoomState, ServerMsg, Settings, ShotEvent } from '../shared/types';
-import { DEFAULT_SETTINGS, DRAFT_BURNS, DRAFT_HAND, EMOTES, FINALE_KINDS, LOOK_COUNTS, lookUnlocked, randomLook, type EmoteId, type Look } from '../shared/types';
+import { DECKS, DEFAULT_SETTINGS, DRAFT_BURNS, FELTS, DRAFT_HAND, EMOTES, FINALE_KINDS, LOOK_COUNTS, lookUnlocked, randomLook, type EmoteId, type Look } from '../shared/types';
 import { EXPLAIN_MS } from '../shared/voiced';
 import { SLIDE_ANIM_MS, SLIDE_INTRO_MS, SLIDE_RESULT_MS, SLIDE_TURN_MS, slideDist, slideMark, slideOutcome } from './slide';
 import { NARRATOR, pickLine, type NarrKey } from '../shared/narrator';
@@ -26,9 +26,12 @@ const NARR_PRI: Partial<Record<NarrKey, number>> = {
   draft: 6, trade: 4, burn: 3, saddle: 9, straggler: 7,
   how_lobby: 6, how_nominate: 6, how_draft: 6, how_veto: 6, how_star: 6, how_slide: 6, how_cylinder: 6, how_duel: 7, how_result: 6,
   how_vote: 6, how_golf: 6, how_horse: 6,
+  vote_revolver: 8, vote_slide: 8, vote_golf: 8, vote_horse: 8,
+  horse_perfect: 7, golf_ace: 7, horse_miss: 4, mini_win: 8, mini_close: 8, horse_ride: 8,
 };
 // phase-change cues always cut in (even over an equal/higher line still ringing)
-const CUES = new Set<NarrKey>(['how_lobby', 'how_nominate', 'how_draft', 'how_veto', 'how_star', 'how_slide', 'how_cylinder', 'how_duel', 'how_result', 'how_vote', 'how_golf', 'how_horse', 'vote', 'golf', 'horse', 'draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat', 'slide', 'slide_win', 'saddle', 'ousted', 'draft']);
+const CUES = new Set<NarrKey>(['how_lobby', 'how_nominate', 'how_draft', 'how_veto', 'how_star', 'how_slide', 'how_cylinder', 'how_duel', 'how_result', 'how_vote', 'how_golf', 'how_horse', 'vote', 'golf', 'horse', 'draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat', 'slide', 'slide_win', 'saddle', 'ousted', 'draft',
+  'vote_revolver', 'vote_slide', 'vote_golf', 'vote_horse', 'mini_win', 'mini_close', 'horse_ride']);
 const BOT_NAMES = ['Dusty Pete', 'One-Eye Jack', 'Calamity Sue', 'Tumbleweed Tim', 'Sagebrush Sal', 'Two-Bit Earl', 'Whiskey Nell', 'Slim Pickens', 'Rattlesnake Ray', 'Biscuit Bill'];
 const FAKE_LIB: [number, string][] = [[730, 'Counter-Strike 2'], [252490, 'Rust'], [892970, 'Valheim'], [1966720, 'Lethal Company'],
   [548430, 'Deep Rock Galactic'], [105600, 'Terraria'], [413150, 'Stardew Valley'], [632360, 'Risk of Rain 2'], [739630, 'Phasmophobia'],
@@ -487,6 +490,16 @@ export class Room extends DurableObject<Env> {
             this.x.jobs = this.x.jobs.filter((j) => !(j.k === 'narr' && j.key?.startsWith('how_')));
           }
         }
+        if (n.felt !== undefined) {
+          const v = typeof n.felt === 'number' ? n.felt : NaN;
+          if (!Number.isInteger(v) || v < 0 || v >= FELTS.length) throw new Bad('We don\u2019t stock that felt.');
+          st.felt = v;
+        }
+        if (n.deck !== undefined) {
+          const v = typeof n.deck === 'number' ? n.deck : NaN;
+          if (!Number.isInteger(v) || v < 0 || v >= DECKS.length) throw new Bad('We don\u2019t stock that deck.');
+          st.deck = v;
+        }
         const flip = st.nominations !== s.settings.nominations;
         s.settings = st;
         if (flip && s.phase === 'nominate') {
@@ -530,6 +543,27 @@ export class Room extends DurableObject<Env> {
         return;
       }
       case 'say': return; // chat text was removed from the client: accepted, dropped silently
+      case 'bottles': {
+        const p = this.me(pid);
+        if (p.bot) return;
+        if (s.phase !== 'lobby' && s.phase !== 'nominate' && s.phase !== 'result') throw new Bad('No target practice right now.');
+        const v = Number(i.score);
+        if (!Number.isFinite(v)) throw new Bad('Bad score.');
+        const score = clamp(Math.round(v), 0, 99);
+        if (this.limited('bt:' + pid, 12_000)) return;
+        const r = s.record;
+        const was = JSON.stringify(r.bottles ?? []);
+        const list = (r.bottles ?? []).map((b) => ({ ...b }));
+        const mine = list.find((b) => b.pid === pid);
+        if (mine) { mine.score = Math.max(mine.score, score); mine.name = p.name; }
+        else list.push({ pid, name: p.name, score });
+        list.sort((a, b) => b.score - a.score);
+        const top = list.slice(0, 5);
+        if (JSON.stringify(top) === was) return; // didn't make the board: no storage write
+        r.bottles = top;
+        this.broadcast();
+        return;
+      }
       case 'skipExplain': return this.skipExplain(pid);
       case 'finaleVote': {
         const v = s.vote;
@@ -1410,6 +1444,7 @@ export class Room extends DurableObject<Env> {
     v.picked = tied.length ? pick(tied) : pick(FINALE_KINDS); // tie or nobody voted: random
     v.pickedAt = Date.now();
     this.x.jobs = this.x.jobs.filter((j) => j.k !== 'bvote');
+    this.narr(`vote_${v.picked}` as NarrKey);
   }
 
   /** the picked finale starts (VOTE_PICK_MS after the decision) */
@@ -1483,12 +1518,16 @@ export class Room extends DurableObject<Env> {
     strokes = clamp(Math.round(strokes), 1, 12);
     ms = Math.max(0, Math.round(ms));
     const score = 10000 - strokes * 1000 - Math.min(999, Math.round((ms / 1000) * 5));
+    if (strokes === 1 && !this.limited('mini:ace', 3000)) this.narr('golf_ace');
     this.miniResult(m, pid, { score, label: `${strokes} stroke${strokes === 1 ? '' : 's'}`, data: [strokes, ms] });
   }
 
   miniHorse(m: Mini, pid: string, score: number, inputs: unknown[]) {
     score = clamp(Math.round(score), 0, 100);
     const label = score >= 95 ? 'Perfect landing!' : score >= 75 ? 'Clean landing' : score >= 40 ? 'Wobbly' : 'Missed the horse';
+    // in memory only: once per round (keyed by the round's seed) / at most one wince every 4 s
+    if (score >= 95) { if (!this.limited('mini:perfect:' + m.seed, 120_000)) this.narr('horse_perfect'); }
+    else if (score < 40 && !this.limited('mini:miss', 4000)) this.narr('horse_miss');
     this.miniResult(m, pid, { score: score * 10, label, data: nums(inputs, 64) });
   }
 
@@ -1520,8 +1559,14 @@ export class Room extends DurableObject<Env> {
     m.winner = wp !== undefined && m.games.includes(m.backs[wp]) ? m.backs[wp] : pick(m.games);
     m.decidedAt = now;
     this.x.jobs = this.x.jobs.filter((j) => j.k !== 'bmini');
-    if (m.kind === 'slide') this.narr('slide_win');
-    else this.narr('result', 'result_3'); // "The dust settles. We have a winner." (result_1 is saved for the result screen)
+    // a hair's breadth between the top two real finishers: "close one"; else the game's own decided line
+    const sc = fin.map((id) => m.results[id].score).sort((a, b) => b - a);
+    const close = sc.length >= 2 && sc[0] > 0 && sc[0] - sc[1] < (m.kind === 'slide' ? 15 : Math.abs(sc[0]) * 0.03);
+    const key: NarrKey = close ? 'mini_close' : m.kind === 'slide' ? 'slide_win' : m.kind === 'horse' ? 'horse_ride' : 'mini_win';
+    // the last result's own remark (ace / perfect / miss) was queued this tick: let it play, then call it
+    const p = this.narrPending?.key;
+    if (p === 'golf_ace' || p === 'horse_perfect' || p === 'horse_miss') this.job({ at: now + 1800, k: 'narr', ph: 'mini', key });
+    else this.narr(key);
   }
 
   // ---------- explanation skip ----------

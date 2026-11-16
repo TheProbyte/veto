@@ -1,12 +1,12 @@
 // Emotes only (sends {t:'emote'}; no typed text or taunts). Phones: a bottom-left button + wheel.
-// Desktop (wide + mouse): the always-open ChatPanel. Always mounted (also runs the shot extras).
+// Desktop (wide + mouse): the always-visible EmoteRail (ChatPanel.tsx) at the middle of the left edge. Always mounted (also runs the shot extras).
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { RoomProps } from '../props';
 import { EMOTES, type EmoteId } from '../../shared/types';
 import { PixelSprite } from '../pixel/PixelCanvas';
 import { sfx } from '../sfx';
-import ChatPanel, { drawBubble, useChatLog, useDeskChat } from './ChatPanel';
+import EmoteRail, { drawBubble, useDeskChat } from './ChatPanel';
 import { useShotExtras } from '../phases/ShotExtras';
 import '../phases/gameplay.css';
 import PixelIcon from '../ui/PixelIcon';
@@ -16,9 +16,7 @@ const EMOTE_CD = 1200;
 export default function EmoteBar(rp: RoomProps) {
   const { state, send, skew } = rp;
   useShotExtras(state, skew); // always mounted: catches the finale shot even if the phase flips with it
-  const log = useChatLog(rp); // kept here so the log survives collapsing the panel
-  const { desk, open: deskOpen } = useDeskChat(state.phase);
-  const [focusKey, setFocusKey] = useState(0);
+  const { desk } = useDeskChat(state.phase);
   const deskRef = useRef(desk);
   deskRef.current = desk;
   const [open, setOpen] = useState(false);
@@ -43,7 +41,7 @@ export default function EmoteBar(rp: RoomProps) {
       const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
       if (e.key === 'Escape') { setOpen(false); return; }
       if (typing || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === 'e' || e.key === 'E') { e.preventDefault(); if (deskRef.current) setFocusKey(Date.now()); else toggle(); }
+      if (e.key === 'e' || e.key === 'E') { e.preventDefault(); if (deskRef.current) (document.querySelector('.emo-rail-b:not(:disabled)') as HTMLElement | null)?.focus(); else toggle(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -76,7 +74,7 @@ export default function EmoteBar(rp: RoomProps) {
     setOpen(false);
   };
 
-  if (desk) return <ChatPanel log={log} emote={emote} emoteCool={emoteCool} open={deskOpen} focusKey={focusKey} />;
+  if (desk) return <EmoteRail emote={emote} emoteCool={emoteCool} />;
 
   return createPortal(
     <div className={`emo ph-${phase}`} ref={rootRef}>

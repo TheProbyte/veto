@@ -35,6 +35,10 @@ const MAPS: Record<string, string[]> = {
   download: ['..kkk...', '..kBk...', '..kBk...', 'kkkBkkk.', '.kBBBk..', '..kBk...', '...k....', 'kkkkkkk.'],
   buy: ['...k....', '.kkskk..', 'kssssk..', 'ksk.....', '.kssk...', '...ksk..', 'kssssk..', '..kkk...'],
   wait: ['........', '........', '........', '........', '.k.k.k..', '.s.s.s..', '........', '........'],
+  // UI: arrow glyphs for the brass coin buttons, the dice for Random
+  arrowL: ['........', '....kk..', '...kOk..', '..kOOkkk', '.kOOOOOk', '..kOOkkk', '...kOk..', '....kk..'],
+  arrowR: ['........', '..kk....', '..kOk...', 'kkkOOk..', 'kOOOOOk.', 'kkkOOk..', '..kOk...', '..kk....'],
+  dice: ['.kkkkkk.', 'kwwwwwwk', 'kwkwwwwk', 'kwwwwwwk', 'kwwwkwwk', 'kwwwwwwk', 'kwwwwwkk', '.kkkkkk.'],
 };
 
 export const hasPixelIcon = (name: string) => name in MAPS;

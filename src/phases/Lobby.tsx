@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { DEFAULT_SETTINGS, emptyStats, type Player, type RoomState, type Settings } from '../../shared/types';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { DECKS, DEFAULT_SETTINGS, FELTS, emptyStats, type Player, type RoomState, type Settings } from '../../shared/types';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import { DockActions } from '../scene/Dock';
 import BustPreview from '../pixel/BustPreview';
 import CharacterCreator from './CharacterCreator';
 import { RulesButton, useTableFit } from './Nominate';
+import TargetPractice from '../fun/TargetPractice';
+import { deckOf, feltOf, useTableTheme } from '../ui/tableTheme';
 import './panels.css';
 
 export function Avatar({ p, size = 32 }: { p?: Player; size?: number }) {
@@ -36,6 +38,20 @@ export function rulesSummary(s: Settings) {
   return parts.join(' · ');
 }
 
+/** the one-line rules plus the felt + card-back swatches */
+export function RulesSummary({ s }: { s: Settings }) {
+  const f = feltOf(s.felt), d = deckOf(s.deck);
+  return (
+    <span className="nh-rules-sum">
+      {rulesSummary(s)}
+      <span className="nh-theme-sw" title={`Felt: ${f.label} · Cards: ${d.label}`}>
+        <i className="nh-felt-sw" style={{ '--fb': f.base, '--fl': f.light, '--fd': f.dark } as CSSProperties} aria-label={`Felt: ${f.label}`} />
+        <i className="nh-deck-sw deck-back" style={{ '--deck-a': d.a, '--deck-b': d.b } as CSSProperties} aria-label={`Cards: ${d.label}`} />
+      </span>
+    </span>
+  );
+}
+
 /** Host-editable table rules (lobby + nominate before the deal). Non-hosts get a one-line summary. */
 export function TableRules({ state, isHost: host, send, collapsible }: { state: RoomState; isHost: boolean; send: RoomProps['send']; collapsible?: boolean }) {
   const server = settingsOf(state);
@@ -52,7 +68,7 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
   };
   useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
   // follow the server unless I have an edit in flight
-  const sk = `${server.turnSecs}|${server.picks}|${server.cylinderAt}|${server.nominations}|${server.sheriff}|${server.explain}`;
+  const sk = `${server.turnSecs}|${server.picks}|${server.cylinderAt}|${server.nominations}|${server.sheriff}|${server.explain}|${server.felt}|${server.deck}`;
   useEffect(() => { if (!pend.current) setDraft(server); }, [sk]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (patch: Partial<Settings>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -62,11 +78,11 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
   };
   const s = isHost ? draft : server;
   if (!isHost) {
-    return <div className="nh-rules-ro"><span className="nh-rules-k">Table rules</span> {rulesSummary(server)}</div>;
+    return <div className="nh-rules-ro"><span className="nh-rules-k">Table rules</span> <RulesSummary s={server} /></div>;
   }
   const head = collapsible ? (
     <button type="button" className="nh-rules-toggle" aria-expanded={open} onClick={() => { sfx.click(); setOpen((o) => !o); }}>
-      <span className="nh-rules-k">Table rules</span><span className="nh-rules-sum">{rulesSummary(s)}</span><i aria-hidden>{open ? '▴' : '▾'}</i>
+      <span className="nh-rules-k">Table rules</span><RulesSummary s={s} /><i aria-hidden>{open ? '▴' : '▾'}</i>
     </button>
   ) : <div className="nh-label">Table rules</div>;
   return (
@@ -122,6 +138,28 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
               ))}
             </div>
           </div>
+          <div className="nh-rule-row">
+            <span className="nh-rule-name">Felt</span>
+            <div className="nh-swatches" role="radiogroup" aria-label="Table felt">
+              {FELTS.map((f, i) => (
+                <button key={f.label} type="button" role="radio" aria-checked={(s.felt ?? 0) === i} title={f.label} aria-label={f.label}
+                  className={`nh-swatch nh-swatch-felt ${(s.felt ?? 0) === i ? 'on' : ''}`} style={{ '--fb': f.base, '--fl': f.light, '--fd': f.dark } as CSSProperties}
+                  onClick={() => { sfx.click(); set({ felt: i }); }} />
+              ))}
+            </div>
+            <small className="nh-swatch-name">{feltOf(s.felt).label}</small>
+          </div>
+          <div className="nh-rule-row">
+            <span className="nh-rule-name">Cards</span>
+            <div className="nh-swatches" role="radiogroup" aria-label="Card backs">
+              {DECKS.map((d, i) => (
+                <button key={d.label} type="button" role="radio" aria-checked={(s.deck ?? 0) === i} title={d.label} aria-label={d.label}
+                  className={`nh-swatch nh-swatch-deck deck-back ${(s.deck ?? 0) === i ? 'on' : ''}`} style={{ '--deck-a': d.a, '--deck-b': d.b } as CSSProperties}
+                  onClick={() => { sfx.click(); set({ deck: i }); }} />
+              ))}
+            </div>
+            <small className="nh-swatch-name">{deckOf(s.deck).label}</small>
+          </div>
           {host && (
             <div className="nh-rule-row nh-rule-reset">
               <span className="nh-rule-name">Table history</span>
@@ -169,7 +207,7 @@ function ResetBtn({ empty, onReset }: { empty: boolean; onReset: () => void }) {
   );
 }
 
-function PosseRecordCard({ state }: { state: RoomState }) {
+export function PosseRecordCard({ state }: { state: RoomState }) {
   const r = state.record;
   if (!r || !(r.rounds > 0)) return null;
   const top = r.wins?.[0];
@@ -199,7 +237,9 @@ function useDesk() {
   return on;
 }
 
-export default function Lobby({ state, me, send }: RoomProps) {
+export default function Lobby(props: RoomProps) {
+  const { state, me, send } = props;
+  useTableTheme(settingsOf(state));
   const mine = state.players.find((p) => p.id === me);
   const host = state.players.find((p) => p.host);
   const isHost = !!mine?.host;
@@ -252,7 +292,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
       <section className="nh-sec">
         <div className="nh-label">Your outfit</div>
         <div className="nh-me nh-me-look">
-          {mine?.style ? <span className="nh-me-bust"><BustPreview look={mine.style} scale={1} /></span> : <Avatar p={mine} size={44} />}
+          {mine?.style ? <span className="nh-me-bust"><BustPreview look={mine.style} scale={1} /></span> : <Avatar p={mine ? { ...mine, steam: undefined } : mine} size={44} />}
           <div className="nh-me-txt"><b>{mine?.name}</b></div>
           <button type="button" className="nh-btn nh-btn-sm" onClick={() => { sfx.unlock(); sfx.click(); setDressing(true); }}>Change outfit</button>
         </div>
@@ -272,7 +312,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
           </form>
         ) : (
           <div className="nh-me">
-            <Avatar p={mine} size={44} />
+            <Avatar p={mine} size={32} />
             <div className="nh-me-txt">
               <b>{steam.name}</b>
               <span>{steam.private ? 'Library hidden' : `${steam.gameCount} games`}</span>
@@ -299,13 +339,15 @@ export default function Lobby({ state, me, send }: RoomProps) {
       <ul className="nh-posse">
         {state.players.map((p) => (
           <li key={p.id} className={`${p.connected || p.bot ? '' : 'is-off'} ${p.id === me ? 'is-me' : ''} ${p.bot ? 'is-bot' : ''}`}>
-            {p.style ? <span className="nh-posse-bust"><BustPreview look={p.style} scale={1} /></span> : <Avatar p={p} size={32} />}
-            <span className="nh-pname">
-              {p.name}{p.id === me && <small> (you)</small>}
-              {p.host && <span className="nh-tag">HOST</span>}
+            <span className="nh-posse-bust">{p.style ? <BustPreview look={p.style} scale={1} /> : <Avatar p={{ ...p, steam: undefined }} size={28} />}</span>
+            <span className="nh-pinfo">
+              <span className="nh-pname">{p.name}{p.id === me && <small> (you)</small>}</span>
+              <span className="nh-psub">
+                {p.host && <span className="nh-tag">HOST</span>}
+                <Status p={p} />
+                {!p.style && <span className="nh-dressed" title="Still choosing an outfit">dressing…</span>}
+              </span>
             </span>
-            {!p.style && <span className="nh-dressed" title="Still choosing an outfit">… dressing</span>}
-            <Status p={p} />
             {isHost && p.id !== me && (p.bot || !p.connected) && <KickBtn name={p.name} onKick={() => send({ t: 'kick', pid: p.id })} />}
           </li>
         ))}
@@ -334,14 +376,15 @@ export default function Lobby({ state, me, send }: RoomProps) {
         <h2 className="nh-h">Round up the posse</h2>
         {desk && (
           <div className="nh-lb-rules">
-            <span className="nh-rules-k">Rules</span><span className="nh-rules-sum">{rulesSummary(settingsOf(state))}</span>
+            <span className="nh-rules-k">Rules</span><RulesSummary s={settingsOf(state)} />
             {canEditRules && <RulesButton state={state} isHost={isHost} send={send} />}
           </div>
         )}
       </header>
 
       <div className="nh-lb-grid">
-        <div className="nh-lb-col nh-lb-you">{steam ? <>{outfitSec}{steamSec}</> : <>{steamSec}{outfitSec}</>}{desk && <PosseRecordCard state={state} />}</div>
+        <div className="nh-lb-col nh-lb-you">{steam ? <>{outfitSec}{steamSec}</> : <>{steamSec}{outfitSec}</>}</div>
+        <div className="nh-lb-col nh-lb-posse">{posseSec}</div>
         <div className="nh-lb-col nh-lb-inv">
       <section className="nh-sec">
         <div className="nh-label">Invite your crew</div>
@@ -372,10 +415,10 @@ export default function Lobby({ state, me, send }: RoomProps) {
         </section>
       )}
 
-      {!desk && <PosseRecordCard state={state} />}
+      <div className="nh-lb-fun"><TargetPractice {...props} /></div>
+      <PosseRecordCard state={state} />
         </div>
         {!desk && <TableRules state={state} isHost={isHost} send={send} />}
-        <div className="nh-lb-col nh-lb-posse">{posseSec}</div>
       </div>
         </>
       )}

@@ -43,19 +43,18 @@ const restMs = (dist: number, fell: boolean, reduce: boolean) => (reduce ? 500 :
 
 /* ---------------- projection shared by the canvas and the DOM glasses ---------------- */
 interface Geo { W: number; H: number; cx: number; y0: number; yH: number; hw0: number; s: (t: number) => number; y: (t: number) => number; hw: (t: number) => number; tOf: (sy: number) => number }
-function geo(W: number, H: number, top = 0, bot = H, left = 0): Geo {
+function geo(W: number, H: number, top = 0, bot = H): Geo {
   const h = Math.max(40, bot - top);
   const y0 = bot;
   const yt = top + Math.max(6, h * 0.03);
   const sT = 1 / (1 + K * TMAX);
   const yH = (yt - sT * y0) / (1 - sT);
   // phones: the bar fills the width; wide screens: a bit narrower so the room frames it
-  const Wv = W - left;
-  const hw0 = Wv < 700 ? Math.min(Wv * 0.47, h * 1.1, 560) : Math.min(Wv * 0.38, h * 0.95, 620);
+  const hw0 = W < 700 ? Math.min(W * 0.47, h * 1.1, 560) : Math.min(W * 0.38, h * 0.95, 620);
   const s = (t: number) => 1 / (1 + K * t);
   const y = (t: number) => yH + (y0 - yH) * s(t);
   const tOf = (sy: number) => { const ss = (sy - yH) / (y0 - yH); return (1 / ss - 1) / K; };
-  return { W, H, cx: left + Wv / 2, y0, yH, hw0, s, y, hw: (t) => hw0 * s(t), tOf };
+  return { W, H, cx: W / 2, y0, yH, hw0, s, y, hw: (t) => hw0 * s(t), tOf };
 }
 const TW = TMAX + 0.3;   // the back wall stands this far down the bar
 /** lane centres in bar half-widths (-1..1) */
@@ -66,7 +65,7 @@ const rgb = (h: string) => { let v = rgbCache.get(h); if (!v) { v = hexRgb(h); r
 const LANE_A = '#5c3c25', LANE_B = '#533521', WALL = '#2a1611', WALL2 = '#331c14';
 
 /** the saloon + the bar in perspective: calm, few details, painted once per size at a chunky pixel scale */
-const RoomCanvas = memo(function RoomCanvas({ W, H, top, bot, left, mark, lanes }: { W: number; H: number; top: number; bot: number; left: number; mark: number; lanes: number }) {
+const RoomCanvas = memo(function RoomCanvas({ W, H, top, bot, mark, lanes }: { W: number; H: number; top: number; bot: number; mark: number; lanes: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current; if (!cv || W < 10 || H < 10) return;
@@ -74,7 +73,7 @@ const RoomCanvas = memo(function RoomCanvas({ W, H, top, bot, left, mark, lanes 
     const cw = Math.ceil(W / P), ch = Math.ceil(H / P);
     cv.width = cw; cv.height = ch;
     const c = cv.getContext('2d'); if (!c) return;
-    const g = geo(W, H, top, bot, left);
+    const g = geo(W, H, top, bot);
     const n = Math.max(1, lanes);
     const img = c.createImageData(cw, ch);
     const d = img.data;
@@ -140,7 +139,7 @@ const RoomCanvas = memo(function RoomCanvas({ W, H, top, bot, left, mark, lanes 
       if (P === 2) put(x, ym + 1, rnd(x, 2, 5) > 0.5 ? PAL.parch : PAL.parch2);
     }
     c.putImageData(img, 0, 0);
-  }, [W, H, top, bot, left, mark, lanes]);
+  }, [W, H, top, bot, mark, lanes]);
   return <canvas ref={ref} className="sl-cv" aria-hidden />;
 });
 
@@ -181,16 +180,14 @@ const SHARDS = Array.from({ length: 10 }, (_, i) => ({ a: (i * 31 + ((i * 13) % 
 function useStage() {
   const stage = useRef<HTMLDivElement>(null);
   const zone = useRef<HTMLDivElement>(null);
-  const [sz, setSz] = useState({ w: 0, h: 0, top: 0, bot: 0, left: 0 });
+  const [sz, setSz] = useState({ w: 0, h: 0, top: 0, bot: 0 });
   useEffect(() => {
     const el = stage.current, z = zone.current; if (!el || !z) return;
     const on = () => {
       const a = el.getBoundingClientRect(), b = z.getBoundingClientRect();
-      // a desktop chat panel docked on the left: centre the bar in the room that's left
-      const chat = document.querySelector('aside.chat')?.getBoundingClientRect();
-      const left = chat && chat.width > 0 && chat.right < a.width * 0.4 ? Math.round(chat.right + 8) : 0;
-      const n = { w: Math.round(a.width), h: Math.round(a.height), top: Math.round(b.top - a.top), bot: Math.round(b.bottom - a.top), left };
-      setSz((o) => (o.w === n.w && o.h === n.h && o.top === n.top && o.bot === n.bot && o.left === n.left ? o : n));
+      // centred on the full viewport (the stage is full-screen; nothing docks beside it any more)
+      const n = { w: Math.round(a.width), h: Math.round(a.height), top: Math.round(b.top - a.top), bot: Math.round(b.bottom - a.top) };
+      setSz((o) => (o.w === n.w && o.h === n.h && o.top === n.top && o.bot === n.bot ? o : n));
     };
     on();
     const ro = new ResizeObserver(on);
@@ -375,7 +372,7 @@ export default function Slide({ state, me, send, skew }: RoomProps) {
 
   if (!mini) return createPortal(<div className="sl"><div className="sl-title">Lining up the glasses…</div></div>, document.body);
 
-  const g = geo(sz.w, sz.h, sz.top, sz.bot, sz.left);
+  const g = geo(sz.w, sz.h, sz.top, sz.bot);
   const laneW = (2 * g.hw0 * SPAN) / Math.max(1, n);
   const gs0 = Math.max(24, Math.min(88, laneW * 0.72, (sz.bot - sz.top) * 0.22));
   const sweet = mark / REACH;
@@ -397,7 +394,7 @@ export default function Slide({ state, me, send, skew }: RoomProps) {
   return createPortal(
     <div className={`sl ${canHold ? 'my-turn' : ''} ${revealed ? 'decided' : ''} ${reduce ? 'reduce' : ''} ${holding ? 'holding' : ''} ${n > 4 ? 'many' : ''}`} role="main" aria-label="Whiskey slide" ref={stageRef}>
       <div className="sl-stage">
-        <RoomCanvas W={sz.w} H={sz.h} top={sz.top} bot={sz.bot} left={sz.left} mark={mark} lanes={n} />
+        <RoomCanvas W={sz.w} H={sz.h} top={sz.top} bot={sz.bot} mark={mark} lanes={n} />
         {sz.w > 0 && (
           <>
             <div className="sl-mark-lbl" style={{ top: g.y(mark), left: g.cx + g.hw(mark) + 6 }}>MARK</div>

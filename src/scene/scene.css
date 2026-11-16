@@ -1,0 +1,61 @@
+/* ============ scene agent: emote rail, barkeep quip bubble, scene hover, phase transitions, parallax ============ */
+
+/* ---------- desktop emote rail (ChatPanel.tsx): 8 pixel-icon buttons, middle of the left edge; overlays, reserves nothing ---------- */
+.emo-rail {
+  position: fixed; z-index: 64; left: calc(env(safe-area-inset-left) + var(--pu) * 2); top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: calc(var(--pu) * 2); padding: calc(var(--pu) * 2);
+  background: rgba(22, 13, 8, .82);
+  box-shadow: inset 0 0 0 var(--pu) var(--wood3), 0 calc(var(--pu) * -1) 0 0 var(--ink), 0 var(--pu) 0 0 var(--ink), calc(var(--pu) * -1) 0 0 0 var(--ink), var(--pu) 0 0 0 var(--ink);
+  font-family: var(--px-sm);
+}
+.emo-rail-b {
+  position: relative; width: calc(var(--pt) * 18); height: calc(var(--pt) * 18); min-width: 34px; min-height: 34px; padding: 0; border: 0; border-radius: 0;
+  display: grid; place-items: center; background: #3b2416; color: var(--parch); cursor: var(--cur-pointer);
+  box-shadow: inset var(--pu) var(--pu) 0 0 #5a3a22, inset calc(var(--pu) * -1) calc(var(--pu) * -1) 0 0 #160d08, 0 0 0 var(--pu) var(--ink);
+}
+.emo-rail-b .pxi { width: calc(var(--pt) * 12); height: calc(var(--pt) * 12); }
+.emo-rail-b:hover, .emo-rail-b:focus-visible { background: #5a3a22; outline: none; box-shadow: inset var(--pu) var(--pu) 0 0 #7a5232, inset calc(var(--pu) * -1) calc(var(--pu) * -1) 0 0 #2a1a10, 0 0 0 var(--pu) var(--amber); }
+.emo-rail-b:active { transform: translateY(var(--pu)); }
+.emo-rail-b:disabled { cursor: var(--cur-default); filter: grayscale(.6) brightness(.6); transform: none; }
+.emo-rail-tip {
+  position: absolute; left: calc(100% + var(--pu) * 4); top: 50%; transform: translateY(-50%); white-space: nowrap; pointer-events: none;
+  padding: var(--pu) calc(var(--pu) * 2); font-size: calc(var(--pt) * 8); line-height: 1; letter-spacing: .06em; text-transform: uppercase;
+  background: #160d08; color: var(--amber); box-shadow: inset 0 0 0 var(--pu) var(--wood3), 0 0 0 var(--pu) var(--ink);
+  opacity: 0; visibility: hidden;
+}
+.emo-rail-b:hover .emo-rail-tip, .emo-rail-b:focus-visible .emo-rail-tip { opacity: 1; visibility: visible; }
+.emo-rail-b:disabled .emo-rail-tip { display: none; }
+
+/* ---------- interactable props under a mouse (Saloon.tsx sets html.scene-hot) ---------- */
+html.scene-hot .saloon, html.scene-hot .scene, html.scene-hot .px-scene, html.scene-hot .saloon-ui,
+html.scene-hot .saloon-front, html.scene-hot .saloon-stage, html.scene-hot .front-top { cursor: var(--cur-pointer); }
+
+/* ---------- parallax: the DOM nameplates follow the busts' layer (PixelCanvas sets --plx-x/--plx-y in scene px) ---------- */
+.scene .seats { transform: translate(calc(var(--plx-x, 0) * var(--P, 4px)), calc(var(--plx-y, 0) * var(--P, 4px))); }
+.scene .bk-say { transform: translate(calc(var(--plx-wx, 0) * var(--P, 4px)), calc(var(--plx-wy, 0) * var(--P, 4px))); }
+
+/* ---------- the barkeep's caption-only quip: a small pixel speech bubble above his head ---------- */
+.bk-say { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.bk-say-in {
+  position: absolute; left: var(--bx); top: var(--by); transform: translate(-50%, -100%); white-space: nowrap;
+  padding: calc(var(--pu) * 1.5) calc(var(--pu) * 2.5) var(--pu); font-family: var(--px-sm); font-size: calc(var(--pt) * 8); line-height: 1.1; color: var(--ink);
+  background: var(--parch);
+  box-shadow: inset 0 calc(var(--pu) * -1) 0 0 var(--parch2), 0 calc(var(--pu) * -1) 0 0 var(--ink), 0 var(--pu) 0 0 var(--ink), calc(var(--pu) * -1) 0 0 0 var(--ink), var(--pu) 0 0 0 var(--ink);
+  animation: bk-pop .16s steps(2, end) both, bk-out .2s steps(2, end) var(--life, 2400ms) forwards;
+}
+.bk-say-in::after { /* the tail: a stepped pixel wedge pointing down at him */
+  content: ''; position: absolute; left: 50%; top: 100%; width: calc(var(--pu) * 3); height: calc(var(--pu) * 2); margin-left: calc(var(--pu) * -1);
+  background: linear-gradient(90deg, var(--ink) 0 33.4%, var(--parch) 33.4% 66.7%, var(--ink) 66.7%);
+  clip-path: polygon(0 0, 100% 0, 66.7% 50%, 66.7% 100%, 33.3% 100%, 33.3% 50%);
+}
+@keyframes bk-pop { from { opacity: 0; transform: translate(-50%, -80%); } to { opacity: 1; transform: translate(-50%, -100%); } }
+@keyframes bk-out { to { opacity: 0; } }
+
+/* ---------- phase transitions (Saloon.tsx PhaseFx): one low-res canvas, scaled by P, pixel-stepped ---------- */
+.wipe.ptx canvas { position: absolute; left: 0; top: 0; image-rendering: pixelated; }
+.wipe.ptx-fade { background: #050302; opacity: 0; animation: ptx-fade var(--pt-all, 420ms) linear both; }
+@keyframes ptx-fade { 0% { opacity: 0; } 40%, 60% { opacity: 1; } 100% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .bk-say-in { animation: bk-out .2s steps(2, end) var(--life, 2400ms) forwards; }
+}

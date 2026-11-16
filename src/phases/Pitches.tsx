@@ -4,6 +4,7 @@ import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import { Avatar } from './Lobby';
 import Cover from '../scene/Cover';
+import { ShotArt } from '../ui/ShotFlip';
 import { play } from '../scene/Dock';
 import { PagedDeck, tossOrTake, usePages, type CellSize } from './Nominate';
 import { settingsOf } from './Lobby';
@@ -125,12 +126,12 @@ export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | '
     return (
       <div key={p.appid} className={`nm-card nm-pcard ${mine ? 'is-mine' : ''} ${by.length ? 'is-nom' : ''} ${myVote ? `voted-${myVote}` : ''}`}>
         <span className="nm-face">
-          <span className="nm-art">
+          <ShotArt appid={p.appid} className="nm-art">
             <Cover appid={p.appid} name={p.name} kind="header" />
             {p.discount ? <span className="nm-disc">-{p.discount}%</span> : null}
             <span className="nm-ptag">{p.price || '$ ?'}</span>
             {others.length > 0 && <span className="nm-by">{others.slice(0, 3).map((o) => <Avatar key={o.id} p={o} size={16} />)}</span>}
-          </span>
+          </ShotArt>
           <span className="nm-name" title={p.name}>{p.name}</span>
           <span className="nm-meta"><span className="nm-hrs">by <b>{p.by === me ? 'you' : pitcher?.name ?? 'someone'}</b></span>
             {p.by === me && (

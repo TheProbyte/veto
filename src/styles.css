@@ -28,6 +28,8 @@
   /* pixel cursors (src/ui/cursors.ts swaps in the images on fine pointers); keyword fallbacks */
   --cur-default: default; --cur-pointer: pointer; --cur-text: text; --cur-aim: crosshair;
   --cur-grab: grab; --cur-grabbing: grabbing; --cur-no: not-allowed; --cur-wait: wait;
+  /* table theme (src/ui/tableTheme.ts sets the live values from settings.felt / settings.deck) */
+  --felt-base: #1f4a2c; --felt-light: #2f6a3e; --felt-dark: #12301c; --deck-a: #9e1b1b; --deck-b: #e8d5b5;
   --noise: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='.33 .33 .33 0 0 .33 .33 .33 0 0 .33 .33 .33 0 0 0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 *, *::before, *::after { box-sizing: border-box; }
@@ -47,11 +49,6 @@ button:disabled, input:disabled, select:disabled, [aria-disabled='true'] { curso
 .dock-card:active { cursor: var(--cur-grabbing); }
 canvas { image-rendering: pixelated; }
 
-.loading {
-  position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg);
-  font-family: var(--px); font-size: 20px; color: var(--amber); letter-spacing: .04em;
-  animation: pulse 1.2s steps(2) infinite;
-}
 .toast {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 90;
   padding: 8px 16px; font-family: var(--px); font-size: calc(var(--pt) * 7); background: var(--wood0); color: var(--parch);
@@ -74,7 +71,7 @@ canvas { image-rendering: pixelated; }
   box-shadow: inset var(--pu) var(--pu) 0 0 var(--hi), inset calc(var(--pu) * -1) calc(var(--pu) * -1) 0 0 var(--lo), 0 calc(-1 * var(--b)) 0 0 var(--edge), calc(-1 * var(--b)) 0 0 0 var(--edge), var(--b) 0 0 0 var(--edge), 0 calc(var(--b) + var(--depth)) 0 0 var(--edge);
   transform: translateY(0); transition: none; user-select: none; -webkit-user-select: none; text-decoration: none;
 }
-.px-btn:hover { filter: brightness(1.12); }
+@media (hover: hover) { .px-btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(calc(var(--pu) * -1)); --depth: calc(var(--pu) * 3); } }
 .px-btn:active { transform: translateY(var(--pu)); --depth: var(--pu); }
 .px-btn:disabled { cursor: var(--cur-no); filter: grayscale(.7) brightness(.6); transform: none; }
 .px-btn-sm { padding: 6px 10px; font-size: calc(var(--pt) * 7); }
@@ -552,7 +549,7 @@ canvas { image-rendering: pixelated; }
   .finalists li { font-size: calc(var(--pt) * 7); padding: 4px 8px 2px; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* result: poster + LAUNCH in one screen, the rest scrolls */
-  .phase-result { --front-top: clamp(calc(env(safe-area-inset-top) + 12px), calc(100dvh - 530px), var(--stage-top)); }
+  .phase-result { --front-top: clamp(calc(env(safe-area-inset-top) + 12px), calc(100dvh - 470px), var(--stage-top)); }
   .result { margin-top: 0; gap: 14px; }
   .poster-wrap { width: min(78vw, 360px); }
   .poster { padding: 18px 16px 20px; }
@@ -886,10 +883,7 @@ canvas.chat-bust { image-rendering: pixelated; }
 .chat-tab-txt { writing-mode: vertical-rl; font-family: var(--px-sm); font-size: calc(var(--pt) * 8); letter-spacing: .2em; text-transform: uppercase; }
 .chat-tab-n { min-width: 18px; padding: 2px 3px 1px; background: var(--red); color: #fff2d6; font-family: var(--px-sm); font-size: calc(var(--pt) * 8); text-align: center; }
 /* reserve the panel's column: the phase UI and the dealer's dock centre in what's left */
-.saloon.has-chat .saloon-front { padding-left: calc(var(--chat-w) + var(--chat-gap) * 2 + 8px); }
-.saloon.has-chat .dock { padding-left: calc(var(--chat-w) + var(--chat-gap) * 2 + 8px); }
-.saloon.has-chat .dock-in { width: min(960px, 100% - 32px); }
-.saloon.has-chat-tab .saloon-front { padding-left: 44px; }
+
 @media (prefers-reduced-motion: reduce) { .chat, .chat-line { animation: none; } }
 
 /* =====================================================================
@@ -980,3 +974,40 @@ html.cat-hover .saloon-front, html.cat-hover .saloon-stage { cursor: var(--cur-p
 .emo-wheel .emo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 4px; }
 .emo-wheel .emo-e { min-width: 0; padding-left: 0; padding-right: 0; }
 .emo-wheel .emo-e span:last-child { font-size: calc(var(--pt) * 7); white-space: normal; text-align: center; line-height: 1.15; }
+
+/* ================= pass 10: loading screen, card backs, screenshot flip ================= */
+/* pixel loading screen: a stagecoach across a desert strip */
+.ld { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--pt) * 8); background: var(--bg);
+  background-image: radial-gradient(ellipse 60% 40% at 50% 50%, rgba(255,138,61,.12), transparent 70%); }
+.ld-cv { display: block; width: min(92vw, calc(96px * 6)); height: auto; aspect-ratio: 96 / 30; image-rendering: pixelated;
+  box-shadow: 0 0 0 calc(var(--pu) * 2) #120904, 0 0 0 calc(var(--pu) * 3) #6b3f1c, 0 0 0 calc(var(--pu) * 5) #120904; }
+.ld-label { font-family: var(--px); font-weight: 600; font-size: calc(var(--pt) * 9); letter-spacing: .04em; color: var(--amber); text-shadow: var(--pt) var(--pt) 0 #000; text-align: center; padding: 0 16px; }
+.ld-dots i { font-style: normal; animation: ld-dot 1.2s steps(1, end) infinite; opacity: 0; }
+.ld-dots i:nth-child(2) { animation-delay: .3s; }
+.ld-dots i:nth-child(3) { animation-delay: .6s; }
+@keyframes ld-dot { 0% { opacity: 0; } 25%, 100% { opacity: 1; } }
+.ld-inline { position: static; inset: auto; z-index: auto; flex-direction: row; gap: calc(var(--pt) * 5); background: none; padding: 2px 0; }
+.ld-inline .ld-cv { width: calc(96px * 1.5); box-shadow: 0 0 0 var(--pu) #120904; }
+.ld-inline .ld-label { font-size: calc(var(--pt) * 7); padding: 0; color: #f0e6c8; }
+@media (max-width: 420px) { .ld-inline .ld-cv { width: 96px; } }
+@media (prefers-reduced-motion: reduce) { .ld-dots i { animation: none; opacity: 1; } }
+
+/* card backs: the host's deck colours (--deck-a back, --deck-b ink): an inked frame + a diamond lattice */
+.deck-back {
+  --db-ink: color-mix(in srgb, var(--deck-b) 55%, transparent);
+  background:
+    linear-gradient(var(--deck-b), var(--deck-b)) left top / 100% 2px no-repeat,
+    linear-gradient(var(--deck-b), var(--deck-b)) left bottom / 100% 2px no-repeat,
+    linear-gradient(var(--deck-b), var(--deck-b)) left top / 2px 100% no-repeat,
+    linear-gradient(var(--deck-b), var(--deck-b)) right top / 2px 100% no-repeat,
+    repeating-linear-gradient(45deg, var(--db-ink) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(-45deg, var(--db-ink) 0 1px, transparent 1px 5px),
+    var(--deck-a) !important;
+}
+/* screenshot flip over card art */
+.shotflip { position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: 0; }
+.shotflip.is-on { opacity: 1; }
+.shotflip-cv { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.shotflip-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--pu) * 1); display: flex; justify-content: center; gap: var(--pu); }
+.shotflip-dots i { width: calc(var(--pu) * 1.5); height: calc(var(--pu) * 1.5); min-width: 3px; min-height: 3px; background: rgba(11,7,5,.7); box-shadow: 0 0 0 1px rgba(232,213,181,.6); }
+.shotflip-dots i.on { background: var(--amber); }

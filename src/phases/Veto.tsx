@@ -99,6 +99,34 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // mouse wheel / trackpad: one step per notch, throttled so trackpad inertia doesn't skip past games
+  // (native non-passive listener on the carousel only, so Boot Hill / the sheriff panel still scroll)
+  const carRef = useRef<HTMLDivElement>(null);
+  const wheelRef = useRef({ aimAt, ok: myTurn && !hush && n > 1 });
+  wheelRef.current = { aimAt, ok: myTurn && !hush && n > 1 };
+  useEffect(() => {
+    const el = carRef.current;
+    if (!el) return;
+    let acc = 0, last = 0, lastEv = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (!wheelRef.current.ok) return;
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (!d) return;
+      e.preventDefault();
+      const t = performance.now();
+      if (t - lastEv > 300) acc = 0;
+      lastEv = t;
+      acc += e.deltaMode === 1 ? d * 30 : e.deltaMode === 2 ? d * 400 : d;
+      if (Math.abs(acc) < 40 || t - last < 220) return;
+      last = t;
+      const dir = acc > 0 ? 1 : -1;
+      acc = 0;
+      wheelRef.current.aimAt(dir);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   // swipe (touch, pen or mouse): ~30px horizontal flick aims; any real drag cancels the tap-to-aim click
   const drag = useRef<{ x: number; y: number; id: number } | null>(null);
   const swiped = useRef(false);
@@ -151,7 +179,6 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
 
   // desktop: the gun sits in flow under the carousel (sticky to the bottom edge). Scroll the stage so the box,
   // its name and the raised gun are all on screen together instead of the gun covering the box.
-  const carRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const t = window.setTimeout(() => {
       const car = carRef.current;
@@ -246,7 +273,6 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
       </div>
 
       <div className={`vt-gunbar ${canFire ? 'live' : 'idle'}`}>
-        <button className="vt-arrow px-btn" disabled={!canFire || n < 2} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(-1)} aria-label="Aim left">◀</button>
         <Revolver
           live={canFire}
           revenge={!!revengeOn}
@@ -255,8 +281,7 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
           label={canFire || hush ? '' : `Waiting on ${shooterName}`}
           aimName={center?.name}
         />
-        <button className="vt-arrow px-btn" disabled={!canFire || n < 2} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
-        {canFire && <div className="vt-hint">◀ ▶ aim · click or Space fires</div>}
+        {canFire && <div className="vt-hint">scroll or ← → aims · click or Space fires</div>}
       </div>
 
       {dead.length > 0 && (

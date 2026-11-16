@@ -8,6 +8,9 @@ import Pitches from './Pitches';
 import DraftHand from './DraftHand';
 import Cover from '../scene/Cover';
 import { DockActions, launchCard, play } from '../scene/Dock';
+import { ShotArt } from '../ui/ShotFlip';
+import LoadingScreen from '../ui/LoadingScreen';
+import { useTableTheme } from '../ui/tableTheme';
 import './nominate.css';
 
 const SUITS = ['♠', '♥', '♦', '♣'];
@@ -219,7 +222,7 @@ export function PickSlots({ mine, max, me, send, slotsRef }: { mine: BoardGame[]
     <div className={`nm-slots ${mine.length >= max ? 'is-full' : ''}`} ref={slotsRef} role="group" aria-label={`Your picks: ${mine.length} of ${max}`}>
       {Array.from({ length: max }, (_, i) => {
         const g = mine[i];
-        if (!g) return <span key={`e${i}`} className="nm-slot" aria-hidden><b>{SUITS[i % 4]}</b></span>;
+        if (!g) return <span key={`e${i}`} className="nm-slot deck-back" aria-hidden><b>{SUITS[i % 4]}</b></span>;
         const others = g.by.filter((id) => id !== me).length;
         return (
           <button key={g.appid} type="button" className="nm-slot is-filled" onClick={() => tossOrTake(g.appid, true, null, send)}
@@ -291,6 +294,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
   const drafting = settingsOf(state).nominations === 'draft' && !!state.draft;
 
   useTableFit(panelRef, `${state.players.map((p) => p.seat).join(',')}|${drafting}`);
+  useTableTheme(settingsOf(state));
 
   const filtered = (coopOnly ? 1 : 0) + (fresh ? 1 : 0) + (blood ? 1 : 0) + (minHours ? 1 : 0);
   const visible = state.pool.filter((g) => !(coopOnly && g.coop === false) && !(fresh && g.recent) && !(blood && g.hours > 0) && g.hours >= minHours);
@@ -356,7 +360,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
       <button key={g.appid} type="button" className={`nm-card ${isMine ? 'is-mine' : ''} ${others.length ? 'is-nom' : ''} ${full ? 'is-full' : ''} ${tossed === g.appid ? 'is-tossed' : ''}`}
         onClick={(e) => toggle(g, e)} aria-pressed={isMine} title={hoursTitle(g)}>
         <span className="nm-face">
-          <span className="nm-art">
+          <ShotArt appid={g.appid} className="nm-art">
             <Cover appid={g.appid} name={g.name} kind="header" />
             {g.discount ? <span className="nm-disc">-{g.discount}%</span> : null}
             {others.length > 0 && (
@@ -364,7 +368,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
                 {others.slice(0, 3).map((p) => <Avatar key={p.id} p={p} size={16} />)}{others.length > 3 && <small>+{others.length - 3}</small>}
               </span>
             )}
-          </span>
+          </ShotArt>
           <span className="nm-name">{g.name}</span>
           <span className="nm-meta">
             <span className="nm-hrs">{g.hours > 0 ? <><b>{hrs(g.hours)}h</b> together</> : 'Never played'}</span>
@@ -448,7 +452,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
               </div>
               {dealEl}
             </div>
-            {state.poolLoading && <div className="nm-loading"><i className="nh-spin" /> Reading everyone's libraries…</div>}
+            {state.poolLoading && <div className="nm-loading"><LoadingScreen inline label="Rifling through everyone's libraries…" /></div>}
             <PagedDeck pager={pager} label={tier === 'all' ? 'Games everyone owns' : 'Games almost everyone owns'}
               empty={empty ? <div className="nm-empty">No games in common. Pitch one under Buy new.</div> : list.length === 0 && !state.poolLoading ? (
                 <div className="nm-empty">

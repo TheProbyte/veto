@@ -3,6 +3,7 @@ import { LOOK_COUNTS, LOOK_LABELS, LOOK_UNLOCKS, lookUnlocked, type Look, type P
 import BustPreview from '../pixel/BustPreview';
 import { DockActions, play } from '../scene/Dock';
 import { sfx } from '../sfx';
+import PixelIcon from '../ui/PixelIcon';
 import './panels.css';
 
 const FIELDS: { k: keyof Look; label: string }[] = [
@@ -108,13 +109,14 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
   return (
     <div className={`cc ${tip ? 'is-tipping' : ''}`}>
       <div className="cc-stage">
+        <div className="cc-scenery" aria-hidden><i className="cc-sun" /><i className="cc-town" /><i className="cc-walk" /></div>
         <div className="cc-spot" aria-hidden />
         <div className="cc-bust" ref={bustRef}>
           <BustPreview look={draft} scale={scale} tipHat={tip} className="cc-bust-cv" />
         </div>
         {puff > 0 && <span key={puff} className="cc-puff" aria-hidden><i /><i /><i /><i /><i /></span>}
         <button type="button" className="nh-btn nh-btn-sm cc-random" onClick={shuffle} disabled={tip} aria-label="Random look">
-          <span aria-hidden>🎲</span> Random
+          <PixelIcon name="dice" /> Random
         </button>
       </div>
 
@@ -126,7 +128,7 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
           const u = open ? undefined : unlockOf(k, v);
           return (
             <div key={k} className={`cc-row ${open ? '' : 'is-locked'}`}>
-              <button type="button" className="cc-arrow" onClick={() => cycle(k, -1)} aria-label={`Previous ${label.toLowerCase()}`} disabled={tip}>◀</button>
+              <button type="button" className="cc-arrow" onClick={() => cycle(k, -1)} aria-label={`Previous ${label.toLowerCase()}`} disabled={tip}><PixelIcon name="arrowL" /></button>
               <div className="cc-mid">
                 <span className="cc-field">{label}</span>
                 <b className="cc-val" aria-live="polite">{!open && <span aria-label="locked">🔒 </span>}{LOOK_LABELS[k][v]}</b>
@@ -137,7 +139,7 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
                   </span>
                 )}
               </div>
-              <button type="button" className="cc-arrow" onClick={() => cycle(k, 1)} aria-label={`Next ${label.toLowerCase()}`} disabled={tip}>▶</button>
+              <button type="button" className="cc-arrow" onClick={() => cycle(k, 1)} aria-label={`Next ${label.toLowerCase()}`} disabled={tip}><PixelIcon name="arrowR" /></button>
             </div>
           );
         })}
@@ -157,7 +159,7 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
         )}
         <div className="dock-act dock-act-row">
           <button type="button" className="nh-btn nh-btn-sm cc-random cc-random-dock" onClick={shuffle} disabled={tip} aria-label="Random look">
-            <span aria-hidden>🎲</span> Random
+            <PixelIcon name="dice" /> Random
           </button>
           {!first && <button type="button" className="nh-linkbtn" onClick={() => { sfx.click(); onDone(); }} disabled={tip}>back</button>}
           <button type="button" className={`nh-btn nh-btn-big cc-save ${locked.length ? 'is-locked' : ''}`} onClick={save} disabled={tip} aria-disabled={locked.length > 0}>

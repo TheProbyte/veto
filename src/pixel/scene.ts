@@ -1,6 +1,7 @@
 import { PAL, hexRgb, rnd } from './palette';
 import { bayer, circle, ditherBands, ellipse, line, makeCanvas, px } from './dither';
-import type { Look } from '../../shared/types';
+import { FELTS, type Look } from '../../shared/types';
+import { BK_BOX, BK_HEAD, drawBarkeep, type BkPose } from './barkeep';
 import { peekPixelized, pixelize } from './pixelize';
 import { BUST_H, BUST_W, bustFor, poseKey, renderBust, shade, styleSig, type BustLook, type Pose } from './sprites';
 
@@ -452,7 +453,14 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
   geo.decor = used;
 }
 
-function drawTable(c: Ctx, L: Layout) {
+/** felt shades (darkest..lightest) for a FELTS theme */
+function feltCols(i = 0): [string, string, string, string] {
+  const f = FELTS[Math.max(0, Math.min(FELTS.length - 1, i | 0))] ?? FELTS[0];
+  return [shade(f.dark, 0.62), f.dark, f.base, f.light];
+}
+
+function drawTable(c: Ctx, L: Layout, felt = 0) {
+  const [felt0, felt1, felt2, felt3] = feltCols(felt);
   const { W, H, cx, cy, rx, ry } = L;
   // floor below everything near the bottom
   for (let y = cy + ry - 2; y < H; y++) {
@@ -476,8 +484,8 @@ function drawTable(c: Ctx, L: Layout) {
       const d = Math.hypot((x - cx) / frx, (y - (cy - fry * 0.4)) / fry);
       const v = 1 - d;
       const b = bayer(x, y);
-      const col = v > 0.55 + b * 0.2 ? PAL.felt3 : v > 0.25 + b * 0.25 ? PAL.felt2 : v > b * 0.25 ? PAL.felt1 : PAL.felt0;
-      c.fillStyle = rnd(x, y, 55) > 0.97 ? PAL.felt0 : col; c.fillRect(x, y, 1, 1);
+      const col = v > 0.55 + b * 0.2 ? felt3 : v > 0.25 + b * 0.25 ? felt2 : v > b * 0.25 ? felt1 : felt0;
+      c.fillStyle = rnd(x, y, 55) > 0.97 ? felt0 : col; c.fillRect(x, y, 1, 1);
     }
   }
   // rim grain
@@ -529,7 +537,9 @@ export type SceneEvt =
   | { k: 'emote'; pid: string; emote: string; at: number }
   | { k: 'bolt'; big: boolean; at: number } // lightning (big = on top of a slow-mo / revenge shot)
   | { k: 'doors'; leave: boolean; at: number }
-  | { k: 'slowmo'; at: number };
+  | { k: 'slowmo'; at: number }
+  | { k: 'talk'; ms: number; at: number } // the barkeep is narrating
+  | { k: 'cheers'; at: number }; // the barkeep raises a glass (the result)
 export interface SceneFX {
   queue: SceneEvt[];
   /** piano tempo in bpm right now (0 = the pianist rests) */
@@ -548,6 +558,29 @@ export interface SceneData {
   fx?: SceneFX;
   /** appid of the game this table played last time (the "LAST TIME" wanted poster); 0/undefined = generic poster */
   poster?: number;
+  /** table felt theme (index into FELTS) */
+  felt?: number;
+}
+
+/** something on the back wall / ceiling you can click or tap */
+export type HotKind = 'cat' | 'barkeep' | 'lamp' | 'bottles' | 'doors' | 'piano' | 'window';
+export type PokeResult =
+  | { k: 'cat'; act: CatAct }
+  | { k: 'barkeep'; x: number; y: number } // x, y: above his hat, in un-shifted (wall layer) scene px
+  | { k: 'doors' } | { k: 'lamp' } | { k: 'piano' } | { k: 'bottles' }
+  | { k: 'window'; big: boolean };
+interface Off { x: number; y: number }
+const OFF0: Off = { x: 0, y: 0 };
+/** parallax travel per layer (scene px at full deflection) */
+const PLX = { wall: { x: 1, y: 1 }, players: { x: 2, y: 1 }, table: { x: 3, y: 2 } };
+/** draw a full-size layer canvas shifted by d (under the current transform), stretching its edge rows/columns into the gap */
+function blit(c: Ctx, cv: HTMLCanvasElement, d: Off) {
+  const W = cv.width, H = cv.height;
+  c.drawImage(cv, 0, 0);
+  if (d.x > 0) c.drawImage(cv, 0, 0, 1, H, -d.x - 4, 0, d.x + 4, H);
+  if (d.x < 0) c.drawImage(cv, W - 1, 0, 1, H, W, 0, -d.x + 4, H);
+  if (d.y > 0) c.drawImage(cv, 0, 0, W, 1, 0, -d.y - 4, W, d.y + 4);
+  if (d.y < 0) c.drawImage(cv, 0, H - 1, W, 1, 0, H, W, -d.y + 4);
 }
 
 /** emote durations (ms of scene time); keep in step with the HTML caption in Saloon (EMOTE_POP_MS) */
@@ -707,9 +740,27 @@ export class SceneRenderer {
   shards: Shard[] = [];
   /** knocked bottles: index -> scene time it's back on the shelf */
   missing = new Map<number, number>();
+  /** table felt theme the table layer was painted with */
+  feltIdx = 0;
+  // ---- parallax: target / eased deflection (-1..1 each axis, set by PixelScene from the mouse) and this frame's layer offsets
+  plxT = { x: 0, y: 0 };
+  plx = { x: 0, y: 0 };
+  lw: Off = OFF0; lp: Off = OFF0; lt: Off = OFF0;
+  frames = 0;
+  // ---- the barkeep behind the back bar
+  bk = { x: 0, tx: 0, y: 0, placed: false, nextSpot: 0, walk: 0, f: 0, fT: 0, idle: 'polish' as BkPose, idleUntil: 4000, talkUntil: 0, cheersV: -1e9, pointV: -1e9, pointId: '', blinkAt: 2500 };
+  // ---- clickable props
+  lampKick = { v: -1e9, amp: 0 };
+  lampPos = { x: -99, y: -99 };
+  pianoV = -1e9;
+  winV = -1e9;
+  boltWin = -1;
+  clinks: { bi: number; v: number }[] = [];
+  shelfCv: { bare: HTMLCanvasElement; full: HTMLCanvasElement } | null = null;
 
-  constructor(L: Layout, opts: { motes?: number; reduce?: boolean; low?: boolean } = {}) {
+  constructor(L: Layout, opts: { motes?: number; reduce?: boolean; low?: boolean; felt?: number } = {}) {
     this.L = L;
+    this.feltIdx = opts.felt ?? 0;
     this.reduce = !!opts.reduce;
     this.low = !!opts.low;
     const { W, H } = L;
@@ -719,7 +770,7 @@ export class SceneRenderer {
     drawWall(bc, L, this.emis, this.cool, this.geo);
     this.bg = bg; this.bgc = bc;
     const [tb, tc] = makeCanvas(W, H);
-    drawTable(tc, L);
+    drawTable(tc, L, this.feltIdx);
     this.table = tb;
     this.fg = new Uint8Array(W * H);
     this.tableMask = alphaMask(tb);
@@ -759,6 +810,17 @@ export class SceneRenderer {
       this.rain.push(Array.from({ length: n }, (_, i) => ({ x: rnd(ri, i, 91) * (r.w + 6), y: rnd(ri, i, 92) * r.h, v: 0.09 + rnd(ri, i, 93) * 0.07, len: 2 + Math.floor(rnd(ri, i, 94) * 3) })));
     });
     this.cat.x = this.geo.shelf.x0 + 4;
+    this.bk.y = this.geo.shelf.y - 22;
+  }
+
+  /** repaint the table layer in another felt (the host changed it); the mask is unchanged */
+  setFelt(i: number) {
+    if (i === this.feltIdx) return;
+    this.feltIdx = i;
+    const tc = this.table.getContext('2d');
+    if (!tc) return;
+    tc.clearRect(0, 0, this.L.W, this.L.H);
+    drawTable(tc, this.L, i);
   }
 
   sprite(p: ScenePlayer, g: SeatGeom, blink: boolean, lit: boolean, rimRight: boolean, gun = 0, ps: Pose2 = {}) {
@@ -821,6 +883,8 @@ export class SceneRenderer {
       else if (e.k === 'bolt') { this.bolt = { v: this.vt, big: e.big }; this.nextBolt = this.vt + 9000 + Math.random() * 12000; }
       else if (e.k === 'doors') { this.doorV = this.vt; this.doorLeave = e.leave; this.spawnGust(e.leave ? 34 : 18); }
       else if (e.k === 'slowmo') this.slowUntil = t + 1500;
+      else if (e.k === 'talk') this.bk.talkUntil = this.vt + Math.max(600, e.ms - Math.max(0, t - e.at));
+      else if (e.k === 'cheers') this.bk.cheersV = this.vt;
     }
   }
 
@@ -846,6 +910,16 @@ export class SceneRenderer {
     this.drain(t, D);
     const sec = vt / 1000;
     this.setPoster(D.poster ?? 0);
+    this.setFelt(D.felt ?? 0);
+    this.frames++;
+    // ---- parallax: ease toward the mouse, then whole-pixel offsets per layer (far layers move least)
+    {
+      const ek = this.reduce ? 1 : Math.min(1, dtReal / 240);
+      this.plx.x += (this.plxT.x - this.plx.x) * ek; this.plx.y += (this.plxT.y - this.plx.y) * ek;
+      const o = (k: Off): Off => ({ x: Math.round(-this.plx.x * k.x) || 0, y: Math.round(-this.plx.y * k.y) || 0 });
+      this.lw = o(PLX.wall); this.lp = o(PLX.players); this.lt = o(PLX.table);
+    }
+    const lw = this.lw, lp = this.lp, lt = this.lt;
     // shot age in scene time, stamped when first seen
     if (D.shot && D.shot.at !== this.shotSeen) {
       this.shotSeen = D.shot.at;
@@ -882,9 +956,10 @@ export class SceneRenderer {
       ox = Math.round((rnd(Math.floor(vt / 60), 1) - 0.5) * 2 * amp);
       oy = Math.round((rnd(Math.floor(vt / 60), 2) - 0.5) * 2 * amp);
     }
-    c.setTransform(1, 0, 0, 1, ox, oy);
-    c.fillStyle = PAL.ink; c.fillRect(-4, -4, W + 8, H + 8);
-    c.drawImage(this.bg, 0, 0);
+    const T = (d: Off) => c.setTransform(1, 0, 0, 1, ox + d.x, oy + d.y);
+    T(lw);
+    c.fillStyle = PAL.ink; c.fillRect(-8, -8, W + 16, H + 16);
+    blit(c, this.bg, lw);
 
     // ---- windows + doorway: rain, lightning, dawn
     this.drawWeather(c, vt, dt, boltK, storm);
@@ -903,8 +978,17 @@ export class SceneRenderer {
     // lamp swing (pendulum), biased toward the shooter
     const target = shooterG ? Math.max(-0.35, Math.min(0.35, Math.atan2(shooterG.g.x - cx, L.tableTop * 1.6))) : 0;
     this.lampA += (target - this.lampA) * (this.reduce ? 1 : 0.08);
-    const a = this.reduce ? this.lampA : this.lampA + Math.sin(sec * 1.1) * 0.05 + Math.sin(sec * 2.7) * 0.012;
+    // a click knocks it swinging (a damped pendulum on top of the drift)
+    const kAge = vt - this.lampKick.v;
+    const kick = kAge < 4000 ? this.lampKick.amp * Math.exp(-kAge / 1100) * Math.sin((kAge / 1000) * Math.PI * 2 * 0.9) : 0;
+    const a = this.reduce ? this.lampA + kick * 0.3 : this.lampA + Math.sin(sec * 1.1) * 0.05 + Math.sin(sec * 2.7) * 0.012 + kick;
     const lx = Math.round(cx + Math.sin(a) * L.lampLen), ly = Math.round(Math.cos(a) * L.lampLen);
+    this.lampPos = { x: lx + lp.x, y: ly + lp.y };
+
+    // ---- the barkeep, behind the back bar (wall layer, behind the players)
+    T(lw);
+    this.drawBarkeep(c, vt, dt, D, shooterG?.g, turnAge, shotAge, lx);
+    T(lp);
 
     // idle animations: random, staggered, never during your turn
     if (!this.reduce) for (const { p } of geoms) {
@@ -963,16 +1047,19 @@ export class SceneRenderer {
       c.drawImage(cv, bx, by);
       let m = this.spriteMasks.get(cv);
       if (!m) { m = alphaMask(cv); this.spriteMasks.set(cv, m); }
-      stampMask(this.fg, W, H, m, cv.width, cv.height, bx + ox, by + oy);
+      stampMask(this.fg, W, H, m, cv.width, cv.height, bx + ox + lp.x, by + oy + lp.y);
     }
-    c.drawImage(this.table, 0, 0);
-    { // the table covers the busts' lower edge: it takes the floor spill again
+    T(lt);
+    blit(c, this.table, lt);
+    { // the table covers the busts' lower edge (2 = table: lit in table space, takes no wall spill)
       const tm = this.tableMask, fg = this.fg;
-      for (let y = Math.max(0, oy); y < Math.min(H, H + oy); y++) {
-        const r = y * W, rs = (y - oy) * W;
-        for (let x = Math.max(0, ox); x < Math.min(W, W + ox); x++) if (tm[rs + x - ox]) fg[r + x] = 0;
+      const tox = ox + lt.x, toy = oy + lt.y;
+      for (let y = 0; y < H; y++) {
+        const r = y * W, ys = Math.min(H - 1, Math.max(0, y - toy)) * W;
+        for (let x = 0; x < W; x++) if (tm[ys + Math.min(W - 1, Math.max(0, x - tox))]) fg[r + x] = 2;
       }
     }
+    T(lp);
 
     // chain + lamp body (unlit layer; flame drawn after lighting)
     for (let i = 0; i <= L.lampLen - 2; i++) {
