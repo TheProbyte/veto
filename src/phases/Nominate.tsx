@@ -1,8 +1,8 @@
 import { useMemo, useState, type MouseEvent } from 'react';
-import { MAX_NOMS, type PoolGame, type Player } from '../../shared/types';
+import type { PoolGame, Player } from '../../shared/types';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
-import { Avatar } from './Lobby';
+import { Avatar, settingsOf, TableRules } from './Lobby';
 import Pitches from './Pitches';
 import Cover from '../scene/Cover';
 import { DockActions, launchCard, play } from '../scene/Dock';
@@ -18,6 +18,8 @@ export function tossOrTake(appid: number, mineNow: boolean, from: Element | null
   send({ t: 'nominate', appid });
 }
 
+const isPhone = () => { try { return !!window.matchMedia?.('(max-width: 640px)').matches; } catch { return false; } };
+
 function hrs(h: number) {
   if (h >= 1000) return `${(h / 1000).toFixed(1)}k`;
   return `${Math.round(h)}`;
@@ -26,6 +28,7 @@ function hrs(h: number) {
 export default function Nominate({ state, me, send }: RoomProps) {
   const [coopOnly, setCoopOnly] = useState(true);
   const [fresh, setFresh] = useState(false);
+  const [blood, setBlood] = useState(false);
   const [minHours, setMinHours] = useState(0);
   const [more, setMore] = useState<Record<string, boolean>>({});
   const byId = useMemo(() => new Map(state.players.map((p) => [p.id, p])), [state.players]);
@@ -37,8 +40,20 @@ export default function Nominate({ state, me, send }: RoomProps) {
     return m;
   }, [state.board]);
   const myCount = state.board.filter((b) => b.by.includes(me)).length;
+  const MAX_NOMS = settingsOf(state).picks;
+  const [phone] = useState(isPhone);
 
-  const visible = state.pool.filter((g) => !(coopOnly && g.coop === false) && !(fresh && g.recent) && g.hours >= minHours);
+  const visible = state.pool.filter((g) => !(coopOnly && g.coop === false) && !(fresh && g.recent) && !(blood && g.hours > 0) && g.hours >= minHours);
+
+  // deal of the night: the biggest discount (>= 30%) on something the posse is short on, from the unfiltered pool + pitches
+  const deal = useMemo(() => {
+    type D = { appid: number; name: string; discount: number; price?: string; missing: string[] | null };
+    let best: D | null = null;
+    for (const g of state.pool) if (g.tier === 'almost' && (g.discount ?? 0) >= 30 && (!best || g.discount! > best.discount)) best = { appid: g.appid, name: g.name, discount: g.discount!, price: g.price, missing: g.missing };
+    for (const p of state.pitches || []) if ((p.discount ?? 0) >= 30 && (!best || p.discount! > best.discount)) best = { appid: p.appid, name: p.name, discount: p.discount!, price: p.price, missing: null };
+    return best;
+  }, [state.pool, state.pitches]);
+  const dealWho = deal ? (deal.missing ? deal.missing.map((id) => byId.get(id)?.name).filter(Boolean).join(', ') || 'Somebody' : 'Everyone') : '';
   const all = visible.filter((g) => g.tier === 'all');
   const almost = visible.filter((g) => g.tier === 'almost');
 
@@ -61,6 +76,25 @@ export default function Nominate({ state, me, send }: RoomProps) {
     tossOrTake(g.appid, mineNow, e.currentTarget.querySelector('.nh-game-art') ?? e.currentTarget, send);
   };
 
+  /** "Bo 300h · You 2h · Dee 0h": owners by hours, most first (missing players are listed under Short) */
+  const hoursRows = (g: PoolGame) => {
+    const hb = g.hoursBy || {};
+    const rows = g.owners.map((id) => ({ id, h: hb[id] ?? 0 })).sort((a, b) => b.h - a.h || (a.id === me ? -1 : b.id === me ? 1 : 0));
+    if (!rows.length || !g.hoursBy) return null;
+    const cap = phone ? 3 : 5;
+    const shown = rows.slice(0, cap);
+    return (
+      <div className="nh-hby" aria-label="Hours played">
+        {shown.map(({ id, h }) => (
+          <span key={id} className={`nh-hby-p ${id === me ? 'is-me' : ''} ${h === 0 ? 'is-zero' : ''}`}>
+            {id === me ? 'You' : byId.get(id)?.name ?? '?'} <b>{hrs(h)}h</b>
+          </span>
+        ))}
+        {rows.length > cap && <span className="nh-hby-more">+{rows.length - cap}</span>}
+      </div>
+    );
+  };
+
   const card = (g: PoolGame) => {
     const by = nomBy.get(g.appid) || [];
     const mine = by.includes(me);
@@ -80,6 +114,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
             {g.coop === true && <span className="nh-mini co">Co-op</span>}
             {g.recent && <span className="nh-mini rec">Recent</span>}
           </div>
+          {hoursRows(g)}
           {g.tier === 'almost' && g.missing.length > 0 && (
             <div className="nh-missing">
               <span>Short:</span>
@@ -116,9 +151,26 @@ export default function Nominate({ state, me, send }: RoomProps) {
         </div>
       </header>
 
+      {state.phase === 'nominate' && <div className="nh-nom-rules"><TableRules state={state} isHost={isHost} send={send} collapsible /></div>}
+
+      {deal && (
+        <a className="nh-deal" href={`https://store.steampowered.com/app/${deal.appid}`} target="_blank" rel="noopener noreferrer"
+          onClick={() => sfx.click()} aria-label={`Deal of the night: ${deal.name}, ${deal.discount}% off. Gift it on Steam`}>
+          <span className="nh-deal-art"><Cover appid={deal.appid} name={deal.name} kind="header" /></span>
+          <span className="nh-deal-txt">
+            <span className="nh-deal-k">Deal of the night</span>
+            <b className="nh-deal-name">{deal.name}</b>
+            <span className="nh-deal-line">{dealWho} need{deal.missing && deal.missing.length > 1 ? '' : 's'} it · <em>-{deal.discount}%</em>{deal.price ? <> · {deal.price}</> : null}</span>
+          </span>
+          <span className="nh-deal-go">Gift it ↗</span>
+        </a>
+      )}
+
       <div className="nh-filters">
         <label className="nh-toggle"><input type="checkbox" checked={coopOnly} onChange={(e) => { sfx.click(); setCoopOnly(e.target.checked); }} /><span />Multiplayer/co-op only</label>
         <label className="nh-toggle"><input type="checkbox" checked={fresh} onChange={(e) => { sfx.click(); setFresh(e.target.checked); }} /><span />Not played in last 2 weeks</label>
+        <button type="button" className={`nh-fchip ${blood ? 'on' : ''}`} aria-pressed={blood} onClick={() => { sfx.click(); setBlood((b) => !b); }}
+          title="Only games nobody here has played yet">🩸 Fresh blood</button>
         <label className="nh-select">Group hours ≥
           <select value={minHours} aria-label="Minimum group hours" onChange={(e) => { sfx.click(); setMinHours(Number(e.target.value)); }}>
             <option value={0}>Any</option>

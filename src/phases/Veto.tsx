@@ -1,4 +1,4 @@
-import { TURN_MS } from '../../shared/types';
+import { DEFAULT_SETTINGS } from '../../shared/types';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { PixelArt, PixelSprite } from '../pixel/PixelCanvas';
 import { crosshairDraw } from '../pixel/sprites';
@@ -8,6 +8,8 @@ import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import TinStar from '../scene/TinStar';
 import { BUZZ, buzz } from '../scene/haptics';
+import { useShotExtras } from './ShotExtras';
+import './gameplay.css';
 
 export default function Veto({ state, me, send, skew }: RoomProps) {
   const alive = state.board.filter((g) => g.alive);
@@ -21,6 +23,16 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
   const myTurn = shooterId === me && state.turnDeadline > 0;
   const mine = state.players.find((p) => p.id === me);
   const nameOf = (id?: string) => state.players.find((p) => p.id === id)?.name ?? '???';
+  const settings = state.settings ?? DEFAULT_SETTINGS;
+  const turnMs = Math.max(5, settings.turnSecs || 30) * 1000;
+  // how many games survive the shootout: 'last' = 1, 'duel' = 2, 'cylinder' = cylinderAt
+  const finaleN = settings.finale === 'last' ? 1 : settings.finale === 'duel' ? 2 : (settings.cylinderAt ?? 3);
+  const finaleTail = settings.finale === 'last' ? 'last one standing wins' : settings.finale === 'duel' ? 'then a quick-draw duel decides' : 'then the cylinder decides';
+  const finaleNow = settings.finale === 'last' ? 'last one standing' : settings.finale === 'duel' ? 'the quick-draw decides' : 'the cylinder decides';
+  /** the tin star is private: you only ever know about your own */
+  const starred = (g?: { shieldedBy?: string[] }) => !!g?.shieldedBy?.includes(me);
+  const revengeOn = myTurn && mine?.revengeOn ? mine.revengeOn : undefined;
+  useShotExtras(state, skew);
 
   useEffect(() => { if (myTurn) { sfx.cock(); buzz(BUZZ.myTurn); } }, [myTurn, state.turnIdx]);
 
@@ -42,7 +54,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.closest?.('.emo, .sound'))) return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); keyRef.current.aimAt(-1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); keyRef.current.aimAt(1); }
       else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); if (!e.repeat) keyRef.current.fire(); }
@@ -71,14 +83,16 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
   };
   const onEnd = (e: React.PointerEvent) => { if (drag.current?.id === e.pointerId) drag.current = null; };
 
-  const canShield = !!mine && !mine.shieldUsed && !!center && !center.shieldedBy;
+  const [epi, setEpi] = useState<number | null>(null);
+  const epiGame = dead.find((g) => g.appid === epi);
+  const canShield = !!mine && !mine.shieldUsed && !!center && !starred(center);
 
   // tin star spins in and pins on when a shield lands (not for stars already pinned when we arrived)
   const starSeen = useRef<Set<number> | null>(null);
   const [pinning, setPinning] = useState<Set<number>>(() => new Set());
-  const shieldKey = state.board.filter((g) => g.shieldedBy).map((g) => g.appid).join(',');
+  const shieldKey = state.board.filter((g) => starred(g)).map((g) => g.appid).join(',');
   useEffect(() => {
-    const now = new Set(state.board.filter((g) => g.shieldedBy).map((g) => g.appid));
+    const now = new Set(state.board.filter((g) => starred(g)).map((g) => g.appid));
     if (starSeen.current) {
       const fresh = [...now].filter((a) => !starSeen.current!.has(a));
       if (fresh.length) {
@@ -93,15 +107,16 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
   }, [shieldKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className={`veto ${myTurn ? 'my-turn' : ''}`}>
+    <div className={`veto ${myTurn ? 'my-turn' : ''} ${revengeOn ? 'revenge' : ''}`}>
       <div className="veto-head">
         <div className="veto-count">
-          <b>{n}</b> left {n > 3 ? <span>· shoot down to 3, then the cylinder decides</span> : <span>· the cylinder decides</span>}
+          <b>{n}</b> left {n > finaleN ? <span>· shoot down to {finaleN}, {finaleTail}</span> : <span>· {finaleNow}</span>}
         </div>
         <div className="veto-status">
           {myTurn ? <span className="your-shot">Your shot, partner.</span> : <span><b>{shooter?.name ?? 'Someone'}</b> is taking aim…</span>}
         </div>
-        {state.turnDeadline > 0 && <Fuse deadline={state.turnDeadline} skew={skew} mine={myTurn} />}
+        {revengeOn && <div className="gp-revenge-tag">REVENGE on {nameOf(revengeOn)}</div>}
+        {state.turnDeadline > 0 && <Fuse deadline={state.turnDeadline} skew={skew} mine={myTurn} turnMs={turnMs} />}
       </div>
 
       <div className="carousel" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onEnd} onPointerCancel={onEnd}>
@@ -131,15 +146,15 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
                   <PixelArt appid={g.appid} name={g.name} holes={g.cracks ? 1 : 0} cracked={!!g.cracks} />
                   {g.tier === 'pitch' && <span className="gbox-pitch">PITCH</span>}
                   {!!g.cracks && <span className="gbox-more">1 more</span>}
-                  {g.shieldedBy && (pinning.has(g.appid)
+                  {starred(g) && (pinning.has(g.appid)
                     ? <span className="px-star-wrap px-star-pin"><TinStar size={46} className="gbox-star" /></span>
                     : <TinStar size={46} className="gbox-star" />)}
                 </div>
                 {d === 0 && <div className="cbox-name">{g.name}</div>}
-                {d === 0 && g.shieldedBy && <div className="cbox-shield">protected by {nameOf(g.shieldedBy)}'s tin star</div>}
+                {d === 0 && starred(g) && <div className="cbox-shield mine">Your star: a shot here ricochets</div>}
                 {d === 0 && (g.by.length ? <div className="cbox-by">brought by {g.by.map(nameOf).join(', ')}</div> : <div className="cbox-by">dealt by the house</div>)}
               </div>
-              {d === 0 && <Crosshair hot={myTurn} />}
+              {d === 0 && <Crosshair hot={myTurn} revenge={!!revengeOn} />}
             </div>
           );
         })}
@@ -149,7 +164,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
       {(myTurn || canShield) && (
         <div className={`veto-controls ${myTurn ? '' : 'idle'}`}>
           <button className="btn-arrow turn-btn px-btn" disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(-1)} aria-label="Aim left">◀</button>
-          <button className="btn-fire turn-btn px-btn" disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={fire}>{myTurn ? 'FIRE' : 'WAIT'}</button>
+          <button className={`btn-fire turn-btn px-btn ${revengeOn ? 'avenge' : ''}`} disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={fire}>{myTurn ? (revengeOn ? 'AVENGE' : 'FIRE') : 'WAIT'}</button>
           <button className="btn-arrow turn-btn px-btn" disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
           {canShield && (
             <button
@@ -170,12 +185,21 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
           <div className="graveyard-label">Boot Hill <small>{dead.length}</small></div>
           <div className="graveyard-row">
             {dead.map((g, i) => (
-              <div className="grave" key={g.appid} style={{ '--r': `${((i * 47) % 14) - 7}deg` } as CSSProperties}>
+              <div
+                className={`grave ${g.lastWords ? 'has-words' : ''} ${epi === g.appid ? 'sel' : ''}`}
+                key={g.appid}
+                style={{ '--r': `${((i * 47) % 14) - 7}deg` } as CSSProperties}
+                title={g.lastWords ? `${g.name}: "${g.lastWords}"` : g.name}
+                onPointerEnter={(e) => { if (e.pointerType === 'mouse' && g.lastWords) setEpi(g.appid); }}
+                onPointerLeave={(e) => { if (e.pointerType === 'mouse') setEpi((x) => (x === g.appid ? null : x)); }}
+                onClick={() => { if (g.lastWords) { sfx.click(); setEpi((x) => (x === g.appid ? null : g.appid)); } }}
+              >
                 <div className="grave-art"><PixelArt appid={g.appid} name={g.name} w={24} h={36} holes={g.tier === 'pitch' ? 2 : 1} /><span className="mini-stamp">NAH.</span></div>
                 <div className="grave-by">{nameOf(g.killedBy)}</div>
               </div>
             ))}
           </div>
+          {epiGame?.lastWords && <div className="gp-epitaph"><b>{epiGame.name}</b> · "{epiGame.lastWords}"</div>}
         </div>
       )}
     </div>
@@ -185,8 +209,8 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
 const CROSS_COLD = crosshairDraw('rgba(232,213,181,.7)');
 const CROSS_HOT = crosshairDraw('#ff3b2f');
 
-function Crosshair({ hot }: { hot: boolean }) {
-  return <PixelSprite draw={hot ? CROSS_HOT : CROSS_COLD} w={33} h={33} className={`crosshair ${hot ? 'hot' : ''}`} />;
+function Crosshair({ hot, revenge }: { hot: boolean; revenge?: boolean }) {
+  return <PixelSprite draw={hot ? CROSS_HOT : CROSS_COLD} w={33} h={33} className={`crosshair ${hot ? 'hot' : ''} ${revenge ? 'revenge' : ''}`} />;
 }
 
 const FW = 96, FH = 12;
@@ -201,12 +225,12 @@ function useTick(skew: number, ms = 70) {
   return now;
 }
 
-function Fuse({ deadline, skew, mine }: { deadline: number; skew: number; mine: boolean }) {
+function Fuse({ deadline, skew, mine, turnMs }: { deadline: number; skew: number; mine: boolean; turnMs: number }) {
   const now = useTick(skew);
-  const rem = Math.min(TURN_MS, Math.max(0, deadline - now));
+  const rem = Math.min(turnMs, Math.max(0, deadline - now));
   const secs = Math.ceil(rem / 1000);
-  const frantic = rem > 0 && rem < 10_000;
-  const frac = Math.max(0, Math.min(1, rem / TURN_MS));
+  const frantic = rem > 0 && rem < Math.min(10_000, turnMs / 3);
+  const frac = Math.max(0, Math.min(1, rem / turnMs));
 
   useEffect(() => { if (secs > 0 && secs <= 5) sfx.tick(); }, [secs]);
   const hiss = mine && frantic;

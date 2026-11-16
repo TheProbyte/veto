@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { RoomProps } from '../props';
-import { heroArt } from '../../shared/types';
+import { BADGES, heroArt, type BadgeId } from '../../shared/types';
 import { sfx } from '../sfx';
 import { PixelArt, PixelPanel, PixelSprite } from '../pixel/PixelCanvas';
 import { PAL } from '../pixel/palette';
@@ -16,9 +16,12 @@ const drawNail: DrawFn = (c) => {
 };
 const NAILS: [string, string][] = [['8px', '8px'], ['calc(100% - 22px)', '8px'], ['calc(50% - 7px)', '4px']];
 import { BUZZ, buzz } from '../scene/haptics';
+import { useShotExtras } from './ShotExtras';
+import './gameplay.css';
 
-export default function Result({ state, me, send }: RoomProps) {
+export default function Result({ state, me, send, skew }: RoomProps) {
   const res = state.result;
+  useShotExtras(state, skew);
   useEffect(() => { sfx.win(); buzz(BUZZ.win); }, []);
   // the winning chamber zooms in, becomes the poster, then gets nailed up (3 hits)
   const [nails, setNails] = useState(0);
@@ -61,6 +64,18 @@ export default function Result({ state, me, send }: RoomProps) {
 
   if (!res) return <div className="result"><div className="roulette-title">Counting the bounty…</div></div>;
   const hist = [...state.history].sort((a, b) => b.t - a.t).slice(0, 5);
+  // the duel decided it?
+  const duel = state.duel;
+  const duelMs = duel?.winner === res.appid ? duel.taps[duel.champs[duel.games.indexOf(res.appid)]] : undefined;
+  // badges earned this round, in player order
+  const badgeRows = state.players
+    .map((p) => ({ p, list: ((res.badges ?? {})[p.id] ?? []).filter((b): b is BadgeId => b in BADGES) }))
+    .filter((r) => r.list.length);
+  const never = res.neverSurvive;
+  const rec = state.record;
+  const longest = rec?.streaks?.length ? [...rec.streaks].sort((a, b) => b.best - a.best)[0] : undefined;
+  const hasRecord = !!rec && rec.rounds > 0;
+  let badgeN = 0;
 
   return (
     <div className="result">
@@ -87,9 +102,66 @@ export default function Result({ state, me, send }: RoomProps) {
         </a>
       </div>
 
-      {stats.length > 0 && (
+      {duelMs !== undefined && duelMs >= 0 && <div className="gp-duelwin">Won by quick-draw (<b>{duelMs} ms</b>)</div>}
+
+      {badgeRows.length > 0 && (
+        <div className="gp-badges px-box">
+          <div className="gp-sec">Badges</div>
+          {badgeRows.map(({ p, list }) => (
+            <div className="gp-badge-row" key={p.id}>
+              <b>{p.id === me ? 'You' : p.name}</b>
+              {list.map((b) => {
+                const k = badgeN++;
+                return (
+                  <span key={b} className="gp-badge" title={BADGES[b].desc} style={{ '--dl': `${1700 + k * 220}ms`, '--rot': `${(k * 37) % 7 - 3}deg` } as CSSProperties}>
+                    <i aria-hidden>{BADGES[b].icon}</i>{BADGES[b].label}
+                  </span>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(stats.length > 0 || never) && (
         <div className="stat-chips">
           {stats.map((s) => <div className="chip px-box" key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
+          {never && (
+            <div className="chip px-box gp-never"><span>Never survives</span><b>{never.name}: nominated {never.noms}×, never won</b></div>
+          )}
+        </div>
+      )}
+
+      {amHost ? (
+        <div className="gp-host">
+          <button className="btn-rematch px-btn" onClick={() => send({ t: 'rematch' })} title="Same games, same posse, straight back to the shootout">Rematch: same games</button>
+          <button className="btn-again px-btn" onClick={() => send({ t: 'again' })}>Another round</button>
+        </div>
+      ) : (
+        <div className="wait-host">The host can call a rematch or another round.</div>
+      )}
+
+      {hasRecord && rec && (
+        <div className="gp-record px-box">
+          <div className="gp-sec">Posse record</div>
+          <div className="gp-record-top"><b>{rec.rounds}</b> round{rec.rounds === 1 ? '' : 's'} played at this table</div>
+          <div className="gp-record-grid">
+            {rec.wins?.length > 0 && (
+              <div>
+                <h4>TOP GAMES</h4>
+                <ol>{rec.wins.slice(0, 3).map((w) => <li key={w.appid}><span>{w.name}</span><em>{w.count} win{w.count === 1 ? '' : 's'}</em></li>)}</ol>
+              </div>
+            )}
+            {rec.vetoers?.length > 0 && (
+              <div>
+                <h4>BIGGEST VETOERS</h4>
+                <ol>{rec.vetoers.slice(0, 3).map((v) => <li key={v.pid}><span>{v.name}</span><em>{v.kills} kill{v.kills === 1 ? '' : 's'}</em></li>)}</ol>
+              </div>
+            )}
+            {longest && longest.best > 1 && (
+              <div className="gp-streak">Longest losing streak: <b>{longest.name}</b>, {longest.best} rounds without a win{longest.cur === longest.best ? ' (and counting)' : ''}</div>
+            )}
+          </div>
         </div>
       )}
 
@@ -104,11 +176,6 @@ export default function Result({ state, me, send }: RoomProps) {
         </div>
       )}
 
-      {amHost ? (
-        <button className="btn-again px-btn" onClick={() => send({ t: 'again' })}>Another round</button>
-      ) : (
-        <div className="wait-host">The host can call another round.</div>
-      )}
     </div>
   );
 }

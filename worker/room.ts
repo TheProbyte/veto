@@ -1,10 +1,24 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { BoardGame, Intent, Player, PoolGame, RoomState, ServerMsg, ShotEvent } from '../shared/types';
-import { LOOK_COUNTS, MAX_NOMS, TURN_MS, type Look } from '../shared/types';
+import type { BadgeId, BoardGame, Intent, Phase, Player, PoolGame, PosseRecord, ProfileStats, RoomEvent, RoomState, ServerMsg, Settings, ShotEvent } from '../shared/types';
+import { DEFAULT_SETTINGS, EMOTES, LOOK_COUNTS, SAY_MAX, lookUnlocked, randomLook, type EmoteId, type Look } from '../shared/types';
+import { pickLine, type NarrKey } from '../shared/narrator';
+import { lastWords } from './lastwords';
 import { ownedGames, playerSummary, resolveSteamId, storeBits, type Env, type OwnedGame } from './steam';
 
 const SHOT_PAUSE = 1600; // ms to let the stamp animation land before the next fuse starts
 const SPIN_MS = 6500;
+const NARR_GAP = 2500;
+const NARR_HIGH = 6;
+// higher wins when several fire at once; >= NARR_HIGH may cut into the 2.5s throttle window
+const NARR_PRI: Partial<Record<NarrKey, number>> = {
+  kill: 1, crack: 2, misfire: 2, fuse_low: 2, first_blood: 3, spree: 4, slowmo: 5,
+  ricochet: 6, draw: 6, cylinder: 6, rematch: 6, revenge: 7, duel: 7, duel_foul: 8, duel_win: 8, result: 9, repeat: 9,
+};
+const BOT_NAMES = ['Dusty Pete', 'One-Eye Jack', 'Calamity Sue', 'Tumbleweed Tim', 'Sagebrush Sal', 'Two-Bit Earl', 'Whiskey Nell', 'Slim Pickens', 'Rattlesnake Ray', 'Biscuit Bill'];
+const FAKE_LIB: [number, string][] = [[730, 'Counter-Strike 2'], [252490, 'Rust'], [892970, 'Valheim'], [1966720, 'Lethal Company'],
+  [548430, 'Deep Rock Galactic'], [105600, 'Terraria'], [413150, 'Stardew Valley'], [632360, 'Risk of Rain 2'], [739630, 'Phasmophobia'],
+  [1086940, "Baldur's Gate 3"], [553850, 'HELLDIVERS 2'], [945360, 'Among Us'], [322330, "Don't Starve Together"], [620, 'Portal 2'],
+  [550, 'Left 4 Dead 2'], [1145360, 'Hades'], [381210, 'Dead by Daylight'], [1623730, 'Palworld']];
 
 const shuffle = <T,>(a: T[]): T[] => {
   const b = [...a];
@@ -14,27 +28,78 @@ const shuffle = <T,>(a: T[]): T[] => {
   }
   return b;
 };
+const rnd = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1));
+const pick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+// control chars, zero-width and bidi overrides (no regex literals: keeps the source ASCII)
+const invisible = (c: number) => c < 0x20 || (c >= 0x7f && c <= 0x9f) || (c >= 0x200b && c <= 0x200f) || (c >= 0x2028 && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069) || c === 0xfeff;
+const isKill = (e: ShotEvent) => e.kind === 'hit' || e.kind === 'misfire';
 
 class Bad extends Error {}
+
+/** Timed server work (bots, fuse warnings, delayed narration). All driven by the single DO alarm. */
+interface Job {
+  at: number;
+  k: 'bnom' | 'baim' | 'bfire' | 'bstar' | 'bbang' | 'bemote' | 'fuse' | 'narr';
+  ph: Phase; // dropped as soon as the room leaves this phase
+  pid?: string;
+  seq?: number; // turn sequence (veto turn jobs)
+  appid?: number;
+  n?: number; // bang reaction ms
+  emote?: EmoteId;
+  key?: NarrKey;
+}
+// cosmetic jobs: running them doesn't need a storage write
+const TRANSIENT = new Set<Job['k']>(['baim', 'bemote', 'fuse', 'narr']);
+
+/** Server-only state, persisted alongside RoomState under the same key but never broadcast. */
+interface X {
+  jobs: Job[];
+  seq: number;
+  turnStart: number;
+  fireMs: Record<string, number[]>; // human: ms from turn start to fire, this round
+  misfires: string[];
+  finaleAt: number; // veto: when to roll into the finale (after the last stamp lands)
+}
+const freshX = (): X => ({ jobs: [], seq: 0, turnStart: 0, fireMs: {}, misfires: [], finaleAt: 0 });
+const emptyRecord = (): PosseRecord => ({ rounds: 0, wins: [], vetoers: [], noms: [], streaks: [] });
 
 function fresh(code: string): RoomState {
   return {
     code, phase: 'lobby', players: [], pool: [], poolLoading: false, pitches: [], board: [],
+    settings: { ...DEFAULT_SETTINGS }, record: emptyRecord(),
     turnOrder: [], turnIdx: 0, turnDeadline: 0, shots: [], history: [], now: 0,
   };
 }
 
 export class Room extends DurableObject<Env> {
   s!: RoomState;
+  x!: X;
   libs = new Map<string, OwnedGame[]>();
   poolGen = 0;
   alarmAt = 0; // last alarm we set, so we don't rewrite it on every broadcast (storage writes count on the free plan)
+  // in-memory only (fine to lose on eviction)
+  narrPending?: { key: NarrKey; pri: number };
+  narrAt = 0;
+  narrPri = 0;
+  narrId?: string;
+  rate = new Map<string, number>();
+  statsLoad = new Map<string, Promise<void>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      this.s = (await ctx.storage.get<RoomState>('s')) ?? fresh('');
-      this.s.pitches ??= [];
+      const raw: RoomState & { _x?: X } = (await ctx.storage.get<RoomState & { _x?: X }>('s')) ?? fresh('');
+      this.x = { ...freshX(), ...(raw._x ?? {}) };
+      delete raw._x;
+      const s = (this.s = raw);
+      s.pitches ??= [];
+      s.settings = { ...DEFAULT_SETTINGS, ...(s.settings ?? {}) };
+      s.record ??= emptyRecord();
+      for (const g of s.board) {
+        const sb = g.shieldedBy as unknown;
+        if (typeof sb === 'string') g.shieldedBy = [sb];
+      }
       this.alarmAt = (await ctx.storage.getAlarm()) ?? 0;
     });
     // answered by the runtime without waking the object: keeps phone sockets alive while the room hibernates
@@ -59,33 +124,87 @@ export class Room extends DurableObject<Env> {
   }
   isHost(pid: string) {
     const host = this.s.players.find((p) => p.host);
-    // if the host walked out, anyone still at the table can run the show
-    return host?.id === pid || !host?.connected;
+    // if the host walked out, any human still at the table can run the show
+    if (host?.id === pid) return true;
+    if (host?.connected) return false;
+    return !!this.s.players.find((p) => p.id === pid && !p.bot);
   }
+  humansOnline() { return this.s.players.some((p) => !p.bot && p.connected); }
+  alive() { return this.s.board.filter((g) => g.alive); }
+  /** how many games remain when the shooting stops */
+  threshold() {
+    const st = this.s.settings;
+    return st.finale === 'cylinder' ? st.cylinderAt : st.finale === 'duel' ? 2 : 1;
+  }
+
   /** persist=false for cosmetic/transient updates (aim moves, partial pool loads) to save storage writes */
   broadcast(persist = true) {
-    this.s.now = Date.now();
-    if (persist) this.ctx.storage.put('s', this.s);
-    const json = JSON.stringify(this.s); // serialize once, not once per player
+    const s = this.s;
+    s.now = Date.now();
+    this.schedule();
+    if (persist) this.ctx.storage.put('s', { ...s, _x: this.x });
+    // tin stars are private: everyone gets a redacted board; star owners get their own ids back
+    const owners = new Set<string>();
+    const strip = (g: BoardGame): BoardGame => {
+      if (!g.shieldedBy) return g;
+      const { shieldedBy, ...r } = g;
+      return r;
+    };
+    for (const g of s.board) g.shieldedBy?.forEach((o) => owners.add(o));
+    const base = JSON.stringify({ ...s, board: s.board.map(strip) }); // serialize once, not once per player
+    const variants = new Map<string, string>();
     for (const ws of this.ctx.getWebSockets()) {
       const pid = this.pidOf(ws);
       if (!pid) continue;
+      let json = base;
+      if (owners.has(pid)) {
+        json = variants.get(pid) ?? '';
+        if (!json) {
+          json = JSON.stringify({ ...s, board: s.board.map((g) => (g.shieldedBy?.includes(pid) ? { ...strip(g), shieldedBy: [pid] } : strip(g))) });
+          variants.set(pid, json);
+        }
+      }
       try { ws.send(`{"t":"state","you":${JSON.stringify(pid)},"state":${json}}`); } catch {}
     }
-    this.schedule();
+    this.flushNarr();
   }
-  schedule() {
-    const s = this.s;
-    let at = 0;
-    if (s.phase === 'veto') {
-      if (s.board.filter((g) => g.alive).length <= 3) {
-        // keep an already-pending roulette alarm instead of pushing it back on every broadcast
-        const soon = Date.now() + SHOT_PAUSE + 600;
-        at = this.alarmAt > Date.now() && this.alarmAt <= soon ? this.alarmAt : soon;
-      } else at = s.turnDeadline;
-    } else if (s.phase === 'roulette' && s.roulette) {
-      at = s.roulette.startedAt + s.roulette.duration + 1500;
+  /** transient events: never stored */
+  event(ev: RoomEvent) {
+    const json = JSON.stringify(ev);
+    for (const ws of this.ctx.getWebSockets()) {
+      if (!this.pidOf(ws)) continue;
+      try { ws.send(json); } catch {}
     }
+  }
+  narr(key: NarrKey) {
+    const pri = NARR_PRI[key] ?? 1;
+    if (!this.narrPending || pri > this.narrPending.pri) this.narrPending = { key, pri };
+  }
+  flushNarr() {
+    const n = this.narrPending;
+    if (!n) return;
+    this.narrPending = undefined;
+    const now = Date.now();
+    if (now - this.narrAt < NARR_GAP && !(n.pri >= NARR_HIGH && n.pri > this.narrPri)) return;
+    const line = pickLine(n.key, this.narrId);
+    this.narrAt = now; this.narrPri = n.pri; this.narrId = line.id;
+    this.event({ t: 'narrate', id: line.id, text: line.text, at: now });
+  }
+  job(j: Job) { this.x.jobs.push(j); }
+
+  schedule() {
+    const s = this.s, x = this.x;
+    x.jobs = x.jobs.filter((j) => j.ph === s.phase);
+    const ts = x.jobs.map((j) => j.at);
+    if (s.phase === 'veto') {
+      if (this.alive().length <= this.threshold()) ts.push(x.finaleAt || Date.now());
+      else if (s.turnDeadline) ts.push(s.turnDeadline);
+    } else if (s.phase === 'roulette' && s.roulette) {
+      ts.push(s.roulette.startedAt + s.roulette.duration + 1500);
+    } else if (s.phase === 'duel' && s.duel) {
+      ts.push(s.duel.decidedAt ? s.duel.decidedAt + 3000 : s.duel.drawAt + 4000);
+    }
+    const at = ts.length ? Math.min(...ts) : 0;
     if (at === this.alarmAt) return;
     this.alarmAt = at;
     if (at) this.ctx.storage.setAlarm(at);
@@ -101,6 +220,7 @@ export class Room extends DurableObject<Env> {
       if (!pid) throw new Bad('Say hello first.');
       await this.handle(pid, i);
     } catch (e) {
+      if (!(e instanceof Bad)) console.error('intent failed', i?.t, e);
       const message = e instanceof Error ? e.message : 'Something broke.';
       try { ws.send(JSON.stringify({ t: 'error', message } satisfies ServerMsg)); } catch {}
     }
@@ -113,42 +233,92 @@ export class Room extends DurableObject<Env> {
     if (!pid) return;
     const still = this.ctx.getWebSockets().some((w) => w !== ws && this.pidOf(w) === pid);
     const p = this.s.players.find((x) => x.id === pid);
-    if (p && !still) {
+    if (p && !still && p.connected) {
       p.connected = false;
-      // don't make everyone wait 30s on an empty chair
-      if (this.s.phase === 'veto' && this.s.turnOrder[this.s.turnIdx] === pid) {
+      // don't make everyone wait on an empty chair
+      if (this.s.phase === 'veto' && this.s.turnOrder[this.s.turnIdx] === pid && this.s.turnDeadline) {
         this.s.turnDeadline = Math.min(this.s.turnDeadline, Date.now() + 4000);
       }
+      this.narr('leave');
       this.broadcast();
     }
   }
 
+  // ---------- profiles ----------
+  profile(pid: string) { return this.env.PROFILE.get(this.env.PROFILE.idFromName('p:' + pid)); }
+  loadStats(pid: string) {
+    const p = (async () => {
+      try {
+        const r = await this.profile(pid).fetch('https://profile/');
+        const st = (await r.json()) as ProfileStats;
+        const q = this.s.players.find((x) => x.id === pid);
+        if (q) { q.stats = st; this.broadcast(false); }
+      } catch (e) {
+        console.error('profile load failed', e);
+      } finally {
+        this.statsLoad.delete(pid);
+      }
+    })();
+    this.statsLoad.set(pid, p);
+    this.ctx.waitUntil(p);
+  }
+  pushStats(deltas: Map<string, Partial<ProfileStats>>) {
+    if (!deltas.size) return;
+    this.ctx.waitUntil((async () => {
+      let any = false;
+      await Promise.all([...deltas].map(async ([pid, delta]) => {
+        try {
+          const r = await this.profile(pid).fetch('https://profile/', { method: 'POST', body: JSON.stringify({ delta }) });
+          const st = (await r.json()) as ProfileStats;
+          const q = this.s.players.find((x) => x.id === pid);
+          if (q) { q.stats = st; any = true; }
+        } catch (e) {
+          console.error('profile update failed', e);
+        }
+      }));
+      if (any) this.broadcast(false);
+    })());
+  }
+
   // ---------- intents ----------
   hello(ws: WebSocket, pid: string, name: string) {
-    if (!pid || typeof pid !== 'string') throw new Bad('Bad hello.');
+    if (!pid || typeof pid !== 'string' || pid.length > 64 || pid.startsWith('bot:')) throw new Bad('Bad hello.');
     name = String(name || 'Stranger').trim().slice(0, 20) || 'Stranger';
     let p = this.s.players.find((x) => x.id === pid);
     if (!p) {
+      const freshRoom = !this.s.players.length && !this.s.history.length;
       const taken = new Set(this.s.players.map((x) => x.seat));
       let seat = -1;
       for (let k = 0; k < 8; k++) if (!taken.has(k)) { seat = k; break; }
       if (seat < 0) {
-        // evict an offline, unlinked ghost if the table is full
-        const ghost = this.s.players.find((x) => !x.connected && !x.steam);
+        // evict an offline, unlinked ghost (or a bot) if the table is full
+        const ghost = this.s.players.find((x) => !x.connected && !x.steam) ?? this.s.players.find((x) => x.bot);
         if (!ghost) throw new Bad('The table is full, partner.');
-        this.s.players = this.s.players.filter((x) => x !== ghost);
         seat = ghost.seat;
+        this.removePlayer(ghost);
       }
       p = {
         id: pid, name, seat, look: (seat * 3 + Math.floor(Math.random() * 8)) % 8,
         shieldUsed: false, connected: true, host: !this.s.players.some((x) => x.host),
       };
       this.s.players.push(p);
+      this.narr(freshRoom ? 'open' : 'join');
+    } else if (!p.connected) {
+      this.narr('back');
     }
     p.name = name;
     p.connected = true;
     ws.serializeAttachment({ pid });
+    this.loadStats(pid);
     this.broadcast();
+  }
+
+  limited(key: string, ms: number) {
+    const now = Date.now();
+    if (now - (this.rate.get(key) ?? 0) < ms) return true;
+    this.rate.set(key, now);
+    if (this.rate.size > 200) this.rate.delete(this.rate.keys().next().value!);
+    return false;
   }
 
   async handle(pid: string, i: Intent) {
@@ -157,12 +327,15 @@ export class Room extends DurableObject<Env> {
       case 'link': return this.link(pid, String(i.profile ?? ''));
       case 'style': {
         const p = this.me(pid);
+        if (!p.stats) await this.statsLoad.get(pid);
         const st = {} as Look;
         for (const k of Object.keys(LOOK_COUNTS) as (keyof Look)[]) {
           const v = Number((i.style as Partial<Look> | undefined)?.[k]);
           if (!Number.isInteger(v) || v < 0 || v >= LOOK_COUNTS[k]) throw new Bad('That outfit is not in the store.');
+          if (!lookUnlocked(k, v, p.stats)) throw new Bad("You haven't earned that one yet, partner.");
           st[k] = v;
         }
+        if (!p.style) this.narr('dress');
         p.style = st;
         this.broadcast();
         return;
@@ -175,30 +348,92 @@ export class Room extends DurableObject<Env> {
         this.broadcast();
         return this.recomputePool();
       }
+      case 'settings': {
+        if (s.phase !== 'lobby' && s.phase !== 'nominate') throw new Bad('Rules are set once the shooting starts.');
+        if (!this.isHost(pid)) throw new Bad('Only the host sets the house rules.');
+        const n = (i.settings ?? {}) as Partial<Settings>;
+        const st = { ...s.settings };
+        if (n.turnSecs !== undefined) {
+          const v = Math.round(Number(n.turnSecs));
+          if (!Number.isFinite(v)) throw new Bad('Bad fuse length.');
+          st.turnSecs = clamp(v, 10, 90);
+        }
+        if (n.picks !== undefined) {
+          const v = Math.round(Number(n.picks));
+          if (!Number.isFinite(v)) throw new Bad('Bad pick count.');
+          st.picks = clamp(v, 1, 5);
+        }
+        if (n.finale !== undefined) {
+          if (n.finale !== 'cylinder' && n.finale !== 'duel' && n.finale !== 'last') throw new Bad('Unknown finale.');
+          st.finale = n.finale;
+        }
+        if (n.cylinderAt !== undefined) {
+          const v = Number(n.cylinderAt);
+          if (v !== 2 && v !== 3) throw new Bad('Cylinder spins at 2 or 3.');
+          st.cylinderAt = v;
+        }
+        s.settings = st;
+        this.broadcast();
+        return;
+      }
+      case 'kick': {
+        if (!this.isHost(pid)) throw new Bad('Only the host can show folks the door.');
+        const t = s.players.find((p) => p.id === i.pid);
+        if (!t) throw new Bad('Nobody by that name here.');
+        if (t.id === pid) throw new Bad("You can't kick yourself, partner.");
+        if (!t.bot && t.connected) throw new Bad("They're still at the table. Only empty chairs and bots get kicked.");
+        this.removePlayer(t);
+        this.narr('kick');
+        this.broadcast();
+        return this.recomputePool();
+      }
+      case 'bots': {
+        if (s.phase !== 'lobby') throw new Bad('Hire hands in the lobby.');
+        if (!this.isHost(pid)) throw new Bad('Only the host hires hands.');
+        const n = Math.floor(Number(i.n));
+        if (!Number.isFinite(n) || n < 0 || n > 3) throw new Bad('1 to 3 bots at a time.');
+        if (n === 0) {
+          for (const b of s.players.filter((p) => p.bot)) this.removePlayer(b);
+        } else {
+          const added = await this.addBots(pid, n);
+          if (!added) throw new Bad('No empty chairs.');
+          this.narr('bots');
+        }
+        this.broadcast();
+        return this.recomputePool();
+      }
+      case 'emote': {
+        this.me(pid);
+        if (typeof i.emote !== 'string' || !Object.hasOwn(EMOTES, i.emote)) throw new Bad('Unknown emote.');
+        if (this.limited('e:' + pid, 1200)) return;
+        this.event({ t: 'emote', pid, emote: i.emote, at: Date.now() });
+        return;
+      }
+      case 'say': {
+        this.me(pid);
+        const text = [...String(i.text ?? '')].filter((ch) => !invisible(ch.codePointAt(0)!)).join('').trim().slice(0, SAY_MAX).trim();
+        if (!text) return;
+        if (this.limited('s:' + pid, 2000)) return;
+        this.event({ t: 'say', pid, text, at: Date.now() });
+        return;
+      }
       case 'start': {
         if (s.phase !== 'lobby') throw new Bad('Already dealt.');
         if (!this.isHost(pid)) throw new Bad('Only the host deals.');
         if (!s.players.some((p) => p.steam && !p.steam.private)) throw new Bad('Nobody has a public library linked yet.');
         s.phase = 'nominate';
+        this.narr('deal');
+        this.scheduleBotNoms();
         this.broadcast();
         return;
       }
       case 'nominate': {
         if (s.phase !== 'nominate') throw new Bad('Not tossing games right now.');
-        const pg = s.pool.find((x) => x.appid === i.appid);
-        const pt = s.pitches.find((x) => x.appid === i.appid);
-        const g = pg ?? (pt && { appid: pt.appid, name: pt.name, tier: 'pitch' as const });
-        if (!g) throw new Bad("That game isn't in the pool.");
         const b = s.board.find((x) => x.appid === i.appid);
-        const mine = s.board.filter((x) => x.by.includes(pid)).length;
         if (b?.by.includes(pid)) {
           b.by = b.by.filter((x) => x !== pid);
           if (!b.by.length) s.board = s.board.filter((x) => x !== b);
-        } else {
-          if (mine >= MAX_NOMS) throw new Bad(`You've already tossed in ${MAX_NOMS}. Pull one back first.`);
-          if (b) b.by.push(pid);
-          else s.board.push({ appid: g.appid, name: g.name, tier: g.tier, by: [pid], alive: true });
-        }
+        } else this.addNom(pid, i.appid);
         this.broadcast();
         return;
       }
@@ -215,6 +450,7 @@ export class Room extends DurableObject<Env> {
           price: i.price ? String(i.price).slice(0, 20) : undefined, votes: { [pid]: 'buy' as const } as Record<string, 'buy' | 'nope'>,
         };
         s.pitches.push(pitch);
+        this.narr('pitch');
         this.broadcast();
         const bits = await storeBits(this.env, appid);
         const live = s.pitches.find((x) => x.appid === appid);
@@ -244,21 +480,23 @@ export class Room extends DurableObject<Env> {
       case 'beginVeto': {
         if (s.phase !== 'nominate') throw new Bad('Not now.');
         if (!this.isHost(pid)) throw new Bad('Only the host calls the draw.');
-        this.autofill();
+        const added = this.autofill();
         if (!s.board.length) throw new Bad('Nothing on the table to shoot at.');
-        for (const p of s.players) p.shieldUsed = false;
-        s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; g.cracks = 0; });
-        s.shots = []; s.lastShot = undefined;
-        s.turnOrder = shuffle(s.players.filter((p) => p.connected).map((p) => p.id));
-        if (!s.turnOrder.length) s.turnOrder = [pid];
-        s.turnIdx = 0;
-        s.phase = 'veto';
-        if (s.board.length <= 3) {
-          this.startRoulette();
-        } else {
-          s.aim = s.board[0].appid;
-          this.armTurn(0);
-        }
+        if (added) {
+          this.narr('house');
+          this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' });
+        } else this.narr('draw');
+        this.startVeto(pid);
+        this.broadcast();
+        return;
+      }
+      case 'rematch': {
+        if (s.phase !== 'result') throw new Bad('Finish this round first.');
+        if (!this.isHost(pid)) throw new Bad('Only the host calls a rematch.');
+        if (!s.board.length) throw new Bad('Nothing to rematch.');
+        this.narr('rematch');
+        this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' });
+        this.startVeto(pid);
         this.broadcast();
         return;
       }
@@ -273,7 +511,7 @@ export class Room extends DurableObject<Env> {
         this.assertTurn(pid);
         const g = s.board.find((x) => x.appid === i.appid);
         if (!g || !g.alive) throw new Bad("That one's already dead.");
-        this.shoot(pid, g, 'hit');
+        this.fire(pid, g);
         this.broadcast();
         return;
       }
@@ -283,9 +521,15 @@ export class Room extends DurableObject<Env> {
         if (p.shieldUsed) throw new Bad('You already pinned your tin star.');
         const g = s.board.find((x) => x.appid === i.appid);
         if (!g || !g.alive) throw new Bad("Can't protect the dead.");
-        if (g.shieldedBy) throw new Bad('Already wearing a star.');
-        g.shieldedBy = pid;
-        p.shieldUsed = true;
+        this.pinStar(p, g);
+        this.broadcast();
+        return;
+      }
+      case 'bang': {
+        const d = s.duel;
+        if (s.phase !== 'duel' || !d) throw new Bad('No duel right now.');
+        if (!d.champs.includes(pid)) throw new Bad("This ain't your duel.");
+        this.bang(pid, Number(i.reaction));
         this.broadcast();
         return;
       }
@@ -293,8 +537,10 @@ export class Room extends DurableObject<Env> {
         if (s.phase !== 'result') throw new Bad('Finish this round first.');
         if (!this.isHost(pid)) throw new Bad('Only the host can deal again.');
         s.phase = 'nominate';
-        s.board = []; s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.result = undefined;
+        s.board = []; s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.result = undefined; s.duel = undefined;
         s.turnOrder = []; s.turnIdx = 0; s.turnDeadline = 0; s.aim = undefined;
+        this.narr('deal');
+        this.scheduleBotNoms();
         this.broadcast();
         return;
       }
@@ -302,93 +548,476 @@ export class Room extends DurableObject<Env> {
     }
   }
 
+  addNom(pid: string, appid: number) {
+    const s = this.s;
+    const pg = s.pool.find((x) => x.appid === appid);
+    const pt = s.pitches.find((x) => x.appid === appid);
+    const g = pg ?? (pt && { appid: pt.appid, name: pt.name, tier: 'pitch' as const });
+    if (!g) throw new Bad("That game isn't in the pool.");
+    const b = s.board.find((x) => x.appid === appid);
+    if (b?.by.includes(pid)) return;
+    const mine = s.board.filter((x) => x.by.includes(pid)).length;
+    const max = s.settings.picks;
+    if (mine >= max) throw new Bad(`You've already tossed in ${max}. Pull one back first.`);
+    if (b) b.by.push(pid);
+    else s.board.push({ appid: g.appid, name: g.name, tier: g.tier, by: [pid], alive: true });
+  }
+
+  pinStar(p: Player, g: BoardGame) {
+    // private: stacking is allowed and reveals nothing; each star blocks one shot, first in first out
+    g.shieldedBy = [...(g.shieldedBy ?? []), p.id];
+    p.shieldUsed = true;
+  }
+
+  removePlayer(t: Player) {
+    const s = this.s;
+    const id = t.id;
+    s.players = s.players.filter((p) => p !== t);
+    const k = s.turnOrder.indexOf(id);
+    if (k >= 0) {
+      const wasShooter = k === s.turnIdx;
+      s.turnOrder.splice(k, 1);
+      if (k < s.turnIdx) s.turnIdx--;
+      if (!s.turnOrder.length && s.phase === 'veto') s.turnOrder = s.players.filter((p) => p.connected).map((p) => p.id);
+      s.turnIdx = s.turnOrder.length ? s.turnIdx % s.turnOrder.length : 0;
+      if (wasShooter && s.phase === 'veto' && s.turnDeadline && this.alive().length > this.threshold()) this.armTurn(0);
+    }
+    for (const g of s.board) {
+      if (g.by.includes(id)) {
+        g.by = g.by.filter((x) => x !== id);
+        if (!g.by.length && g.tier !== 'pitch') g.tier = 'house'; // their picks stay as house picks
+      }
+      if (g.shieldedBy) {
+        g.shieldedBy = g.shieldedBy.filter((x) => x !== id);
+        if (!g.shieldedBy.length) g.shieldedBy = undefined;
+      }
+    }
+    for (const p of s.players) if (p.revengeOn === id) p.revengeOn = undefined;
+    for (const pt of s.pitches) delete pt.votes[id];
+    this.x.jobs = this.x.jobs.filter((j) => j.pid !== id);
+    this.libs.delete(id);
+    this.ctx.storage.delete(`lib:${id}`);
+    if (t.host) {
+      const n = s.players.find((q) => !q.bot && q.connected) ?? s.players.find((q) => !q.bot);
+      if (n) n.host = true;
+    }
+  }
+
+  // ---------- bots ----------
+  async addBots(hostPid: string, n: number) {
+    const s = this.s;
+    const hostLib = await this.lib(hostPid);
+    const base = hostLib && hostLib.length >= 4 ? hostLib.map((g) => [g.appid, g.name] as [number, string]) : FAKE_LIB;
+    let added = 0;
+    for (let k = 0; k < n; k++) {
+      const taken = new Set(s.players.map((x) => x.seat));
+      let seat = -1;
+      for (let q = 0; q < 8; q++) if (!taken.has(q)) { seat = q; break; }
+      if (seat < 0) break;
+      const used = new Set(s.players.map((p) => p.name));
+      const name = pick(BOT_NAMES.filter((x) => !used.has(x)).concat(used.size >= BOT_NAMES.length ? ['Nameless Drifter'] : []));
+      const id = 'bot:' + Math.random().toString(36).slice(2, 10);
+      let games = base.filter(() => Math.random() < 0.75);
+      if (games.length < 3) games = base.slice(0, 3);
+      const lib: OwnedGame[] = games.map(([appid, gname]) => ({ appid, name: gname, mins: rnd(0, 6000), mins2w: Math.random() < 0.15 ? 60 : 0 }));
+      this.libs.set(id, lib);
+      await this.ctx.storage.put(`lib:${id}`, lib);
+      s.players.push({
+        id, name, seat, look: seat % 8, style: randomLook(), bot: true, connected: true, host: false, shieldUsed: false,
+        steam: { steamid: id, name, avatar: '', private: false, gameCount: lib.length },
+      });
+      added++;
+    }
+    return added;
+  }
+
+  scheduleBotNoms() {
+    const now = Date.now();
+    for (const b of this.s.players.filter((p) => p.bot)) {
+      const n = rnd(1, this.s.settings.picks);
+      for (let k = 0; k < n; k++) this.job({ at: now + rnd(1500, 5000), k: 'bnom', ph: 'nominate', pid: b.id });
+    }
+  }
+
+  /** returns true if the job changed persistent state */
+  runJob(j: Job): boolean {
+    const s = this.s;
+    if (j.k === 'narr') { if (j.key) this.narr(j.key); return false; }
+    if (j.k === 'fuse') {
+      if (s.phase === 'veto' && j.seq === this.x.seq && s.turnDeadline > Date.now()) this.narr('fuse_low');
+      return false;
+    }
+    const b = s.players.find((p) => p.id === j.pid);
+    if (!b?.bot || !this.humansOnline()) return false; // bots only play while someone's watching
+    switch (j.k) {
+      case 'bemote':
+        if (j.emote) this.event({ t: 'emote', pid: b.id, emote: j.emote, at: Date.now() });
+        return false;
+      case 'bnom': {
+        if (s.phase !== 'nominate') return false;
+        if (s.board.filter((x) => x.by.includes(b.id)).length >= s.settings.picks) return false;
+        const opts = s.pool.slice(0, 20).filter((g) => !s.board.some((x) => x.appid === g.appid && x.by.includes(b.id)));
+        if (!opts.length) return false;
+        this.addNom(b.id, pick(opts).appid);
+        return true;
+      }
+      case 'baim': {
+        if (s.phase !== 'veto' || j.seq !== this.x.seq) return false;
+        if (s.board.some((g) => g.appid === j.appid && g.alive)) s.aim = j.appid;
+        return false;
+      }
+      case 'bfire': {
+        if (s.phase !== 'veto' || j.seq !== this.x.seq || s.turnOrder[s.turnIdx] !== b.id) return false;
+        if (this.alive().length <= this.threshold()) return false;
+        const alive = this.alive();
+        const g = alive.find((x) => x.appid === j.appid) ?? pick(alive);
+        this.fire(b.id, g);
+        return true;
+      }
+      case 'bstar': {
+        if (s.phase !== 'veto' || b.shieldUsed) return false;
+        const alive = this.alive();
+        if (!alive.length) return false;
+        const mine = alive.filter((g) => g.by.includes(b.id));
+        this.pinStar(b, mine.length && Math.random() < 0.7 ? pick(mine) : pick(alive));
+        return true;
+      }
+      case 'bbang': {
+        if (s.phase !== 'duel' || !s.duel || s.duel.decidedAt) return false;
+        this.bang(b.id, j.n ?? 400);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ---------- veto ----------
   assertTurn(pid: string) {
     const s = this.s;
     if (s.phase !== 'veto') throw new Bad('No shootout right now.');
-    if (s.board.filter((g) => g.alive).length <= 3) throw new Bad('Holster it. The cylinder decides now.');
+    if (this.alive().length <= this.threshold()) throw new Bad('Holster it. The finale decides now.');
     if (s.turnOrder[s.turnIdx] !== pid) throw new Bad("Not your turn, cowboy.");
   }
 
-  armTurn(delay: number) {
-    const s = this.s;
-    const shooter = s.players.find((p) => p.id === s.turnOrder[s.turnIdx]);
-    const ms = shooter?.connected ? TURN_MS : 4000;
-    s.turnDeadline = Date.now() + delay + ms;
-    const alive = s.board.filter((g) => g.alive);
-    if (!alive.some((g) => g.appid === s.aim)) s.aim = alive[0]?.appid;
+  startVeto(pid: string) {
+    const s = this.s, x = this.x;
+    for (const p of s.players) { p.shieldUsed = false; p.revengeOn = undefined; p.badges = undefined; }
+    s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; g.cracks = 0; g.lastWords = undefined; });
+    s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.duel = undefined; s.result = undefined;
+    x.fireMs = {}; x.misfires = []; x.finaleAt = 0;
+    s.turnOrder = shuffle(s.players.filter((p) => p.connected).map((p) => p.id));
+    if (!s.turnOrder.length) s.turnOrder = [pid];
+    s.turnIdx = 0;
+    s.phase = 'veto';
+    if (s.board.length <= this.threshold()) {
+      this.enterFinale();
+      return;
+    }
+    s.aim = s.board[0].appid;
+    this.armTurn(0);
+    const now = Date.now();
+    for (const b of s.players.filter((p) => p.bot && s.turnOrder.includes(p.id))) {
+      if (Math.random() < 0.3) this.job({ at: now + rnd(1500, 9000), k: 'bstar', ph: 'veto', pid: b.id });
+    }
   }
 
-  shoot(actor: string, g: BoardGame, kind: ShotEvent['kind']) {
+  armTurn(delay: number) {
+    const s = this.s, x = this.x;
+    x.seq++;
+    x.jobs = x.jobs.filter((j) => j.k !== 'baim' && j.k !== 'bfire' && j.k !== 'fuse');
+    const shooter = s.players.find((p) => p.id === s.turnOrder[s.turnIdx]);
+    const live = !!shooter?.connected && (!shooter.bot || this.humansOnline());
+    const ms = live ? s.settings.turnSecs * 1000 : 4000;
+    const start = Date.now() + delay;
+    s.turnDeadline = start + ms;
+    x.turnStart = start;
+    const alive = this.alive();
+    if (!alive.some((g) => g.appid === s.aim)) s.aim = alive[0]?.appid;
+    if (!shooter || !live) return;
+    if (shooter.bot) {
+      const total = rnd(2500, 6000);
+      const own = alive.filter((g) => !g.by.includes(shooter.id));
+      const cands = shuffle(own.length ? own : alive).slice(0, rnd(1, 3));
+      cands.forEach((g, k) => this.job({ at: start + Math.round((total * k) / cands.length) + 300, k: 'baim', ph: 'veto', pid: shooter.id, seq: x.seq, appid: g.appid }));
+      this.job({ at: start + total, k: 'bfire', ph: 'veto', pid: shooter.id, seq: x.seq, appid: cands[cands.length - 1]?.appid });
+    } else if (s.settings.turnSecs >= 15) {
+      this.job({ at: s.turnDeadline - 5000, k: 'fuse', ph: 'veto', seq: x.seq });
+    }
+  }
+
+  /** a deliberate trigger pull (human or bot) */
+  fire(pid: string, g: BoardGame) {
+    const p = this.s.players.find((x) => x.id === pid);
+    let revenge = false;
+    if (p?.revengeOn) { revenge = true; p.revengeOn = undefined; }
+    if (p && !p.bot) (this.x.fireMs[pid] ??= []).push(Math.max(0, Date.now() - this.x.turnStart));
+    this.shoot(pid, g, 'hit', revenge);
+    if (p?.bot && Math.random() < 0.1) {
+      this.job({ at: Date.now() + 900, k: 'bemote', ph: this.s.phase, pid, emote: pick(['laugh', 'yeehaw', 'tip'] as EmoteId[]) });
+    }
+  }
+
+  shoot(actor: string, g: BoardGame, kind: ShotEvent['kind'], revenge = false) {
     const s = this.s;
-    if (g.shieldedBy) {
-      g.shieldedBy = undefined;
-      kind = 'ricochet';
+    const ev: ShotEvent = { id: (s.lastShot?.id ?? 0) + 1, t: Date.now(), actor, appid: g.appid, kind };
+    if (revenge) { ev.revenge = true; this.narr('revenge'); }
+    if (kind === 'misfire') { this.x.misfires.push(actor); this.narr('misfire'); }
+    if (g.shieldedBy?.length) {
+      ev.shieldOwner = g.shieldedBy.shift();
+      if (!g.shieldedBy.length) g.shieldedBy = undefined;
+      ev.kind = 'ricochet';
+      this.narr('ricochet');
     } else if (g.tier === 'pitch' && !g.cracks) {
       g.cracks = 1; // pitched buys need two shots
-      kind = 'crack';
+      ev.kind = 'crack';
+      this.narr('crack');
     } else {
+      const firstBlood = !s.shots.some(isKill);
+      const kills = s.shots.filter((e) => e.actor === actor && isKill(e)).length + 1;
       g.alive = false;
       g.killedBy = actor;
+      g.lastWords = ev.lastWords = lastWords();
+      for (const nom of g.by) {
+        if (nom === actor) continue;
+        const p = s.players.find((x) => x.id === nom);
+        if (p) p.revengeOn = actor; // latest grudge wins
+      }
+      if (this.alive().length === this.threshold()) { ev.slowmo = true; this.narr('slowmo'); }
+      if (firstBlood) this.narr('first_blood');
+      if (kills === 3) this.narr('spree');
+      if (Math.random() < 0.35) this.narr('kill');
     }
-    const ev: ShotEvent = { id: (s.lastShot?.id ?? 0) + 1, t: Date.now(), actor, appid: g.appid, kind };
     s.lastShot = ev;
     s.shots.push(ev);
-    s.turnIdx = (s.turnIdx + 1) % s.turnOrder.length;
-    if (s.board.filter((x) => x.alive).length <= 3) {
-      s.turnDeadline = 0; // alarm will roll the cylinder after the stamp lands
+    if (s.turnOrder.length) s.turnIdx = (s.turnIdx + 1) % s.turnOrder.length;
+    if (this.alive().length <= this.threshold()) {
+      s.turnDeadline = 0; // alarm rolls into the finale after the stamp lands
+      this.x.finaleAt = Date.now() + SHOT_PAUSE + 600;
+      this.x.jobs = this.x.jobs.filter((j) => j.k !== 'baim' && j.k !== 'bfire' && j.k !== 'fuse');
     } else {
       this.armTurn(SHOT_PAUSE);
     }
   }
 
-  startRoulette() {
+  enterFinale() {
     const s = this.s;
-    const alive = s.board.filter((g) => g.alive);
-    if (alive.length === 1) return this.finish(alive[0].appid);
+    this.x.finaleAt = 0;
+    s.turnDeadline = 0;
+    const alive = this.alive();
+    if (alive.length <= 1) return this.finish((alive[0] ?? s.board[0]).appid);
+    if (s.settings.finale === 'duel' && alive.length === 2 && this.startDuel(alive[0], alive[1])) return;
+    this.startRoulette(alive);
+  }
+
+  startRoulette(alive: BoardGame[]) {
+    const s = this.s;
     const chambers: number[] = [];
     for (let k = 0; k < 6; k++) chambers.push(alive[k % alive.length].appid);
     s.roulette = { chambers: shuffle(chambers), target: Math.floor(Math.random() * 6), startedAt: Date.now() + 400, duration: SPIN_MS };
     s.phase = 'roulette';
-    s.turnDeadline = 0;
+    this.narr('cylinder');
   }
 
+  // ---------- duel ----------
+  startDuel(a: BoardGame, b: BoardGame): boolean {
+    const s = this.s;
+    const humans = this.humansOnline();
+    const pool = s.players.filter((p) => p.connected && (!p.bot || humans));
+    if (pool.length < 2) return false;
+    const champs: string[] = [];
+    for (const g of [a, b]) {
+      const c = [...g.by].reverse().find((id) => !champs.includes(id) && pool.some((p) => p.id === id))
+        ?? pick(pool.filter((p) => !champs.includes(p.id))).id;
+      champs.push(c);
+    }
+    const startedAt = Date.now() + 1200;
+    const drawAt = startedAt + rnd(2500, 5000);
+    s.duel = { games: [a.appid, b.appid], champs: [champs[0], champs[1]], startedAt, drawAt, taps: {} };
+    s.phase = 'duel';
+    this.narr('duel');
+    for (const c of champs) {
+      if (!s.players.find((p) => p.id === c)?.bot) continue;
+      const r = rnd(260, 520);
+      this.job({ at: drawAt + r, k: 'bbang', ph: 'duel', pid: c, n: r });
+    }
+    return true;
+  }
+
+  bang(pid: string, reaction: number) {
+    const d = this.s.duel;
+    if (!d || d.decidedAt || pid in d.taps) return;
+    const now = Date.now();
+    d.taps[pid] = now < d.drawAt - 150 || !Number.isFinite(reaction) || reaction < 80 ? -1 : clamp(Math.round(reaction), 80, 3000);
+    if (d.champs.every((c) => c in d.taps)) this.decideDuel();
+  }
+
+  decideDuel() {
+    const d = this.s.duel;
+    if (!d || d.decidedAt) return;
+    const [ta, tb] = d.champs.map((c) => d.taps[c]);
+    const fa = ta === -1, fb = tb === -1;
+    const va = ta !== undefined && ta > 0, vb = tb !== undefined && tb > 0;
+    let w: number;
+    let foul = false;
+    if (fa !== fb) { w = fa ? 1 : 0; foul = true; }
+    else if (va && vb) w = ta < tb ? 0 : tb < ta ? 1 : rnd(0, 1);
+    else if (va !== vb) w = va ? 0 : 1;
+    else w = rnd(0, 1);
+    d.winner = d.games[w];
+    d.decidedAt = Date.now();
+    this.narr(foul ? 'duel_foul' : 'duel_win');
+  }
+
+  // ---------- result ----------
   finish(appid: number) {
     const s = this.s;
-    const g = s.board.find((x) => x.appid === appid) ?? s.pool.find((x) => x.appid === appid);
-    const name = g?.name ?? `App ${appid}`;
+    const winner = s.board.find((x) => x.appid === appid);
+    const name = winner?.name ?? s.pool.find((x) => x.appid === appid)?.name ?? `App ${appid}`;
     let repeat = 0;
     for (let k = s.history.length - 1; k >= 0 && s.history[k].appid === appid; k--) repeat++;
-    s.result = { appid, name, repeatCount: repeat };
+
+    // per-player tallies for this round
+    const kills: Record<string, number> = {};
+    const saves: Record<string, number> = {};
+    const avengers = new Set<string>();
+    for (const e of s.shots) {
+      if (isKill(e)) kills[e.actor] = (kills[e.actor] ?? 0) + 1;
+      if (e.shieldOwner) saves[e.shieldOwner] = (saves[e.shieldOwner] ?? 0) + 1;
+      if (e.revenge) avengers.add(e.actor);
+    }
+    const duelist = s.duel?.winner === appid ? s.duel.champs[s.duel.games.indexOf(appid)] : undefined;
+    const badges: Record<string, BadgeId[]> = {};
+    const give = (pid: string, b: BadgeId) => { if (s.players.some((p) => p.id === pid)) (badges[pid] ??= []).includes(b) || badges[pid].push(b); };
+    const maxKills = Math.max(0, ...Object.values(kills));
+    if (maxKills >= 2) for (const [pid, k] of Object.entries(kills)) if (k === maxKills) give(pid, 'trigger');
+    for (const pid of Object.keys(saves)) give(pid, 'peacemaker');
+    let sharp: string | undefined, best = Infinity;
+    for (const [pid, ms] of Object.entries(this.x.fireMs)) {
+      if (ms.length < 2) continue;
+      const avg = ms.reduce((a, b) => a + b, 0) / ms.length;
+      if (avg < best) { best = avg; sharp = pid; }
+    }
+    if (sharp) give(sharp, 'sharp');
+    for (const pid of winner?.by ?? []) give(pid, 'kingmaker');
+    for (const pid of avengers) give(pid, 'avenger');
+    for (const pid of this.x.misfires) give(pid, 'snail');
+    if (duelist) give(duelist, 'duelist');
+    for (const p of s.players) p.badges = badges[p.id];
+
+    // posse record
+    const rec = s.record;
+    const humanName = new Map(s.players.filter((p) => !p.bot).map((p) => [p.id, p.name]));
+    rec.rounds++;
+    const w = rec.wins.find((x) => x.appid === appid);
+    if (w) { w.count++; w.name = name; } else rec.wins.push({ appid, name, count: 1 });
+    rec.wins = rec.wins.sort((a, b) => b.count - a.count).slice(0, 10);
+    for (const v of rec.vetoers) { const n = humanName.get(v.pid); if (n) v.name = n; }
+    for (const [pid, k] of Object.entries(kills)) {
+      const n = humanName.get(pid);
+      if (!n) continue;
+      const v = rec.vetoers.find((x) => x.pid === pid);
+      if (v) v.kills += k; else rec.vetoers.push({ pid, name: n, kills: k });
+    }
+    rec.vetoers = rec.vetoers.sort((a, b) => b.kills - a.kills).slice(0, 10);
+    const nominators = new Set<string>();
+    for (const g of s.board) {
+      if (!g.by.length) continue;
+      g.by.forEach((pid) => humanName.has(pid) && nominators.add(pid));
+      let e = rec.noms.find((x) => x.appid === g.appid);
+      if (!e) rec.noms.push((e = { appid: g.appid, name: g.name, noms: 0, deaths: 0, wins: 0 }));
+      e.name = g.name; e.noms++;
+      if (!g.alive && g.killedBy) e.deaths++;
+      if (g.appid === appid) e.wins++;
+    }
+    rec.noms = rec.noms.sort((a, b) => b.noms - a.noms).slice(0, 30);
+    for (const pid of nominators) {
+      let st = rec.streaks.find((x) => x.pid === pid);
+      if (!st) rec.streaks.push((st = { pid, name: '', cur: 0, best: 0 }));
+      st.name = humanName.get(pid)!;
+      st.cur = winner?.by.includes(pid) ? 0 : st.cur + 1;
+      st.best = Math.max(st.best, st.cur);
+    }
+    rec.streaks = rec.streaks.sort((a, b) => b.cur - a.cur || b.best - a.best).slice(0, 30);
+    const ns = rec.noms.filter((x) => x.noms >= 2 && x.wins === 0).sort((a, b) => b.noms - a.noms)[0];
+
+    s.result = { appid, name, repeatCount: repeat, badges, ...(ns ? { neverSurvive: { appid: ns.appid, name: ns.name, noms: ns.noms } } : {}) };
     s.history.push({ appid, name, t: Date.now() });
     s.history = s.history.slice(-20);
     s.phase = 'result';
     s.turnDeadline = 0;
+    this.narr(repeat > 0 ? 'repeat' : 'result');
+    if (ns && Math.random() < 0.5) this.job({ at: Date.now() + 4500, k: 'narr', ph: 'result', key: 'never_survive' });
+
+    // lifetime stats (humans only)
+    const deltas = new Map<string, Partial<ProfileStats>>();
+    for (const p of s.players) {
+      if (p.bot) continue;
+      const played = s.turnOrder.includes(p.id) || s.board.some((g) => g.by.includes(p.id));
+      if (!played) continue;
+      deltas.set(p.id, {
+        rounds: 1,
+        kills: kills[p.id] ?? 0,
+        wins: winner?.by.includes(p.id) ? 1 : 0,
+        saves: saves[p.id] ?? 0,
+        duelsWon: duelist === p.id ? 1 : 0,
+        shotAt: s.board.filter((g) => g.by.includes(p.id) && !g.alive && g.killedBy).length,
+      });
+    }
+    this.pushStats(deltas);
   }
 
+  // ---------- timers ----------
   async alarm() {
     this.alarmAt = 0; // it just fired
-    const s = this.s;
+    let persist = true;
+    try {
+      persist = this.tick();
+    } catch (e) {
+      console.error('alarm failed', e);
+    }
+    this.broadcast(persist);
+  }
+
+  tick(): boolean {
+    const s = this.s, x = this.x;
     const now = Date.now();
+    let persist = false;
+    const due = x.jobs.filter((j) => j.at <= now + 25).sort((a, b) => a.at - b.at);
+    if (due.length) {
+      x.jobs = x.jobs.filter((j) => !due.includes(j));
+      for (const j of due) {
+        if (j.ph !== s.phase) continue;
+        if (!TRANSIENT.has(j.k)) persist = true;
+        try { if (this.runJob(j)) persist = true; } catch (e) { if (!(e instanceof Bad)) console.error('job failed', j.k, e); }
+      }
+    }
     if (s.phase === 'veto') {
-      const alive = s.board.filter((g) => g.alive);
-      if (alive.length <= 3) {
-        this.startRoulette();
+      const alive = this.alive();
+      if (alive.length <= this.threshold()) {
+        if (!x.finaleAt || now >= x.finaleAt - 50) { this.enterFinale(); persist = true; }
       } else if (s.turnDeadline && now >= s.turnDeadline - 100) {
-        const target = alive.find((g) => g.appid === s.aim) ?? alive[Math.floor(Math.random() * alive.length)];
+        const target = alive.find((g) => g.appid === s.aim) ?? pick(alive);
         this.shoot(s.turnOrder[s.turnIdx], target, 'misfire');
+        persist = true;
       }
     } else if (s.phase === 'roulette' && s.roulette) {
       if (now >= s.roulette.startedAt + s.roulette.duration + 1000) {
         this.finish(s.roulette.chambers[s.roulette.target]);
+        persist = true;
       }
+    } else if (s.phase === 'duel' && s.duel) {
+      const d = s.duel;
+      if (!d.decidedAt && now >= d.drawAt + 4000 - 50) { this.decideDuel(); persist = true; }
+      if (d.decidedAt && d.winner && now >= d.decidedAt + 3000 - 50) { this.finish(d.winner); persist = true; }
     }
-    this.broadcast();
+    return persist;
   }
 
-  autofill() {
+  autofill(): number {
     const s = this.s;
     const want = Math.min(5, s.pool.length);
-    if (s.board.length >= want) return;
+    let added = 0;
+    if (s.board.length >= want) return 0;
     const ranked = [
       ...s.pool.filter((g) => g.tier === 'all' && g.coop !== false),
       ...s.pool.filter((g) => g.tier === 'all' && g.coop === false),
@@ -398,18 +1027,21 @@ export class Room extends DurableObject<Env> {
       if (s.board.length >= want) break;
       if (s.board.some((b) => b.appid === g.appid)) continue;
       s.board.push({ appid: g.appid, name: g.name, tier: 'house', by: [], alive: true });
+      added++;
     }
+    return added;
   }
 
   // ---------- steam ----------
   async link(pid: string, profile: string) {
     const key = this.env.STEAM_API_KEY;
     const p = this.me(pid);
+    if (p.bot) throw new Bad('Bots bring their own.');
     if (this.env.FAKE_STEAM === '1' && profile.startsWith('fake:')) return this.fakeLink(pid, profile.slice(5));
     if (!key) throw new Bad('The server has no STEAM_API_KEY set yet.');
     if (!profile.trim()) throw new Bad('Paste your Steam profile link.');
     p.linking = true; p.linkError = undefined;
-    this.broadcast();
+    this.broadcast(false);
     try {
       const id = await resolveSteamId(profile, key);
       const [sum, games] = await Promise.all([playerSummary(id, key), ownedGames(id, key)]);
@@ -427,6 +1059,7 @@ export class Room extends DurableObject<Env> {
       const q = this.me(pid);
       q.linking = false;
       q.linkError = e instanceof Error ? e.message : 'Steam link failed.';
+      console.log('steam link failed:', q.linkError);
     }
     this.broadcast();
     await this.recomputePool();
@@ -434,11 +1067,7 @@ export class Room extends DurableObject<Env> {
 
   // dev only (FAKE_STEAM=1 in .dev.vars): lets the whole flow run without Steam access
   async fakeLink(pid: string, nick: string) {
-    const ids: [number, string][] = [[730, 'Counter-Strike 2'], [252490, 'Rust'], [892970, 'Valheim'], [1966720, 'Lethal Company'],
-      [548430, 'Deep Rock Galactic'], [105600, 'Terraria'], [413150, 'Stardew Valley'], [632360, 'Risk of Rain 2'], [739630, 'Phasmophobia'],
-      [1086940, "Baldur's Gate 3"], [553850, 'HELLDIVERS 2'], [945360, 'Among Us'], [322330, "Don't Starve Together"], [620, 'Portal 2'],
-      [550, 'Left 4 Dead 2'], [1145360, 'Hades'], [381210, 'Dead by Daylight'], [1623730, 'Palworld']];
-    const games = ids.filter(() => Math.random() < 0.75).map(([appid, name]) => ({ appid, name, mins: Math.floor(Math.random() * 9000), mins2w: Math.random() < 0.2 ? 60 : 0 }));
+    const games = FAKE_LIB.filter(() => Math.random() < 0.75).map(([appid, name]) => ({ appid, name, mins: Math.floor(Math.random() * 9000), mins2w: Math.random() < 0.2 ? 60 : 0 }));
     const p = this.me(pid);
     p.steam = { steamid: '7656119' + Math.floor(Math.random() * 1e10), name: nick || p.name, avatar: '', private: nick === 'private', gameCount: games.length };
     if (nick !== 'private') { this.libs.set(pid, games); await this.ctx.storage.put(`lib:${pid}`, games); }
@@ -464,23 +1093,26 @@ export class Room extends DurableObject<Env> {
       const games = await this.lib(p.id);
       if (games) linked.push({ pid: p.id, games });
     }
+    if (gen !== this.poolGen) return;
     const n = linked.length;
     if (!n) { s.pool = []; s.poolLoading = false; this.broadcast(); return; }
 
-    const agg = new Map<number, { name: string; owners: string[]; mins: number; recent: boolean }>();
+    type Agg = { name: string; owners: string[]; mins: number; by: Record<string, number>; recent: boolean };
+    const agg = new Map<number, Agg>();
     for (const { pid, games } of linked) {
       for (const g of games) {
         let a = agg.get(g.appid);
-        if (!a) agg.set(g.appid, (a = { name: g.name, owners: [], mins: 0, recent: false }));
+        if (!a) agg.set(g.appid, (a = { name: g.name, owners: [], mins: 0, by: {}, recent: false }));
         a.owners.push(pid);
         a.mins += g.mins;
+        a.by[pid] = Math.round(g.mins / 60);
         if (g.mins2w > 0) a.recent = true;
       }
     }
     const ids = linked.map((l) => l.pid);
-    const mk = (appid: number, a: { name: string; owners: string[]; mins: number; recent: boolean }, tier: PoolGame['tier']): PoolGame => ({
+    const mk = (appid: number, a: Agg, tier: PoolGame['tier']): PoolGame => ({
       appid, name: a.name, tier, owners: a.owners, missing: ids.filter((x) => !a.owners.includes(x)),
-      hours: Math.round(a.mins / 60), recent: a.recent,
+      hours: Math.round(a.mins / 60), hoursBy: a.by, recent: a.recent,
     });
     const all: PoolGame[] = [];
     const almost: PoolGame[] = [];

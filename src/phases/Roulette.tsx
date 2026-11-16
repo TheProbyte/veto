@@ -9,6 +9,7 @@ import { PixelCover } from '../pixel/PixelCover';
 import '../pixel/pixel.css';
 import { useNow } from '../net';
 import { sfx } from '../sfx';
+import { useShotExtras } from './ShotExtras';
 
 const TURNS = 6;
 
@@ -33,6 +34,7 @@ const ease = (p: number) => 1 - Math.pow(1 - p, 4);
 
 export default function Roulette({ state, skew }: RoomProps) {
   const r = state.roulette;
+  useShotExtras(state, skew);
   const nameOf = (appid: number) => state.board.find((g) => g.appid === appid)?.name ?? `App ${appid}`;
   if (!r) return <div className="roulette"><div className="roulette-title">Loading the cylinder…</div></div>;
   const finalists = Array.from(new Set(r.chambers));

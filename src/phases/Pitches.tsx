@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { headerArt, MAX_NOMS, type Pitch, type Player, type StoreHit } from '../../shared/types';
+import { headerArt, type Pitch, type Player, type StoreHit } from '../../shared/types';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import { Avatar } from './Lobby';
 import Cover from '../scene/Cover';
 import { play } from '../scene/Dock';
 import { tossOrTake } from './Nominate';
+import { settingsOf } from './Lobby';
 import './panels.css';
 
 function PixImg({ src, className }: { src: string; className: string }) {
@@ -29,6 +30,7 @@ export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | '
     return m;
   }, [state.board]);
   const myCount = state.board.filter((b) => b.by.includes(me)).length;
+  const MAX_NOMS = settingsOf(state).picks;
 
   useEffect(() => {
     const term = q.trim();

@@ -860,7 +860,158 @@ export const sfx = {
     noiseHit(t, 'bandpass', 3200, 0.35, 0.015, 0.1, 4);
     tone(t, 'sine', 1900, 1500, 0.08, 0.03);
   },
+  // ---- saloon scene (storm, doors, emotes) ----
+  thunder(intensity = 0.6) { // distant-to-close thunder: crackle (close only) + long low rumble; intensity 0..1
+    if (!ready()) return;
+    const k = Math.max(0.1, Math.min(1, intensity));
+    const t = now() + 0.02;
+    if (k > 0.6) { noiseHit(t, 'highpass', 1800, 0.25 * k, 0.12, 0.6); noiseHit(t + 0.05, 'bandpass', 900, 0.3 * k, 0.25, 0.8, 0.8); }
+    const dur = 1.8 + k * 2.2;
+    const s = noise(true);
+    const lp = filt('lowpass', 160 + k * 260, 0.9);
+    lp.frequency.setValueAtTime(160 + k * 320, t);
+    lp.frequency.exponentialRampToValueAtTime(70, t + dur);
+    const g = ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5 * k + 0.08, t + 0.08 + (1 - k) * 0.3);
+    // a couple of rolling swells
+    g.gain.exponentialRampToValueAtTime(0.18 * k + 0.03, t + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.32 * k + 0.04, t + dur * 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(lp).connect(g);
+    out(g, 0.6);
+    s.start(t, Math.random());
+    s.stop(t + dur + 0.1);
+    tone(t + 0.04, 'sine', 52, 34, 0.35 * k, dur * 0.6, 0.4, 0.05);
+  },
+  rain(on: boolean) {      // quiet rain on the roof + windows (loop); call after unlock()
+    wantRain = on;
+    if (!ready()) return;
+    if (on) startRain(); else { rainNodes?.stop(); rainNodes = null; }
+  },
+  doors() {                // batwing doors flung open: wind gust + double wooden creak + flap-flap
+    if (!ready()) return;
+    const t = now() + 0.01;
+    const s = noise();
+    const bp = filt('bandpass', 500, 0.8);
+    bp.frequency.setValueAtTime(300, t);
+    bp.frequency.exponentialRampToValueAtTime(1400, t + 0.35);
+    bp.frequency.exponentialRampToValueAtTime(400, t + 1.1);
+    const g = ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22, t + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+    s.connect(bp).connect(g);
+    out(g, 0.3);
+    s.start(t, Math.random(), 1.3);
+    for (const [d, f] of [[0.05, 380], [0.12, 290]] as const) {
+      const o = ctx!.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f, t + d);
+      o.frequency.linearRampToValueAtTime(f * 1.35, t + d + 0.22);
+      const lp = filt('bandpass', f * 3, 3);
+      const cg = ctx!.createGain();
+      env(cg, t + d, 0.05, 0.03, 0.22);
+      o.connect(lp).connect(cg);
+      out(cg, 0.4);
+      o.start(t + d); o.stop(t + d + 0.3);
+    }
+    for (let i = 0; i < 4; i++) noiseHit(t + 0.42 + i * 0.19 * (1 + i * 0.25), 'bandpass', 700, 0.3 / (1 + i), 0.05, 0.4, 1.5);
+  },
+  yeehaw() {               // short whooping "yee-HAW" synth: rising yelp then a falling holler
+    if (!ready()) return;
+    const t = now() + 0.01;
+    const voice = (t0: number, f0: number, f1: number, f2: number, dur: number, peak: number) => {
+      const o = ctx!.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f0, t0);
+      o.frequency.exponentialRampToValueAtTime(f1, t0 + dur * 0.35);
+      o.frequency.exponentialRampToValueAtTime(f2, t0 + dur);
+      const vib = ctx!.createOscillator(); vib.frequency.value = 7;
+      const vg = ctx!.createGain(); vg.gain.value = f1 * 0.03;
+      vib.connect(vg).connect(o.frequency);
+      const f1n = filt('bandpass', 800, 4), f2n = filt('bandpass', 1300, 5);
+      const g = ctx!.createGain();
+      env(g, t0, peak, 0.03, dur);
+      o.connect(f1n).connect(g); o.connect(f2n).connect(g);
+      out(g, 0.4);
+      o.start(t0); o.stop(t0 + dur + 0.1); vib.start(t0); vib.stop(t0 + dur + 0.1);
+    };
+    voice(t, 380, 620, 560, 0.18, 0.35);
+    voice(t + 0.22, 520, 760, 300, 0.55, 0.45);
+  },
+  clap() {                 // a slow clap: three hand claps
+    if (!ready()) return;
+    const t = now() + 0.01;
+    for (let i = 0; i < 3; i++) {
+      const tt = t + i * 0.42;
+      noiseHit(tt, 'bandpass', 1300, 0.55, 0.05, 0.5, 1.2);
+      noiseHit(tt + 0.008, 'bandpass', 2400, 0.3, 0.03, 0.4, 2);
+    }
+  },
+  blip() {                 // tiny speech-bubble typewriter blip
+    if (!ready()) return;
+    const t = now();
+    const f = rnd(560, 720);
+    tone(t, 'square', f, f * 0.94, 0.025, 0.035, 0, 0.002);
+  },
+  heartbeat() {            // lub-dub (slow-mo)
+    if (!ready()) return;
+    const t = now() + 0.01;
+    tone(t, 'sine', 70, 42, 0.8, 0.16, 0.2, 0.004);
+    tone(t + 0.2, 'sine', 62, 38, 0.55, 0.18, 0.2, 0.004);
+  },
+  glass() {                // whiskey glass set down / clinked
+    if (!ready()) return;
+    glassClink(now() + 0.01);
+    noiseHit(now() + 0.01, 'lowpass', 900, 0.12, 0.03);
+  },
+  steam() {                // angry kettle: two short hisses
+    if (!ready()) return;
+    const t = now() + 0.01;
+    noiseHit(t, 'highpass', 4000, 0.18, 0.25, 0.1);
+    noiseHit(t + 0.38, 'highpass', 4600, 0.15, 0.3, 0.1);
+    tone(t, 'sine', 1900, 2300, 0.02, 0.3);
+  },
 };
+
+let rainNodes: { stop: () => void } | null = null;
+let wantRain = false;
+function startRain() {
+  if (!ready() || rainNodes) return;
+  const t = now();
+  const s = noise(true);
+  const hp = filt('highpass', 900);
+  const lp = filt('lowpass', 5200);
+  const g = ctx!.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.022, t + 2.5);
+  const lfo = ctx!.createOscillator(); lfo.frequency.value = 0.09;
+  const lg = ctx!.createGain(); lg.gain.value = 0.007;
+  lfo.connect(lg).connect(g.gain);
+  s.connect(hp).connect(lp).connect(g);
+  out(g, 0.2);
+  s.start(t, Math.random()); lfo.start(t);
+  let alive = true;
+  const drip = () => {
+    if (!alive || !ready()) return;
+    const tt = now() + 0.01;
+    noiseHit(tt, 'bandpass', 2500 + Math.random() * 2500, 0.012 + Math.random() * 0.02, 0.012, 0.3, 3);
+    timer = window.setTimeout(drip, 60 + Math.random() * 260);
+  };
+  let timer = window.setTimeout(drip, 300);
+  rainNodes = {
+    stop() {
+      alive = false; clearTimeout(timer);
+      const tt = now();
+      g.gain.cancelScheduledValues(tt);
+      g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), tt);
+      g.gain.exponentialRampToValueAtTime(0.0001, tt + 1.5);
+      s.stop(tt + 1.6); lfo.stop(tt + 1.6);
+    },
+  };
+}
+void wantRain;
 
 /** Phase -> music mode. Home (undefined) and lobby/nominate -> 'lobby'. */
 export function musicForPhase(phase: string | undefined): MusicMode {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
 import type { Look } from '../../shared/types';
-import { BUST_H, BUST_W, lookFromStyle, renderBust } from './sprites';
+import { BUST_H, BUST_W, bustFor, lookFromStyle, renderBust } from './sprites';
 import { bayer } from './dither';
 import './pixel.css';
 
@@ -119,4 +119,20 @@ export default function BustPreview({ look, scale = 4, className = '', tipHat = 
       role="img"
     />
   );
+}
+
+/** Static head-and-shoulders bust for a player (toasts, lists). 48x40 canvas, drawn once per look. */
+export function MiniBust({ p, className = '', style }: { p: { id: string; look: number; style?: Look; bot?: boolean; connected?: boolean }; className?: string; style?: CSSProperties }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const sig = p.style ? sigOf(p.style) : `l${p.look}`;
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    cv.width = CW; cv.height = 40;
+    const c = cv.getContext('2d'); if (!c) return;
+    c.imageSmoothingEnabled = false;
+    const b = renderBust(bustFor(p), { scale: 1, blink: false, rimRight: true, lit: false, dim: 1.05, ghost: false, bot: p.bot, padTop: 4 });
+    c.clearRect(0, 0, CW, 40);
+    c.drawImage(b, 0, 0);
+  }, [p.id, sig, p.bot]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <canvas ref={ref} className={`px-bust px-minibust ${className}`} style={{ width: CW, height: 40, ...style }} aria-hidden />;
 }

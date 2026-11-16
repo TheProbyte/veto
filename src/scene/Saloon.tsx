@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { RoomProps } from '../props';
-import type { Phase, Player, ShotEvent } from '../../shared/types';
+import { BADGES, EMOTES, type Phase, type Player, type RoomEvent, type ShotEvent } from '../../shared/types';
 import { sfx } from '../sfx';
 import TinStar from './TinStar';
 import ShotFX from './ShotFX';
@@ -8,7 +8,19 @@ import SoundMenu from './SoundMenu';
 import { DockBoard, DockSlot, play } from './Dock';
 import { BUZZ, buzz, isPhone, reducedMotion } from './haptics';
 import { PixelScene } from '../pixel/PixelCanvas';
-import { computeLayout, seatGeom, type Layout, type SceneData, type ScenePlayer } from '../pixel/scene';
+import { computeLayout, seatGeom, type Layout, type SceneData, type SceneFX, type ScenePlayer } from '../pixel/scene';
+import { MiniBust } from '../pixel/BustPreview';
+import Narrator from './Narrator';
+import EmoteBar from './EmoteBar';
+
+/** piano player's tempo per music mode (matches src/music.ts grooves) */
+const BPM: Record<string, number> = { lobby: 76, veto: 92, roulette: 92, result: 76, off: 0 };
+const EMOTE_SFX: Record<string, () => void> = {
+  tip: () => sfx.swish(), spit: () => sfx.spit(), yeehaw: () => sfx.yeehaw(), clap: () => sfx.clap(),
+  shrug: () => sfx.swish(), angry: () => sfx.steam(), drink: () => sfx.glass(), laugh: () => {},
+};
+interface Toast { id: number; p: Player; text: string }
+interface Bubble { id: number; pid: string; text: string }
 
 const mq = (q: string) => { try { return !!window.matchMedia?.(q).matches; } catch { return false; } };
 /** landscape phone: lobby/nominate put the scene on the left half and the panel on the right */
@@ -34,7 +46,8 @@ function useStageLayout(split: boolean): Layout {
 interface Wipe { id: number; from: Phase; to: Phase; draw: boolean; closing: boolean }
 const WIPE = { draw: { close: 420, hold: 640, open: 420 }, soft: { close: 220, hold: 70, open: 260 } };
 
-export default function Saloon({ state, me, children }: RoomProps & { children: ReactNode }) {
+export default function Saloon({ children, ...rp }: RoomProps & { children: ReactNode }) {
+  const { state, me } = rp;
   const [fx, setFx] = useState<ShotEvent | null>(null);
   const frontRef = useRef<HTMLDivElement>(null);
   const [land, setLand] = useState(landPhone);
@@ -74,9 +87,68 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
   const shotRef = useRef<SceneData['shot']>(undefined);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
 
-  // first gesture: unlock audio + start ambience
+  // ---- scene FX bus (emotes, lightning, doors, slow-mo): the canvas loop drains the queue
+  const sceneFx = useRef<SceneFX>(null as unknown as SceneFX);
+  if (!sceneFx.current) sceneFx.current = {
+    queue: [],
+    tempo: () => (sfx.isMuted() || sfx.getMusicVolume() < 0.01 ? 0 : BPM[sfx.getMusicMode()] ?? 0),
+    onBolt: (big) => { window.setTimeout(() => sfx.thunder(big ? 0.85 : 0.3 + Math.random() * 0.35), big ? 500 : 900 + Math.random() * 1800); },
+  };
+  const push = (e: SceneFX['queue'][number]) => { const q = sceneFx.current.queue; q.push(e); if (q.length > 24) q.splice(0, q.length - 24); };
+  const phaseRef = useRef(state.phase);
+  phaseRef.current = state.phase;
+  // the storm clears at the result: rain stops (and comes back for the next round)
+  const unlocked = useRef(false);
+  useEffect(() => { if (unlocked.current) sfx.rain(state.phase !== 'result'); }, [state.phase]);
+
+  // ---- emotes + speech bubbles (transient room events)
+  const [pops, setPops] = useState<Record<string, { emote: string; id: number }>>({});
+  const [bubbles, setBubbles] = useState<Record<string, Bubble>>({});
+  useEffect(() => rp.on((e: RoomEvent) => {
+    if (e.t === 'emote') {
+      if (!(e.emote in EMOTES)) return;
+      push({ k: 'emote', pid: e.pid, emote: e.emote, at: performance.now() });
+      EMOTE_SFX[e.emote]?.();
+      const id = Date.now() + Math.random();
+      setPops((m) => ({ ...m, [e.pid]: { emote: e.emote, id } }));
+      window.setTimeout(() => setPops((m) => { if (m[e.pid]?.id !== id) return m; const n = { ...m }; delete n[e.pid]; return n; }), 2000);
+    } else if (e.t === 'say') {
+      const id = Date.now() + Math.random();
+      setBubbles((m) => ({ ...m, [e.pid]: { id, pid: e.pid, text: String(e.text).slice(0, 120) } }));
+      window.setTimeout(() => setBubbles((m) => { if (m[e.pid]?.id !== id) return m; const n = { ...m }; delete n[e.pid]; return n; }), 4200);
+    }
+  }), [rp.on]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- doors + reconnect toasts
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const conn = useRef<Map<string, Player> | null>(null);
   useEffect(() => {
-    const go = () => { sfx.unlock(); sfx.ambience(true); window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); };
+    const prev = conn.current;
+    conn.current = new Map(state.players.map((p) => [p.id, p]));
+    if (!prev) return;
+    let door: 0 | 1 | 2 = 0; // 1 join, 2 leave
+    const add: Toast[] = [];
+    for (const p of state.players) {
+      const o = prev.get(p.id);
+      if (!o) { door = door || 1; continue; }
+      if (o.connected !== p.connected && p.id !== me && !p.bot) {
+        add.push({ id: Date.now() + Math.random(), p, text: p.connected ? `${p.name} stumbled back in` : `${p.name} stepped out into the rain` });
+        door = p.connected ? door || 1 : 2;
+      }
+    }
+    for (const id of prev.keys()) if (!conn.current.has(id)) door = 2;
+    if (door) { push({ k: 'doors', leave: door === 2, at: performance.now() }); sfx.doors(); }
+    if (!add.length) return;
+    setToasts((ts) => [...ts, ...add].slice(-2));
+    for (const tt of add) window.setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== tt.id)), 2500);
+  }, [state.players]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- slow-mo vignette
+  const [slow, setSlow] = useState(0);
+
+  // first gesture: unlock audio + start ambience (+ the rain, unless the storm already cleared)
+  useEffect(() => {
+    const go = () => { sfx.unlock(); sfx.ambience(true); unlocked.current = true; sfx.rain(phaseRef.current !== 'result'); window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); };
     window.addEventListener('pointerdown', go);
     window.addEventListener('keydown', go);
     return () => { window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); };
@@ -111,6 +183,17 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
     // a transform there would re-anchor the fixed action bar mid-animation.
     const phone = isPhone();
     const dur = phone ? 1600 : 2700;
+    // big lightning + thunder on the finale shot and on revenge; the scene slows down for the finale
+    if (s.slowmo || s.revenge) {
+      push({ k: 'bolt', big: true, at: performance.now() });
+      timers.push(window.setTimeout(() => sfx.thunder(s.slowmo ? 1 : 0.85), s.slowmo ? 420 : 300));
+    }
+    if (s.slowmo) {
+      push({ k: 'slowmo', at: performance.now() });
+      const sid = s.id;
+      setSlow(sid);
+      timers.push(window.setTimeout(() => setSlow((x) => (x === sid ? 0 : x)), 1600));
+    }
     const shake = !phone && !reducedMotion();
     const stepKf = (pts: [number, number][]): Keyframe[] => pts.map(([x, y]) => ({ transform: `translate(${x * P}px, ${y * P}px)`, easing: 'steps(1, end)' }));
     if (s.kind === 'ricochet') {
@@ -131,11 +214,12 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
   const shooter = veto ? state.turnOrder[state.turnIdx] : undefined;
 
   const data: SceneData = useMemo(() => ({
-    players: state.players.map((p) => ({ id: p.id, seat: p.seat, look: p.look, style: p.style, connected: p.connected }) as ScenePlayer),
+    players: state.players.map((p) => ({ id: p.id, seat: p.seat, look: p.look, style: p.style, connected: p.connected, bot: p.bot }) as ScenePlayer),
     shooter,
     phase: state.phase,
     shot: shotRef.current,
     dimAll: state.phase === 'roulette' ? 0.45 : state.phase === 'result' ? 0.6 : 1,
+    fx: sceneFx.current,
   }), [state.players, shooter, state.phase, fx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stageTop = layout.tableTop * layout.P + (layout.portrait ? 30 : 44);
@@ -148,10 +232,11 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
         <PixelScene layout={layout} data={data} />
         <div className={`seats ${layout.portrait && state.players.length > 4 ? 'has-back' : ''}`}>
           {state.players.map((p) => (
-            <Seat key={p.id} p={p} me={me} L={layout} seats={seats} shooter={shooter} order={veto ? state.turnOrder.indexOf(p.id) : -1} turnIdx={state.turnIdx} n={state.turnOrder.length} fresh={fresh.has(p.id)} />
+            <Seat key={p.id} p={p} me={me} L={layout} seats={seats} shooter={shooter} order={veto ? state.turnOrder.indexOf(p.id) : -1} turnIdx={state.turnIdx} n={state.turnOrder.length} fresh={fresh.has(p.id)} pop={pops[p.id]} />
           ))}
         </div>
       </div>
+      {slow > 0 && <div className="slowmo-vig" aria-hidden />}
 
       <div className="saloon-ui">
         <div className="front-top" aria-hidden />
@@ -168,7 +253,26 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
             </div>
           </div>
         )}
+        <Narrator {...rp} />
+        <EmoteBar {...rp} />
       </div>
+
+      <div className="bubbles" aria-live="polite">
+        {Object.values(bubbles).map((b) => {
+          const p = state.players.find((x) => x.id === b.pid);
+          return p ? <SpeechBubble key={b.id} b={b} name={p.name} L={layout} seat={p.seat} seats={seats} /> : null;
+        })}
+      </div>
+      {toasts.length > 0 && (
+        <div className="px-toasts" role="status">
+          {toasts.map((t) => (
+            <div key={t.id} className={`px-toast ${t.p.connected ? 'in' : 'out'}`}>
+              <MiniBust p={t.p} />
+              <span>{t.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {fx && <ShotFX key={fx.id} shot={fx} board={state.board} players={state.players} />}
 
@@ -208,7 +312,7 @@ function PhaseWipe({ w }: { w: Wipe }) {
   );
 }
 
-function Seat({ p, me, L, seats, shooter, order, turnIdx, n, fresh }: { p: Player; me: string; L: Layout; seats: number[]; shooter?: string; order: number; turnIdx: number; n: number; fresh?: boolean }) {
+function Seat({ p, me, L, seats, shooter, order, turnIdx, n, fresh, pop }: { p: Player; me: string; L: Layout; seats: number[]; shooter?: string; order: number; turnIdx: number; n: number; fresh?: boolean; pop?: { emote: string; id: number } }) {
   const g = seatGeom(L, p.seat, seats);
   const lit = shooter === p.id;
   const dark = !!shooter && !lit;
@@ -228,10 +332,54 @@ function Seat({ p, me, L, seats, shooter, order, turnIdx, n, fresh }: { p: Playe
       <div className="seat-plate">
         {!p.shieldUsed && <TinStar size={12} />}
         <span className="seat-name">{p.name}{p.id === me && <span className="seat-you"> (you)</span>}</span>
+        {p.bot && <span className="seat-bot" title="Practice bot">BOT</span>}
+        {!!p.badges?.length && (
+          <span className="seat-badges">
+            {p.badges.slice(0, 3).map((b) => BADGES[b] && <i key={b} className="seat-badge" title={`${BADGES[b].label}: ${BADGES[b].desc}`} aria-label={BADGES[b].label}>{BADGES[b].icon}</i>)}
+          </span>
+        )}
         {p.host && <span className="seat-host" title="Host">HOST</span>}
       </div>
+      {pop && (
+        <div key={pop.id} className={`seat-pop emote-${pop.emote}`} aria-label={`${p.name}: ${EMOTES[pop.emote as keyof typeof EMOTES]?.label ?? pop.emote}`}>
+          <span className="seat-pop-icon">{EMOTES[pop.emote as keyof typeof EMOTES]?.icon}</span>
+          {pop.emote === 'laugh' && <span className="seat-ha">HA HA</span>}
+          {pop.emote === 'yeehaw' && <span className="seat-ha">YEEHAW!</span>}
+        </div>
+      )}
       {rel >= 0 && <div className={`seat-order ${rel === 0 ? 'now' : rel === 1 ? 'next' : ''}`}>{rel === 0 ? 'SHOOTING' : rel === 1 ? 'NEXT' : `#${rel + 1}`}</div>}
       {!p.connected && <div className="seat-away">stepped out</div>}
+    </div>
+  );
+}
+
+/** pixel speech bubble over a player's head: typewriter reveal + blips, clamped to the viewport */
+function SpeechBubble({ b, name, L, seat, seats }: { b: Bubble; name: string; L: Layout; seat: number; seats: number[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [n, setN] = useState(() => (reducedMotion() ? b.text.length : 0));
+  const [pos, setPos] = useState<{ left: number; top: number; tail: number; below: boolean } | null>(null);
+  useEffect(() => {
+    if (n >= b.text.length) return;
+    const t = window.setTimeout(() => setN((k) => Math.min(b.text.length, k + 1)), 32);
+    if (n % 3 === 0) sfx.blip();
+    return () => clearTimeout(t);
+  }, [n, b.text]);
+  const g = seatGeom(L, seat, seats);
+  const hx = g.x * L.P, hy = (g.top + g.h * 0.06) * L.P;
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const left = Math.max(8, Math.min(vw - w - 8, hx - w / 2));
+    let top = hy - h - 12, below = false;
+    if (top < 8) { top = Math.min(vh - h - 8, (g.top + g.h * 0.55) * L.P); below = true; }
+    setPos({ left, top: Math.max(8, top), tail: Math.max(10, Math.min(w - 14, hx - left - 4)), below });
+  }, [hx, hy, b.text]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div ref={ref} className={`bubble ${pos?.below ? 'below' : ''}`} role="note" aria-label={`${name} says: ${b.text}`}
+      style={{ left: pos?.left ?? -999, top: pos?.top ?? -999, '--tail': `${pos?.tail ?? 20}px` } as CSSProperties}>
+      <span className="bubble-full" aria-hidden>{b.text}</span>
+      <span className="bubble-text" aria-hidden>{b.text.slice(0, n)}</span>
     </div>
   );
 }

@@ -50,7 +50,7 @@ export function PixelScene({ layout, data }: { layout: Layout; data: SceneData }
     c.imageSmoothingEnabled = false;
     const prof = motionProfile();
     let r: SceneRenderer | null = null;
-    try { r = new SceneRenderer(layout, { motes: prof.motes, reduce: prof.reduce }); } catch (e) { console.error(e); return; }
+    try { r = new SceneRenderer(layout, { motes: prof.motes, reduce: prof.reduce, low: prof.low }); } catch (e) { console.error(e); return; }
     let raf = 0, last = 0, dead = false;
     const step = 1000 / prof.fps;
     const tick = (t: number) => {

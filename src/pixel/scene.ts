@@ -1,7 +1,7 @@
 import { PAL, hexRgb, rnd } from './palette';
 import { bayer, circle, ditherBands, ellipse, line, makeCanvas, px } from './dither';
 import type { Look } from '../../shared/types';
-import { BUST_H, BUST_W, bustFor, renderBust, shade, styleSig, type BustLook } from './sprites';
+import { BUST_H, BUST_W, bustFor, poseKey, renderBust, shade, styleSig, type BustLook, type Pose } from './sprites';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -98,7 +98,52 @@ function rowSeat(L: Layout, seat: number, all: number[]): SeatGeom {
 
 /* ================= static layers ================= */
 
-function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array) {
+interface Rect { x: number; y: number; w: number; h: number }
+interface WinGeo extends Rect { mesa: number[]; mull: Rect[] }
+/** where the dynamic bits of the back wall live (filled in by drawWall) */
+interface WallGeo {
+  wins: WinGeo[];
+  door: Rect | null; // doorway opening (batwing doors swing in it)
+  piano: { x: number; floor: number } | null;
+  shelf: { x0: number; x1: number; y: number };
+}
+
+const DOOR_OUT = (c: Ctx, d: Rect, dawn: boolean) => {
+  // the street outside: sky, a far false-front building, mud
+  ditherBands(c, d.x, d.y, d.w, d.h, dawn ? ['#3a2c5a', '#c4587a', '#ff8a3d', '#ffd39a'] : [PAL.blue0, PAL.blue1, PAL.blue1, PAL.blue2]);
+  const bh = Math.round(d.h * 0.42);
+  c.fillStyle = dawn ? '#4a2438' : '#0a1018'; c.fillRect(d.x, d.y + d.h - bh, d.w, bh);
+  c.fillRect(d.x + 2, d.y + d.h - bh - 3, Math.max(2, d.w - 6), 3);
+  px(c, d.x + Math.round(d.w * 0.7), d.y + d.h - bh + 3, dawn ? '#ffd39a' : PAL.lamp1);
+  px(c, d.x + Math.round(d.w * 0.3), d.y + d.h - bh + 4, dawn ? '#c4587a' : PAL.lamp3);
+  c.fillStyle = dawn ? '#5a3a22' : '#140c08'; c.fillRect(d.x, d.y + d.h - 3, d.w, 3);
+};
+
+function drawPiano(c: Ctx, x: number, floor: number) {
+  // upright piano, back to the wall; ~24 x 20
+  const w = 24, top = floor - 20;
+  c.fillStyle = PAL.ink; c.fillRect(x - 1, top - 1, w + 2, 21);
+  c.fillStyle = '#2a120c'; c.fillRect(x, top, w, 19);
+  c.fillStyle = '#3e1c12'; c.fillRect(x, top, w, 2); c.fillRect(x + 2, top + 3, w - 4, 6);
+  c.fillStyle = '#4e2618'; c.fillRect(x + 3, top + 4, w - 6, 1);
+  c.fillStyle = PAL.lamp3; px(c, x + 6, top + 6, PAL.lamp3); px(c, x + w - 7, top + 6, PAL.lamp3);
+  // sheet music + candle
+  c.fillStyle = PAL.parch2; c.fillRect(x + 8, top - 4, 8, 5); c.fillStyle = PAL.parch3; c.fillRect(x + 9, top - 3, 6, 1); c.fillRect(x + 9, top - 1, 5, 1);
+  c.fillStyle = PAL.parch; c.fillRect(x + 2, top - 4, 2, 4); px(c, x + 2, top - 5, PAL.lamp1);
+  // keyboard
+  const ky = top + 10;
+  c.fillStyle = PAL.ink; c.fillRect(x - 1, ky, w + 2, 4);
+  c.fillStyle = PAL.parch; c.fillRect(x, ky + 1, w, 2);
+  for (let i = 1; i < w; i += 2) if (i % 7 !== 5) px(c, x + i, ky + 1, PAL.ink);
+  // legs + lower panel
+  c.fillStyle = '#1f0d08'; c.fillRect(x + 1, ky + 4, w - 2, floor - ky - 4);
+  c.fillStyle = '#3e1c12'; c.fillRect(x + 1, floor - 2, 3, 2); c.fillRect(x + w - 4, floor - 2, 3, 2);
+  // stool
+  c.fillStyle = PAL.ink; c.fillRect(x + 7, floor - 5, 10, 2); c.fillStyle = PAL.wood3; c.fillRect(x + 8, floor - 5, 8, 1);
+  c.fillStyle = PAL.wood1; c.fillRect(x + 9, floor - 3, 1, 3); c.fillRect(x + 14, floor - 3, 1, 3);
+}
+
+function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: WallGeo) {
   const { W, H, tableTop } = L;
   // planks
   let x = 0, k = 0;
@@ -141,7 +186,9 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array) {
   const wh = Math.max(14, Math.min(Math.round(ww * 1.45), rail - wy - 8));
   const wl = Math.round(W * 0.1);
   const wins = [wl, W - wl - ww];
+  const winTop = wy, winBot = wy + wh;
   wins.forEach((wx, wi) => {
+    const mesa: number[] = [];
     // blue spill on wall below/around (cool light map)
     for (let y = wy - 6; y < H; y++) for (let xx = wx - 14; xx < wx + ww + 14; xx++) {
       if (xx < 0 || xx >= W || y < 0) continue;
@@ -176,10 +223,18 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array) {
     for (let xx = 0; xx < ww; xx++) {
       const hgt = Math.round(wh * 0.18 + Math.sin((xx + wi * 13) * 0.35) * 2 + (xx % 7 < 3 ? 2 : 0));
       c.fillStyle = PAL.blue0; c.fillRect(wx + xx, wy + wh - hgt, 1, hgt);
+      mesa.push(hgt);
     }
+    // rain sheen on the glass: a faint lighter dither near the top + a few beads
+    for (let y = wy; y < wy + Math.round(wh * 0.5); y++) for (let xx = wx; xx < wx + ww; xx++) {
+      if ((1 - (y - wy) / (wh * 0.5)) * 0.22 > bayer(xx, y) + 0.05 && (xx + y) % 3 === 0) px(c, xx, y, PAL.blue2);
+    }
+    for (let i = 0; i < Math.round(ww * wh / 40); i++) px(c, wx + Math.floor(rnd(wi, i, 71) * ww), wy + Math.floor(rnd(wi, i, 72) * wh), i % 3 ? PAL.blue3 : PAL.moon);
     for (let y = wy; y < wy + wh; y++) for (let xx = wx; xx < wx + ww; xx++) emis[y * W + xx] = 1;
     // mullions
-    c.fillStyle = PAL.wood1; c.fillRect(wx + (ww >> 1) - 1, wy, 2, wh); c.fillRect(wx, wy + Math.round(wh * 0.45), ww, 2);
+    const mull = [{ x: wx + (ww >> 1) - 1, y: wy, w: 2, h: wh }, { x: wx, y: wy + Math.round(wh * 0.45), w: ww, h: 2 }];
+    c.fillStyle = PAL.wood1; for (const m of mull) c.fillRect(m.x, m.y, m.w, m.h);
+    geo.wins.push({ x: wx, y: wy, w: ww, h: wh, mesa, mull });
     // sill
     c.fillStyle = PAL.wood3; c.fillRect(wx - 4, wy + wh + 2, ww + 8, 2);
     c.fillStyle = PAL.blue3; c.fillRect(wx - 4, wy + wh + 2, ww + 8, 1);
@@ -205,10 +260,41 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array) {
   c.fillStyle = PAL.wood4; c.fillRect(sx0, sy, sx1 - sx0, 1);
   c.fillStyle = PAL.ink; c.fillRect(sx0, sy + 2, sx1 - sx0, 1);
   c.fillStyle = PAL.wood1; c.fillRect(sx0 + 3, sy + 3, 2, 4); c.fillRect(sx1 - 5, sy + 3, 2, 4);
+  geo.shelf = { x0: sx0, x1: sx1, y: sy };
+
+  // ---- swinging doors (back wall) + piano corner
+  const floor = L.tableTop + (L.portrait ? 2 : 4);
+  const dw = Math.max(16, Math.min(26, Math.round(W * 0.085)));
+  let door: Rect | null = null;
+  const tallD = Math.min(36, floor - 4 - (L.portrait ? winBot + 6 : 8));
+  if (!L.portrait && Math.round(W * 0.7) + dw < W - wl - ww - 4 && tallD >= 18) door = { x: Math.round(W * 0.7), y: floor - tallD, w: dw, h: tallD };
+  else {
+    const dh = Math.min(34, floor - winBot - 6);
+    if (dh >= 16) door = { x: W - dw - 3, y: floor - dh, w: dw, h: dh };
+  }
+  geo.door = door;
+  if (door) {
+    const d = door;
+    c.fillStyle = PAL.ink; c.fillRect(d.x - 3, d.y - 3, d.w + 6, d.h + 3);
+    c.fillStyle = PAL.wood3; c.fillRect(d.x - 2, d.y - 2, d.w + 4, d.h + 2);
+    c.fillStyle = PAL.wood4; c.fillRect(d.x - 2, d.y - 2, d.w + 4, 1);
+    DOOR_OUT(c, d, false);
+    for (let y = d.y; y < d.y + d.h; y++) for (let xx = d.x; xx < d.x + d.w; xx++) emis[y * W + xx] = 1;
+    // cool spill on the floor boards in front
+    for (let y = d.y + d.h - 4; y < Math.min(H, d.y + d.h + 18); y++) for (let xx = d.x - 10; xx < d.x + d.w + 10; xx++) {
+      if (xx < 0 || xx >= W || (y < d.y + d.h && xx >= d.x && xx < d.x + d.w)) continue;
+      const v = Math.max(0, 1 - Math.abs(xx - (d.x + d.w / 2)) / (d.w * 0.9)) * Math.max(0, 1 - Math.abs(y - (d.y + d.h)) / 16) * 0.7;
+      cool[y * W + xx] = Math.max(cool[y * W + xx], v);
+    }
+  }
+  const pianoX = L.portrait ? 1 : 3;
+  if (W >= 150 && floor - 24 > winBot + 2 - (L.portrait ? 0 : 12)) { drawPiano(c, pianoX, floor); geo.piano = { x: pianoX, floor }; }
+  else geo.piano = null;
+  const doorMid = !!door && !L.portrait && door.x < W * 0.8;
 
   // framed picture (left)
   const fx = Math.round(W * 0.25), fy = Math.max(8, Math.round(tableTop * 0.2)), fw = 14, fh = 11;
-  if (fx + fw < sx0 - 1) {
+  if (fx + fw < sx0 - 1 && !doorMid) {
     c.fillStyle = PAL.ink; c.fillRect(fx - 1, fy - 1, fw + 2, fh + 2);
     c.fillStyle = PAL.lamp3; c.fillRect(fx, fy, fw, fh);
     c.fillStyle = PAL.wood4; c.fillRect(fx, fy, fw, 1);
@@ -218,8 +304,8 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array) {
     px(c, fx + fw / 2, fy - 5, PAL.metal3);
   }
   // wanted poster (right)
-  const px0 = Math.round(W * 0.7), py0 = Math.max(8, Math.round(tableTop * 0.16)), pw2 = 13, ph = 17;
-  if (px0 > sx1 + 1 && px0 + pw2 < W - wl - ww - 4) {
+  const px0 = doorMid ? Math.round(W * 0.25) : Math.round(W * 0.7), py0 = Math.max(8, Math.round(tableTop * 0.16)), pw2 = 13, ph = 17;
+  if (doorMid ? px0 + pw2 < sx0 - 1 : px0 > sx1 + 1 && px0 + pw2 < W - wl - ww - 4) {
     c.fillStyle = PAL.parch2; c.fillRect(px0, py0, pw2, ph);
     for (let y = py0; y < py0 + ph; y++) for (let xx = px0; xx < px0 + pw2; xx++) {
       const e = Math.min(xx - px0, px0 + pw2 - 1 - xx, y - py0, py0 + ph - 1 - y);
@@ -304,40 +390,119 @@ function drawTable(c: Ctx, L: Layout) {
 
 /* ================= runtime scene ================= */
 
-export interface ScenePlayer { id: string; seat: number; look: number; style?: Look; connected: boolean }
+export interface ScenePlayer { id: string; seat: number; look: number; style?: Look; connected: boolean; bot?: boolean }
+
+/** Transient things the scene should play. Pushed by the React side into `SceneFX.queue`; the frame loop drains it. */
+export type SceneEvt =
+  | { k: 'emote'; pid: string; emote: string; at: number }
+  | { k: 'bolt'; big: boolean; at: number } // lightning (big = on top of a slow-mo / revenge shot)
+  | { k: 'doors'; leave: boolean; at: number }
+  | { k: 'slowmo'; at: number };
+export interface SceneFX {
+  queue: SceneEvt[];
+  /** piano tempo in bpm right now (0 = the pianist rests) */
+  tempo: () => number;
+  /** the scene decided an ambient lightning bolt struck (play thunder a moment later) */
+  onBolt?: (big: boolean) => void;
+}
 export interface SceneData {
   players: ScenePlayer[];
   shooter?: string;
   phase: string;
   shot?: { at: number; actor: string; kind: string }; // performance.now() based
   dimAll: number; // 1 normal, lower for roulette/result
+  fx?: SceneFX;
 }
+
+/** emote durations (ms of scene time) */
+const EMO_MS: Record<string, number> = { tip: 1300, spit: 1700, laugh: 2000, yeehaw: 1500, clap: 1400, shrug: 1500, angry: 1900, drink: 1900 };
+const IDLE_MS: Record<string, number> = { cards: 1900, sip: 2000, hat: 1100, look: 1700 };
+const IDLE_KINDS = ['cards', 'sip', 'hat', 'look'] as const;
+
+interface Anim { kind: string; v: number; emote: boolean }
+interface Pose2 { pose?: Pose; hatDy?: number; hand?: boolean; pad?: number; jx?: number; jy?: number; blink?: boolean }
+
+/** what a bust looks like `age` ms into an emote / idle animation */
+function animPose(a: Anim, age: number): Pose2 {
+  const f = (ms: number) => Math.floor(age / ms);
+  switch (a.kind) {
+    case 'tip': return { hatDy: age < 180 ? -2 : age < 950 ? -4 : age < 1150 ? -2 : 0, hand: age < 1150, pose: { mouth: 'grin' } };
+    case 'hat': return { hatDy: age < 150 ? -2 : age < 700 ? -3 : age < 850 ? -1 : 0, hand: age < 900 };
+    case 'spit': return { pose: { mouth: age > 180 && age < 480 ? 'open' : undefined, eyes: 1 }, jx: age > 200 && age < 320 ? 1 : 0 };
+    case 'laugh': return { pose: { mouth: 'open' }, blink: true, jx: f(90) % 2 ? 1 : -1, jy: f(180) % 2 };
+    case 'yeehaw': {
+      // hat flies up and is caught (bust px, negative = up)
+      const T = 900, h = 26;
+      const dy = age < T ? -Math.round(h * 4 * (age / T) * (1 - age / T)) : age < 1050 ? 1 : 0;
+      return { hatDy: dy, pad: 30, pose: { mouth: age < 1100 ? 'open' : 'grin', brow: 'up' } };
+    }
+    case 'clap': return { pose: { arm: f(210) % 2 ? 'clapOpen' : 'clap', mouth: 'grin' } };
+    case 'shrug': return { pose: { arm: 'shrug', brow: 'up' }, jy: age > 120 && age < 1300 ? -1 : 0 };
+    case 'angry': return { pose: { brow: 'angry' }, jx: f(70) % 2 ? 1 : 0 };
+    case 'drink': case 'sip': {
+      const up = age > 400 && age < (a.kind === 'sip' ? 1500 : 1400);
+      return { pose: { arm: up ? 'glassUp' : 'glass', eyes: up ? undefined : -1 }, blink: up && age > 700 };
+    }
+    case 'cards': return { pose: { arm: (['cards', 'cards2', 'cards3', 'cards2'] as const)[f(160) % 4] } };
+    case 'look': return { pose: { eyes: age < 800 ? -1 : 1 } };
+  }
+  return {};
+}
+
+interface Drop { x: number; y: number; v: number; len: number }
+interface Gust { x: number; y: number; vx: number; vy: number; life: number }
 
 export class SceneRenderer {
   L: Layout;
   bg: HTMLCanvasElement;
   table: HTMLCanvasElement;
+  dawnWin: HTMLCanvasElement;
   emis: Uint8Array;
   cool: Float32Array;
   vig: Float32Array;
+  geo: WallGeo = { wins: [], door: null, piano: null, shelf: { x0: 0, x1: 0, y: 0 } };
   sprites = new Map<string, HTMLCanvasElement>();
   looks = new Map<string, BustLook>();
   lampA = 0;
   motes: { x: number; y: number; vx: number; vy: number; p: number }[] = [];
   reduce: boolean;
+  low: boolean;
+  // clocks: `vt` is scene time (runs slow during slow-mo); real time only drives the clock itself
+  vt = 0; lastReal = -1; slowUntil = 0;
+  shotSeen = -1; shotV = -1e9;
+  bolt = { v: -1e9, big: false }; nextBolt = 6000;
+  dawn = 0;
+  rain: Drop[][] = [];
+  gust: Gust[] = [];
+  doorV = -1e9; doorLeave = false;
+  anims = new Map<string, Anim>();
+  nextIdle = new Map<string, number>();
+  cat = { x: 0, dir: 1, state: 'walk' as 'walk' | 'sit' | 'bolt' | 'gone', until: 4000, v: 0 };
 
-  constructor(L: Layout, opts: { motes?: number; reduce?: boolean } = {}) {
+  constructor(L: Layout, opts: { motes?: number; reduce?: boolean; low?: boolean } = {}) {
     this.L = L;
     this.reduce = !!opts.reduce;
+    this.low = !!opts.low;
     const { W, H } = L;
     this.emis = new Uint8Array(W * H);
     this.cool = new Float32Array(W * H);
     const [bg, bc] = makeCanvas(W, H);
-    drawWall(bc, L, this.emis, this.cool);
+    drawWall(bc, L, this.emis, this.cool, this.geo);
     this.bg = bg;
     const [tb, tc] = makeCanvas(W, H);
     drawTable(tc, L);
     this.table = tb;
+    // dawn skies for the windows + doorway (drawn over the night ones at the result)
+    const [dw, dc] = makeCanvas(W, H);
+    this.geo.wins.forEach((w, wi) => {
+      ditherBands(dc, w.x, w.y, w.w, w.h, ['#3a2c5a', '#7a3c6a', '#c4587a', '#ff8a3d', '#ffd39a']);
+      if (wi === 1) { circle(dc, w.x + Math.round(w.w * 0.35), w.y + w.h - Math.round(w.h * 0.18), Math.max(2, Math.round(w.w * 0.18)), '#fff3c4'); }
+      for (let i = 0; i < 4; i++) { dc.fillStyle = '#ffd39a'; dc.fillRect(w.x + Math.floor(rnd(wi, i, 81) * (w.w - 6)), w.y + 2 + i * 3, 4 + (i % 3), 1); }
+      w.mesa.forEach((hgt, xx) => { dc.fillStyle = '#4a2438'; dc.fillRect(w.x + xx, w.y + w.h - hgt, 1, hgt); });
+      dc.fillStyle = PAL.wood1; for (const m of w.mull) dc.fillRect(m.x, m.y, m.w, m.h);
+    });
+    if (this.geo.door) DOOR_OUT(dc, this.geo.door, true);
+    this.dawnWin = dw;
     this.vig = new Float32Array(W * H);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const dx = (x - W / 2) / (W * 0.62), dy = (y - H * 0.36) / (H * 0.72);
@@ -345,18 +510,25 @@ export class SceneRenderer {
       this.vig[y * W + x] = Math.max(0.08, 1 - Math.max(0, d - 0.45) * 1.5);
     }
     for (let i = 0; i < (opts.motes ?? 34); i++) this.motes.push({ x: rnd(i, 1, 9) * W, y: rnd(i, 2, 9) * H * 0.8, vx: (rnd(i, 3, 9) - 0.5) * 2, vy: -0.4 - rnd(i, 4, 9) * 1.2, p: rnd(i, 5, 9) * 6.28 });
+    // rain streaks per window (+ the doorway)
+    const rects: Rect[] = [...this.geo.wins, ...(this.geo.door ? [this.geo.door] : [])];
+    rects.forEach((r, ri) => {
+      const n = Math.max(4, Math.round((r.w * r.h) / (this.low ? 34 : 20)));
+      this.rain.push(Array.from({ length: n }, (_, i) => ({ x: rnd(ri, i, 91) * (r.w + 6), y: rnd(ri, i, 92) * r.h, v: 0.09 + rnd(ri, i, 93) * 0.07, len: 2 + Math.floor(rnd(ri, i, 94) * 3) })));
+    });
+    this.cat.x = this.geo.shelf.x0 + 4;
   }
 
-  sprite(p: ScenePlayer, g: SeatGeom, blink: boolean, lit: boolean, rimRight: boolean, gun = 0) {
+  sprite(p: ScenePlayer, g: SeatGeom, blink: boolean, lit: boolean, rimRight: boolean, gun = 0, ps: Pose2 = {}) {
     const dimQ = Math.round((1.08 - 0.32 * g.depth) * 4) / 4;
     const sig = styleSig(p);
-    const key = `${p.id}|${sig}|${g.scale.toFixed(3)}|${+blink}|${+lit}|${+rimRight}|${dimQ}|${+!p.connected}|${gun}`;
+    const key = `${p.id}|${sig}|${g.scale.toFixed(3)}|${+blink}|${+lit}|${+rimRight}|${dimQ}|${+!p.connected}|${gun}|${+!!p.bot}|${poseKey(ps.pose)}|${ps.hatDy ?? 0}|${+!!ps.hand}|${ps.pad ?? 0}`;
     let cv = this.sprites.get(key);
     if (!cv) {
       let look = this.looks.get(p.id + sig);
       if (!look) { look = bustFor(p); this.looks.set(p.id + sig, look); }
-      cv = renderBust(look, { scale: g.scale, blink, lit, rimRight, dim: lit ? 0.95 : dimQ, ghost: !p.connected, gun });
-      if (this.sprites.size > 96) this.sprites.clear();
+      cv = renderBust(look, { scale: g.scale, blink, lit, rimRight, dim: lit ? 0.95 : dimQ, ghost: !p.connected, gun, bot: p.bot, pose: ps.pose, hatDy: ps.hatDy, hand: ps.hand, padTop: ps.pad });
+      if (this.sprites.size > 160) this.sprites.clear();
       this.sprites.set(key, cv);
     }
     return cv;
@@ -367,21 +539,81 @@ export class SceneRenderer {
     return { x: Math.round(g.x - g.w / 2 + 36 * g.scale), y: Math.round(g.top + 26 * g.scale) };
   }
 
+  /** drain transient events (drop stale ones: a hidden tab stops the loop and they pile up) */
+  private drain(t: number, D: SceneData) {
+    const q = D.fx?.queue;
+    if (!q || !q.length) return;
+    const evs = q.splice(0, q.length);
+    for (const e of evs) {
+      if (t - e.at > 3000) continue;
+      if (e.k === 'emote') this.anims.set(e.pid, { kind: e.emote, v: this.vt, emote: true });
+      else if (e.k === 'bolt') { this.bolt = { v: this.vt, big: e.big }; this.nextBolt = this.vt + 9000 + Math.random() * 12000; }
+      else if (e.k === 'doors') { this.doorV = this.vt; this.doorLeave = e.leave; this.spawnGust(e.leave ? 34 : 18); }
+      else if (e.k === 'slowmo') this.slowUntil = t + 1500;
+    }
+  }
+
+  private spawnGust(n: number) {
+    const d = this.geo.door;
+    if (!d || this.reduce) return;
+    const dir = d.x + d.w / 2 > this.L.cx ? -1 : 1;
+    for (let i = 0; i < (this.low ? n >> 1 : n); i++) {
+      this.gust.push({ x: d.x + Math.random() * d.w, y: d.y + d.h * (0.2 + Math.random() * 0.7), vx: dir * (0.03 + Math.random() * 0.06), vy: 0.005 + Math.random() * 0.025, life: 700 + Math.random() * 700 });
+    }
+  }
+
   frame(c: Ctx, t: number, D: SceneData) {
     const L = this.L;
     const { W, H, cx } = L;
-    const sec = t / 1000;
-    const shotAge = D.shot ? t - D.shot.at : 1e9;
+    // ---- scene clock (slow-mo halves it)
+    const dtReal = this.lastReal < 0 ? 0 : Math.min(250, t - this.lastReal);
+    this.lastReal = t;
+    const rate = t < this.slowUntil && !this.reduce ? 0.45 : 1;
+    const dt = dtReal * rate;
+    this.vt += dt;
+    const vt = this.vt;
+    this.drain(t, D);
+    const sec = vt / 1000;
+    // shot age in scene time, stamped when first seen
+    if (D.shot && D.shot.at !== this.shotSeen) {
+      this.shotSeen = D.shot.at;
+      this.shotV = vt - Math.max(0, Math.min(400, t - D.shot.at)) * rate;
+      if (this.cat.state === 'walk' || this.cat.state === 'sit') { this.cat.state = 'bolt'; this.cat.dir = this.cat.x - this.geo.shelf.x0 < this.geo.shelf.x1 - this.cat.x ? -1 : 1; }
+    }
+    const shotAge = D.shot ? vt - this.shotV : 1e9;
+    // ---- weather: storm until the result, then dawn
+    const result = D.phase === 'result';
+    this.dawn = Math.max(0, Math.min(1, this.dawn + (result ? dt / 3500 : -dtReal / 600)));
+    const storm = this.dawn < 1;
+    if (storm && !result && vt > this.nextBolt) {
+      this.bolt = { v: vt, big: Math.random() < 0.25 };
+      this.nextBolt = vt + 9000 + Math.random() * 16000;
+      D.fx?.onBolt?.(this.bolt.big);
+    }
+    const bAge = vt - this.bolt.v;
+    let boltK = 0;
+    if (!this.reduce && bAge < 700 && !result) {
+      boltK = bAge < 70 ? 1 : bAge < 130 ? 0.25 : bAge < 210 ? 0.85 : Math.max(0, 0.6 * (1 - (bAge - 210) / 490));
+      if (!this.bolt.big) boltK *= 0.6;
+    }
+
     // integer screen shake
     let ox = 0, oy = 0;
     if (shotAge < 420 && !this.reduce) {
       const amp = D.shot!.kind === 'ricochet' ? 1 : shotAge < 160 ? 3 : 2;
-      ox = Math.round((rnd(Math.floor(t / 60), 1) - 0.5) * 2 * amp);
-      oy = Math.round((rnd(Math.floor(t / 60), 2) - 0.5) * 2 * amp);
+      ox = Math.round((rnd(Math.floor(vt / 60), 1) - 0.5) * 2 * amp);
+      oy = Math.round((rnd(Math.floor(vt / 60), 2) - 0.5) * 2 * amp);
     }
     c.setTransform(1, 0, 0, 1, ox, oy);
     c.fillStyle = PAL.ink; c.fillRect(-4, -4, W + 8, H + 8);
     c.drawImage(this.bg, 0, 0);
+
+    // ---- windows + doorway: rain, lightning, dawn
+    this.drawWeather(c, vt, dt, boltK, storm);
+    // ---- back corner: the piano player
+    this.drawPianist(c, vt, D, shotAge);
+    // ---- the cat on the bottle shelf
+    this.drawCat(c, vt, dt);
 
     const seats = D.players.map((p) => p.seat);
     const geoms = D.players.map((p) => ({ p, g: seatGeom(L, p.seat, seats) })).sort((a, b) => b.g.depth - a.g.depth);
@@ -393,11 +625,28 @@ export class SceneRenderer {
     const a = this.reduce ? this.lampA : this.lampA + Math.sin(sec * 1.1) * 0.05 + Math.sin(sec * 2.7) * 0.012;
     const lx = Math.round(cx + Math.sin(a) * L.lampLen), ly = Math.round(Math.cos(a) * L.lampLen);
 
+    // idle animations: random, staggered, never during your turn
+    if (!this.reduce) for (const { p } of geoms) {
+      const cur = this.anims.get(p.id);
+      if (cur) {
+        const dur = cur.emote ? EMO_MS[cur.kind] ?? 1500 : IDLE_MS[cur.kind] ?? 1500;
+        if (vt - cur.v > dur || (!cur.emote && p.id === D.shooter)) this.anims.delete(p.id);
+        continue;
+      }
+      const nx = this.nextIdle.get(p.id);
+      if (nx === undefined) { this.nextIdle.set(p.id, vt + 3000 + Math.random() * 9000); continue; }
+      if (vt > nx) {
+        this.nextIdle.set(p.id, vt + 6000 + Math.random() * 9000);
+        if (p.id !== D.shooter && p.connected && shotAge > 2500 && D.phase !== 'roulette') this.anims.set(p.id, { kind: IDLE_KINDS[Math.floor(Math.random() * IDLE_KINDS.length)], v: vt, emote: false });
+      }
+    } else for (const [id, cur] of this.anims) if (vt - cur.v > (EMO_MS[cur.kind] ?? 1500)) this.anims.delete(id);
+
     // players
+    const overlays: { p: ScenePlayer; g: SeatGeom; a: Anim; age: number }[] = [];
     for (const { p, g } of geoms) {
       const ph = (p.id.charCodeAt(0) || 0) * 0.37 + p.seat;
       const bob = !this.reduce && Math.sin(sec * 1.6 + ph) > 0.2 ? 1 : 0;
-      const blink = ((sec + ph * 1.7) % 4.3) < 0.16;
+      let blink = ((sec + ph * 1.7) % 4.3) < 0.16;
       const lit = p.id === D.shooter;
       const isActor = !!D.shot && D.shot.actor === p.id;
       const gun = (lit || (isActor && shotAge < 1500)) && !this.reduce ? (isActor && shotAge < 220 && D.shot!.kind !== 'ricochet' ? 2 : 1) : lit ? 1 : 0;
@@ -407,8 +656,19 @@ export class SceneRenderer {
         const k = shotAge < 90 ? 2 : 1;
         jx = (rnd(p.seat, Math.floor(shotAge / 70), 5) > 0.5 ? 1 : -1) * k; jy = shotAge < 130 ? 1 : 0;
       }
-      const cv = this.sprite(p, g, blink, lit, g.x < lx, gun);
-      c.drawImage(cv, Math.round(g.x - cv.width / 2) + jx, g.top + bob + jy + (gun === 2 ? 1 : 0));
+      const an = this.anims.get(p.id);
+      let ps: Pose2 = {};
+      if (an && !gun) {
+        const age = vt - an.v;
+        ps = animPose(an, this.reduce ? Math.min(age, 600) : age);
+        if (this.reduce) { ps.jx = 0; ps.jy = 0; if (an.kind === 'yeehaw') ps.hatDy = -3; }
+        if (ps.blink) blink = true;
+        jx += ps.jx ?? 0; jy += ps.jy ?? 0;
+        overlays.push({ p, g, a: an, age });
+      }
+      const cv = this.sprite(p, g, blink, lit, g.x < lx, gun, ps);
+      const pad = Math.round((ps.pad ?? 0) * g.scale);
+      c.drawImage(cv, Math.round(g.x - cv.width / 2) + jx, g.top - pad + bob + jy + (gun === 2 ? 1 : 0));
     }
     c.drawImage(this.table, 0, 0);
 
@@ -425,8 +685,9 @@ export class SceneRenderer {
     // ---- lighting pass
     const img = c.getImageData(0, 0, W, H);
     const d = img.data;
-    const flick = this.reduce ? 0.95 : 0.9 + 0.1 * Math.sin(sec * 9.3) * Math.sin(sec * 3.1 + 1) + (rnd(Math.floor(t / 80), 7) > 0.93 ? -0.18 : 0);
-    const amb = (D.shooter ? 0.42 : 0.52) * D.dimAll;
+    const flick = this.reduce ? 0.95 : 0.9 + 0.1 * Math.sin(sec * 9.3) * Math.sin(sec * 3.1 + 1) + (rnd(Math.floor(vt / 80), 7) > 0.93 ? -0.18 : 0);
+    const dawn = this.dawn;
+    const amb = (D.shooter ? 0.42 : 0.52) * D.dimAll + dawn * 0.14 + boltK * 0.35;
     const R = W * 0.55;
     const tanA = Math.tan(a);
     const flash = shotAge < 140 ? 1.6 * (1 - shotAge / 140) : 0;
@@ -435,13 +696,16 @@ export class SceneRenderer {
     const fX = fM ? fM.x : cx, fY = fM ? fM.y : L.tableTop;
     const sp = shooterG ? { x: shooterG.g.x, y: shooterG.g.top + shooterG.g.h * 0.45, r: shooterG.g.h * 0.75 } : null;
     const lampK = D.dimAll;
+    const emisK = Math.max(0.75 * D.dimAll + 0.25, dawn);
+    // window spill: cold blue at night, warm pink-orange at dawn, white-blue in a lightning flash
+    const coolK = (0.35 + dawn * 0.25) * Math.max(D.dimAll, dawn) + boltK * 1.4;
+    const cR = 0.2 + dawn * 1.2 + boltK * 0.9, cG = 0.6 + dawn * 0.15 + boltK * 0.9, cB = 1.5 - dawn * 0.9 + boltK * 0.6;
     for (let y = 0; y < H; y++) {
       const dy = y - ly;
       for (let x = 0; x < W; x++) {
         const i = y * W + x, o = i * 4;
         if (this.emis[i]) {
-          const k = 0.75 * D.dimAll + 0.25;
-          d[o] *= k; d[o + 1] *= k; d[o + 2] *= k; continue;
+          d[o] *= emisK; d[o + 1] *= emisK; d[o + 2] *= emisK; continue;
         }
         const dx = x - lx;
         const dist = Math.sqrt(dx * dx + dy * dy * 1.3);
@@ -465,16 +729,16 @@ export class SceneRenderer {
         const lq = Math.floor(lamp * 5 + b) / 5;
         const av = amb * this.vig[i];
         const aq = Math.floor(av * 7 + b) / 7;
-        const cl = Math.floor(this.cool[i] * 3 + b) / 3 * 0.35 * D.dimAll;
-        d[o] = d[o] * (aq * 0.85 + lq * 1.3 + cl * 0.2);
-        d[o + 1] = d[o + 1] * (aq * 0.9 + lq * 1.0 + cl * 0.6);
-        d[o + 2] = d[o + 2] * (aq * 1.12 + lq * 0.62 + cl * 1.5);
+        const cl = Math.floor(this.cool[i] * 3 + b) / 3 * coolK;
+        d[o] = d[o] * (aq * 0.85 + lq * 1.3 + cl * cR);
+        d[o + 1] = d[o + 1] * (aq * 0.9 + lq * 1.0 + cl * cG);
+        d[o + 2] = d[o + 2] * (aq * 1.12 + lq * 0.62 + cl * cB);
       }
     }
     c.putImageData(img, 0, 0);
 
     // ---- emissive layer: lamp glass + flame
-    const fh = 4 + (rnd(Math.floor(t / 90), 3) > 0.5 ? 1 : 0);
+    const fh = 4 + (rnd(Math.floor(vt / 90), 3) > 0.5 ? 1 : 0);
     c.fillStyle = shade(PAL.lamp1, 0.8 * lampK + 0.2); c.fillRect(lx - 2, ly + 1, 5, 7);
     c.fillStyle = PAL.lamp2; c.fillRect(lx - 3, ly + 2, 1, 5); c.fillRect(lx + 3, ly + 2, 1, 5);
     c.fillStyle = PAL.lamp0; c.fillRect(lx - 1, ly + 7 - fh, 3, fh);
@@ -487,9 +751,10 @@ export class SceneRenderer {
     }
 
     // ---- dust motes in the light
+    const mk = this.reduce ? 0 : dt / 77;
     for (const m of this.motes) {
-      m.x += m.vx * 0.25 + Math.sin(sec + m.p) * 0.15; m.y += m.vy * 0.25;
-      if (m.y < 0) { m.y = H * 0.8; m.x = rnd(Math.floor(t), m.p * 100) * W; }
+      m.x += (m.vx * 0.25 + Math.sin(sec + m.p) * 0.15) * mk; m.y += m.vy * 0.25 * mk;
+      if (m.y < 0) { m.y = H * 0.8; m.x = rnd(Math.floor(vt), m.p * 100) * W; }
       if (m.x < 0) m.x += W; if (m.x > W) m.x -= W;
       const mx = Math.round(m.x), my = Math.round(m.y);
       const ddy = my - ly;
@@ -497,6 +762,16 @@ export class SceneRenderer {
       const near = Math.hypot(mx - lx, ddy) < W * 0.25;
       if (inCone || near) px(c, mx, my, Math.sin(sec * 2 + m.p) > 0 ? PAL.lamp1 : PAL.parch2);
       else if (this.cool[Math.min(W * H - 1, Math.max(0, my * W + mx))] > 0.3) px(c, mx, my, PAL.blue2);
+    }
+
+    // ---- rain blown in through the doors
+    if (this.gust.length) {
+      this.gust = this.gust.filter((g) => (g.life -= dt) > 0);
+      for (const g of this.gust) {
+        g.x += g.vx * dt; g.y += g.vy * dt; g.vy += 0.00004 * dt;
+        const x0 = Math.round(g.x), y0 = Math.round(g.y);
+        px(c, x0, y0, PAL.blue3); px(c, x0 - Math.sign(g.vx), y0 - 1, PAL.blue2);
+      }
     }
 
     // ---- muzzle flash + smoke at the shooter
@@ -521,6 +796,196 @@ export class SceneRenderer {
             }
           }
         }
+      }
+    }
+
+    // ---- emote props that leave the bust: spit arc + spittoon, steam puffs
+    for (const o of overlays) this.drawEmoteFx(c, o.g, o.a, o.age);
+  }
+
+  private drawWeather(c: Ctx, vt: number, dt: number, boltK: number, storm: boolean) {
+    const { wins, door } = this.geo;
+    const rects: Rect[] = [...wins, ...(door ? [door] : [])];
+    const dq = Math.round(this.dawn * 4) / 4;
+    if (dq > 0) { c.globalAlpha = dq; c.drawImage(this.dawnWin, 0, 0); c.globalAlpha = 1; }
+    // rain streaks
+    if (storm) {
+      const vis = 1 - this.dawn;
+      rects.forEach((r, ri) => {
+        const drops = this.rain[ri];
+        if (!drops) return;
+        for (let i = 0; i < drops.length; i++) {
+          const dr = drops[i];
+          if (!this.reduce) { dr.y += dr.v * dt; if (dr.y > r.h + 2) { dr.y -= r.h + 4; dr.x = Math.random() * (r.w + 6); } }
+          if (vis < 1 && rnd(ri, i, 7) > vis) continue;
+          const col = boltK > 0.3 ? PAL.white : i % 3 ? PAL.blue2 : PAL.blue3;
+          for (let k = 0; k < dr.len; k++) {
+            const x = Math.round(r.x + dr.x - (dr.y + k) * 0.25), y = Math.round(r.y + dr.y + k);
+            if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) px(c, x, y, col);
+          }
+        }
+      });
+    }
+    // lightning: windows blow out white, the land goes black, sometimes a bolt
+    if (boltK > 0.15) {
+      wins.forEach((w, wi) => {
+        c.fillStyle = boltK > 0.6 ? PAL.white : PAL.moon; c.fillRect(w.x, w.y, w.w, w.h);
+        w.mesa.forEach((hgt, xx) => { c.fillStyle = PAL.blue0; c.fillRect(w.x + xx, w.y + w.h - hgt, 1, hgt); });
+        if (boltK > 0.5 && (this.bolt.big || wi === Math.floor(this.bolt.v / 1000) % 2)) {
+          let x = w.x + Math.round(w.w * (0.3 + rnd(Math.floor(this.bolt.v), wi, 3) * 0.4)), y = w.y;
+          while (y < w.y + w.h - (w.mesa[0] ?? 3)) {
+            const nx = Math.max(w.x, Math.min(w.x + w.w - 1, x + Math.round((rnd(x, y, 5) - 0.5) * 5))), ny = y + 2 + Math.floor(rnd(y, x, 6) * 3);
+            line(c, x, y, nx, ny, '#8fd0ff'); x = nx; y = ny;
+          }
+        }
+      });
+      if (door) { c.fillStyle = boltK > 0.6 ? PAL.moon : PAL.blue3; c.fillRect(door.x, door.y, door.w, Math.round(door.h * 0.58)); }
+    }
+    for (const w of wins) { c.fillStyle = PAL.wood1; for (const m of w.mull) c.fillRect(m.x, m.y, m.w, m.h); }
+    // batwing doors: two slatted half-doors that swing (damped) when someone comes or goes
+    if (door) {
+      const age = vt - this.doorV;
+      let open = 0; // 0 closed .. 1 wide open
+      if (age < 2600) {
+        const k = this.reduce ? (age < 900 ? 0.7 : 0) : Math.exp(-age / (this.doorLeave ? 700 : 600)) * Math.abs(Math.cos(age / 170));
+        open = Math.min(1, k * (this.doorLeave ? 1.15 : 1));
+      }
+      const half = door.w / 2;
+      const lw = Math.max(1, Math.round(half * (1 - open * 0.85)));
+      const y0 = door.y + Math.round(door.h * 0.3), y1 = door.y + Math.round(door.h * 0.82);
+      for (const side of [0, 1]) {
+        const x0 = side ? door.x + door.w - lw : door.x;
+        c.fillStyle = PAL.wood1; c.fillRect(x0, y0, lw, y1 - y0);
+        c.fillStyle = PAL.wood2; for (let yy = y0 + 2; yy < y1 - 1; yy += 3) c.fillRect(x0, yy, lw, 1);
+        c.fillStyle = PAL.ink; c.fillRect(side ? x0 : x0 + lw - 1, y0, 1, y1 - y0);
+        // scalloped top edge
+        c.fillStyle = PAL.wood2; c.fillRect(x0, y0 - 1, Math.max(1, lw - 2), 1);
+        c.fillStyle = PAL.metal2; px(c, side ? door.x + door.w - 1 : door.x, y0 + 2, PAL.metal3); px(c, side ? door.x + door.w - 1 : door.x, y1 - 3, PAL.metal3);
+      }
+    }
+  }
+
+  private drawPianist(c: Ctx, vt: number, D: SceneData, shotAge: number) {
+    const pi = this.geo.piano;
+    if (!pi) return;
+    const x = pi.x, floor = pi.floor, top = floor - 20, ky = top + 10;
+    const bpm = D.fx?.tempo() ?? 0;
+    const startled = shotAge < 1800;
+    const playing = bpm > 0 && !startled && !this.reduce;
+    const beat = playing ? Math.floor((vt / 60000) * bpm * 2) : 0; // eighth notes
+    const bx = x + 8; // his back, centered on the keyboard
+    // body (seen from behind): white shirt, black waistcoat, sleeve garters
+    c.fillStyle = PAL.ink; c.fillRect(bx - 1, ky - 3, 10, floor - 5 - ky + 3);
+    c.fillStyle = PAL.parch2; c.fillRect(bx, ky - 2, 8, floor - 6 - ky + 2);
+    c.fillStyle = '#1c1612'; c.fillRect(bx + 1, ky - 1, 6, floor - 7 - ky + 1);
+    c.fillStyle = '#3a2c22'; c.fillRect(bx + 4, ky - 1, 1, floor - 7 - ky + 1);
+    // arms out to the keys; hands bob on the beat (alternating)
+    const lUp = playing && beat % 2 === 0 ? 1 : 0, rUp = playing && beat % 2 === 1 ? 1 : 0;
+    c.fillStyle = PAL.parch2; c.fillRect(bx - 4, ky - 2, 4, 2); c.fillRect(bx + 8, ky - 2, 4, 2);
+    c.fillStyle = PAL.red1; c.fillRect(bx - 3, ky - 2, 1, 2); c.fillRect(bx + 10, ky - 2, 1, 2); // garters
+    c.fillStyle = PAL.skin2; c.fillRect(bx - 6, ky - lUp, 3, 2); c.fillRect(bx + 11, ky - rUp, 3, 2);
+    // head + bowler; looks over his shoulder when a shot rings out
+    const hx = bx + 1, hy = ky - 9;
+    c.fillStyle = PAL.ink; c.fillRect(hx - 1, hy - 1, 8, 8);
+    c.fillStyle = '#4a2c18'; c.fillRect(hx, hy, 6, 6); // hair, back of head
+    c.fillStyle = PAL.skin1; c.fillRect(hx + 1, hy + 5, 4, 2); // neck
+    if (startled) {
+      // turned: a profile peeking right, wide eye
+      c.fillStyle = PAL.skin2; c.fillRect(hx + 3, hy + 1, 4, 5); c.fillRect(hx + 7, hy + 3, 1, 1);
+      px(c, hx + 5, hy + 2, PAL.white); px(c, hx + 6, hy + 2, PAL.ink);
+      c.fillStyle = '#3a2418'; c.fillRect(hx + 4, hy + 4, 3, 1); // moustache
+    } else {
+      c.fillStyle = PAL.skin1; c.fillRect(hx, hy + 2, 1, 2); c.fillRect(hx + 5, hy + 2, 1, 2); // ears
+    }
+    // bowler
+    c.fillStyle = PAL.ink; c.fillRect(hx - 2, hy - 1, 10, 2);
+    c.fillStyle = '#1c1612'; c.fillRect(hx, hy - 5, 6, 5); c.fillRect(hx + 1, hy - 6, 4, 1);
+    c.fillStyle = PAL.metal2; c.fillRect(hx, hy - 2, 6, 1);
+    c.fillStyle = '#2a2420'; c.fillRect(hx - 2, hy - 1, 10, 1);
+    px(c, hx + 1, hy - 5, PAL.metal3);
+    // music notes drifting up while he plays
+    if (playing) {
+      const ph = (vt / 60000 * bpm) % 2;
+      const nx = x + 18 + Math.round(ph * 2), ny = top - 4 - Math.round(ph * 4);
+      if (ph < 1.6) { px(c, nx, ny, PAL.parch2); px(c, nx + 1, ny - 1, PAL.parch2); px(c, nx + 1, ny - 2, PAL.parch2); px(c, nx + 2, ny - 2, PAL.parch2); }
+    }
+  }
+
+  private drawCat(c: Ctx, vt: number, dt: number) {
+    const sh = this.geo.shelf, cat = this.cat;
+    if (sh.x1 - sh.x0 < 24) return;
+    const lo = sh.x0 + 2, hi = sh.x1 - 9;
+    if (cat.state === 'gone') {
+      if (vt > cat.until) { cat.state = 'walk'; cat.dir = Math.random() < 0.5 ? 1 : -1; cat.x = cat.dir > 0 ? lo : hi; cat.until = vt + 3000 + Math.random() * 4000; }
+      return;
+    }
+    if (!this.reduce) {
+      if (cat.state === 'walk') {
+        cat.x += cat.dir * dt * 0.006;
+        if (cat.x < lo || cat.x > hi) { cat.x = Math.max(lo, Math.min(hi, cat.x)); cat.dir *= -1; }
+        if (vt > cat.until) { cat.state = 'sit'; cat.until = vt + 5000 + Math.random() * 8000; }
+      } else if (cat.state === 'sit') {
+        if (vt > cat.until) { cat.state = 'walk'; cat.dir = Math.random() < 0.5 ? 1 : -1; cat.until = vt + 3000 + Math.random() * 5000; }
+      } else if (cat.state === 'bolt') {
+        cat.x += cat.dir * dt * 0.06;
+        if (cat.x < lo - 10 || cat.x > hi + 10) { cat.state = 'gone'; cat.until = vt + 9000 + Math.random() * 12000; return; }
+      }
+    } else if (cat.state === 'bolt') { cat.state = 'sit'; }
+    const x = Math.round(cat.x), y = sh.y; // y = shelf top; the cat stands on it
+    const f = Math.floor(vt / 160) % 2;
+    const C0 = '#161210', C1 = '#2e2722';
+    if (cat.state === 'sit') {
+      // sitting, facing out, tail swishing
+      c.fillStyle = C0; c.fillRect(x + 1, y - 6, 5, 6); c.fillRect(x + 1, y - 9, 5, 3);
+      px(c, x + 1, y - 10, C0); px(c, x + 5, y - 10, C0);
+      c.fillStyle = C1; c.fillRect(x + 2, y - 4, 3, 3);
+      px(c, x + 2, y - 8, '#d8c040'); px(c, x + 4, y - 8, '#d8c040');
+      const sw = this.reduce ? 0 : Math.round(Math.sin(vt / 260) * 2);
+      c.fillStyle = C0; c.fillRect(x + 6, y - 1, 2, 1); c.fillRect(x + 7, y - 3, 1, 2); px(c, x + 7 + (sw > 0 ? 1 : 0), y - 4 + (sw < 0 ? 1 : 0), C0);
+      return;
+    }
+    // walking / bolting (side view)
+    const d = cat.dir, run = cat.state === 'bolt';
+    const bx = x, hx = d > 0 ? x + 7 : x - 1;
+    c.fillStyle = C0; c.fillRect(bx, y - 4 - (run ? 0 : 0), 8, 3);
+    c.fillRect(hx - (d > 0 ? 0 : 1), y - 6, 3, 3); px(c, hx + (d > 0 ? 0 : 1), y - 7, C0); px(c, hx + (d > 0 ? 2 : -1), y - 7, C0);
+    px(c, hx + (d > 0 ? 2 : -1), y - 5, '#d8c040');
+    // legs
+    const s = run ? Math.floor(vt / 60) % 2 : f;
+    c.fillStyle = C0;
+    c.fillRect(bx + (s ? 1 : 0), y - 1, 1, 1); c.fillRect(bx + (s ? 6 : 7), y - 1, 1, 1);
+    // tail: up when walking, straight back when bolting
+    const tx = d > 0 ? bx - 1 : bx + 8;
+    if (run) { c.fillRect(d > 0 ? bx - 3 : bx + 8, y - 4, 3, 1); }
+    else { c.fillRect(tx, y - 6, 1, 3); px(c, tx + (f ? -d : 0), y - 7, C0); }
+  }
+
+  private drawEmoteFx(c: Ctx, g: SeatGeom, a: Anim, age: number) {
+    const s = g.scale;
+    const left = g.x - g.w / 2;
+    if (a.kind === 'spit') {
+      // spittoon on the table edge beside the player; the spit arcs into it
+      const tx = Math.round(g.x + g.w * 0.62), ty = Math.round(g.edge + 3);
+      if (age < 1600) {
+        c.fillStyle = PAL.ink; c.fillRect(tx - 4, ty - 5, 9, 7);
+        c.fillStyle = '#a87c18'; c.fillRect(tx - 3, ty - 4, 7, 5);
+        c.fillStyle = '#d4a52a'; c.fillRect(tx - 3, ty - 4, 7, 1); c.fillRect(tx - 2, ty - 2, 1, 2);
+        c.fillStyle = '#6b4a0c'; c.fillRect(tx - 4, ty - 6, 9, 1);
+        c.fillStyle = PAL.ink; c.fillRect(tx - 2, ty - 6, 5, 1);
+      }
+      if (age > 220 && age < 700) {
+        const k = (age - 220) / 480;
+        const mx = left + 25 * s, my = g.top + 24 * s;
+        const x = Math.round(mx + (tx - mx) * k), y = Math.round(my + (ty - 6 - my) * k - Math.sin(k * Math.PI) * 10 * s);
+        px(c, x, y, '#cfe6f0'); px(c, x - 1, y, '#8fb0c0');
+      }
+      if (age > 700 && age < 900) { px(c, tx - 1, ty - 8, '#cfe6f0'); px(c, tx + 2, ty - 9, '#cfe6f0'); }
+    } else if (a.kind === 'angry' && age < 1800) {
+      for (const side of [-1, 1]) for (let k = 0; k < 3; k++) {
+        const ph = ((age / 600) + k / 3) % 1;
+        const ex = Math.round(g.x + side * (11 + ph * 6) * s), ey = Math.round(g.top + (20 - ph * 14) * s);
+        const r = 1 + Math.round(ph * 2);
+        for (let yy = -r; yy <= r; yy++) for (let xx = -r; xx <= r; xx++) if (Math.hypot(xx, yy) <= r && (1 - ph) * 1.4 > bayer(ex + xx, ey + yy)) px(c, ex + xx, ey + yy, ph < 0.5 ? PAL.parch : '#9a9088');
       }
     }
   }

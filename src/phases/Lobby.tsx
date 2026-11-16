@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { Player } from '../../shared/types';
+import { DEFAULT_SETTINGS, emptyStats, type Player, type RoomState, type Settings } from '../../shared/types';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import { DockActions } from '../scene/Dock';
@@ -17,11 +17,127 @@ export function Avatar({ p, size = 32 }: { p?: Player; size?: number }) {
 }
 
 function Status({ p }: { p: Player }) {
+  if (p.bot) return <span className="nh-chip bot">BOT</span>;
   if (!p.connected) return <span className="nh-chip off">Offline</span>;
   if (p.linking) return <span className="nh-chip wait"><i className="nh-spin" /> Checking…</span>;
   if (p.steam?.private) return <span className="nh-chip warn">Private library ⚠</span>;
   if (p.steam) return <span className="nh-chip ok">Linked ({p.steam.gameCount} games) ✓</span>;
   return <span className="nh-chip none">Not linked yet</span>;
+}
+
+const FINALES: { v: Settings['finale']; label: string; short: string }[] = [
+  { v: 'cylinder', label: 'Revolver roulette', short: 'Roulette' },
+  { v: 'duel', label: 'Quick-draw duel', short: 'Duel' },
+  { v: 'last', label: 'Last one standing', short: 'Last one standing' },
+];
+export const settingsOf = (state: Pick<RoomState, 'settings'>): Settings => ({ ...DEFAULT_SETTINGS, ...(state.settings || {}) });
+export function rulesSummary(s: Settings) {
+  const fin = s.finale === 'cylinder' ? `Roulette at ${s.cylinderAt}` : FINALES.find((f) => f.v === s.finale)?.short ?? 'Roulette';
+  return `${s.turnSecs}s turns · ${s.picks} pick${s.picks === 1 ? '' : 's'} · ${fin}`;
+}
+
+/** Host-editable table rules (lobby + nominate before the deal). Non-hosts get a one-line summary. */
+export function TableRules({ state, isHost, send, collapsible }: { state: RoomState; isHost: boolean; send: RoomProps['send']; collapsible?: boolean }) {
+  const server = settingsOf(state);
+  const [draft, setDraft] = useState<Settings>(server);
+  const [open, setOpen] = useState(!collapsible);
+  const pend = useRef<Partial<Settings> | null>(null);
+  const t = useRef(0);
+  const sendRef = useRef(send); sendRef.current = send;
+  const flush = () => {
+    clearTimeout(t.current);
+    if (pend.current) { sendRef.current({ t: 'settings', settings: pend.current }); pend.current = null; }
+  };
+  useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // follow the server unless I have an edit in flight
+  const sk = `${server.turnSecs}|${server.picks}|${server.finale}|${server.cylinderAt}`;
+  useEffect(() => { if (!pend.current) setDraft(server); }, [sk]); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = (patch: Partial<Settings>) => {
+    setDraft((d) => ({ ...d, ...patch }));
+    pend.current = { ...(pend.current || {}), ...patch };
+    clearTimeout(t.current);
+    t.current = window.setTimeout(flush, 250);
+  };
+  const s = isHost ? draft : server;
+  if (!isHost) {
+    return <div className="nh-rules-ro"><span className="nh-rules-k">Table rules</span> {rulesSummary(server)}</div>;
+  }
+  const head = collapsible ? (
+    <button type="button" className="nh-rules-toggle" aria-expanded={open} onClick={() => { sfx.click(); setOpen((o) => !o); }}>
+      <span className="nh-rules-k">Table rules</span><span className="nh-rules-sum">{rulesSummary(s)}</span><i aria-hidden>{open ? '▴' : '▾'}</i>
+    </button>
+  ) : <div className="nh-label">Table rules</div>;
+  return (
+    <section className={`nh-sec nh-rules ${collapsible ? 'is-card' : ''}`}>
+      {head}
+      {open && (
+        <div className="nh-rules-body">
+          <label className="nh-rule-row">
+            <span className="nh-rule-name">Turn timer</span>
+            <input type="range" className="nh-range" min={10} max={90} step={5} value={s.turnSecs}
+              onChange={(e) => set({ turnSecs: Number(e.target.value) })} aria-label="Turn timer in seconds" />
+            <b className="nh-rule-val">{s.turnSecs}s</b>
+          </label>
+          <div className="nh-rule-row">
+            <span className="nh-rule-name">Picks each</span>
+            <div className="nh-seg" role="group" aria-label="Picks per player">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} type="button" className={s.picks === n ? 'on' : ''} aria-pressed={s.picks === n} onClick={() => { sfx.click(); set({ picks: n }); }}>{n}</button>
+              ))}
+            </div>
+          </div>
+          <div className="nh-rule-row nh-rule-wide">
+            <span className="nh-rule-name">Finale</span>
+            <div className="nh-seg nh-seg-wrap" role="group" aria-label="Finale">
+              {FINALES.map((f) => (
+                <button key={f.v} type="button" className={s.finale === f.v ? 'on' : ''} aria-pressed={s.finale === f.v} onClick={() => { sfx.click(); set({ finale: f.v }); }}>{f.label}</button>
+              ))}
+            </div>
+          </div>
+          {s.finale === 'cylinder' && (
+            <div className="nh-rule-row">
+              <span className="nh-rule-name">Spin at</span>
+              <div className="nh-seg" role="group" aria-label="Spin the cylinder when this many games are left">
+                {([3, 2] as const).map((n) => (
+                  <button key={n} type="button" className={s.cylinderAt === n ? 'on' : ''} aria-pressed={s.cylinderAt === n} onClick={() => { sfx.click(); set({ cylinderAt: n }); }}>{n} left</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** 2-step kick: first tap arms it, second tap kicks; disarms itself after a few seconds */
+function KickBtn({ name, onKick }: { name: string; onKick: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const t = useRef(0);
+  useEffect(() => () => clearTimeout(t.current), []);
+  return (
+    <button type="button" className={`nh-kick ${armed ? 'is-armed' : ''}`} aria-label={armed ? `Confirm kicking ${name}` : `Kick ${name}`}
+      onClick={() => {
+        sfx.unlock(); sfx.click();
+        if (armed) { clearTimeout(t.current); setArmed(false); onKick(); return; }
+        setArmed(true); clearTimeout(t.current); t.current = window.setTimeout(() => setArmed(false), 2600);
+      }}>{armed ? 'Sure?' : 'Kick'}</button>
+  );
+}
+
+function PosseRecordCard({ state }: { state: RoomState }) {
+  const r = state.record;
+  if (!r || !(r.rounds > 0)) return null;
+  const top = r.wins?.[0];
+  const dead = r.vetoers?.[0];
+  return (
+    <section className="nh-record" aria-label="This table's record">
+      <span className="nh-rules-k">This table</span>
+      <span><b>{r.rounds}</b> round{r.rounds === 1 ? '' : 's'}</span>
+      {top && <span>Top pick: <b>{top.name}</b> ({top.count}×)</span>}
+      {dead && dead.kills > 0 && <span>Deadliest: <b>{dead.name}</b> ({dead.kills} kill{dead.kills === 1 ? '' : 's'})</span>}
+    </section>
+  );
 }
 
 export default function Lobby({ state, me, send }: RoomProps) {
@@ -66,6 +182,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
   };
 
   const ready = state.players.filter((p) => p.steam && !p.steam.private);
+  const bots = state.players.filter((p) => p.bot).length;
   const canStart = ready.length >= 1;
   const steam = mine?.steam;
 
@@ -125,7 +242,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
             <h2 className="nh-h">Who are you, stranger?</h2>
             <div className="nh-sub">Pick your look. Everyone at the table sees it.</div>
           </header>
-          <CharacterCreator initial={mine?.style} first={!mine?.style}
+          <CharacterCreator initial={mine?.style} first={!mine?.style} stats={mine?.stats ?? emptyStats()}
             onSave={(style) => send({ t: 'style', style })} onDone={() => { setDressing(false); document.querySelector('.saloon-front')?.scrollTo({ top: 0 }); }} />
         </>
       ) : (
@@ -146,6 +263,29 @@ export default function Lobby({ state, me, send }: RoomProps) {
         </div>
       </section>
 
+      <TableRules state={state} isHost={isHost} send={send} />
+
+      {isHost && (
+        <section className="nh-sec nh-practice">
+          <div className="nh-label">Practice table</div>
+          <div className="nh-practice-row">
+            <span className="nh-practice-txt">Try it solo or show the judges.</span>
+            <div className="nh-seg" role="group" aria-label="Hire practice bots">
+              <span className="nh-seg-k">Hire</span>
+              {[1, 2, 3].map((n) => (
+                <button key={n} type="button" onClick={() => { sfx.unlock(); sfx.click(); send({ t: 'bots', n }); }} aria-label={`Hire ${n} practice bot${n === 1 ? '' : 's'}`}>{n}</button>
+              ))}
+            </div>
+            {bots > 0 && (
+              <button type="button" className="nh-btn nh-btn-sm nh-bots-home" onClick={() => { sfx.unlock(); sfx.whoosh(); send({ t: 'bots', n: 0 }); }}>
+                Send bots home ({bots})
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
+      <PosseRecordCard state={state} />
         </>
       )}
 
@@ -153,7 +293,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
         <div className="nh-label">The posse <span className="nh-count">{state.players.length}</span></div>
         <ul className="nh-posse">
           {state.players.map((p) => (
-            <li key={p.id} className={`${p.connected ? '' : 'is-off'} ${p.id === me ? 'is-me' : ''}`}>
+            <li key={p.id} className={`${p.connected || p.bot ? '' : 'is-off'} ${p.id === me ? 'is-me' : ''} ${p.bot ? 'is-bot' : ''}`}>
               {p.style ? <span className="nh-posse-bust"><BustPreview look={p.style} scale={1} /></span> : <Avatar p={p} size={32} />}
               <span className="nh-pname">
                 {p.name}{p.id === me && <small> (you)</small>}
@@ -161,6 +301,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
               </span>
               <span className={`nh-dressed ${p.style ? 'on' : ''}`} title={p.style ? 'Dressed' : 'Still choosing an outfit'}>{p.style ? '✓ dressed' : '… dressing'}</span>
               <Status p={p} />
+              {isHost && p.id !== me && (p.bot || !p.connected) && <KickBtn name={p.name} onKick={() => send({ t: 'kick', pid: p.id })} />}
             </li>
           ))}
         </ul>

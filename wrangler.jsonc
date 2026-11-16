@@ -5,7 +5,16 @@
   "preview_urls": false,
   "compatibility_date": "2025-09-01",
   "account_id": "a2e1911ceb499b492ab18b8fc5ef02ef",
-  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "Room" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOM", "class_name": "Room" },
+      { "name": "PROFILE", "class_name": "Profile" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room"] },
+    { "tag": "v2", "new_sqlite_classes": ["Profile"] }
+  ],
   "kv_namespaces": [{ "binding": "CACHE", "id": "7ff6558184ee4f69b3f7b7569458d3a2" }]
 }
