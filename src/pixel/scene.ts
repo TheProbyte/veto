@@ -405,7 +405,7 @@ export class SceneRenderer {
         d[o + 2] = d[o + 2] * (aq * 1.12 + lq * 0.62 + cl * 1.5);
       }
     }
-    c.putImageData(img, ox, oy);
+    c.putImageData(img, 0, 0);
 
     // ---- emissive layer: lamp glass + flame
     const fh = 4 + (rnd(Math.floor(t / 90), 3) > 0.5 ? 1 : 0);
@@ -429,15 +429,15 @@ export class SceneRenderer {
       const ddy = my - ly;
       const inCone = ddy > 0 && Math.abs(mx - lx - tanA * ddy) < 3 + ddy * 0.42;
       const near = Math.hypot(mx - lx, ddy) < W * 0.25;
-      if (inCone || near) px(c, mx + ox, my + oy, Math.sin(sec * 2 + m.p) > 0 ? PAL.lamp1 : PAL.parch2);
-      else if (this.cool[Math.min(W * H - 1, Math.max(0, my * W + mx))] > 0.3) px(c, mx + ox, my + oy, PAL.blue2);
+      if (inCone || near) px(c, mx, my, Math.sin(sec * 2 + m.p) > 0 ? PAL.lamp1 : PAL.parch2);
+      else if (this.cool[Math.min(W * H - 1, Math.max(0, my * W + mx))] > 0.3) px(c, mx, my, PAL.blue2);
     }
 
     // ---- muzzle flash + smoke at the shooter
     if (D.shot && shotAge < 2200) {
       const act = geoms.find((x) => x.p.id === D.shot!.actor);
       if (act) {
-        const gx = act.g.x + ox, gy = act.g.edge - 2 + oy;
+        const gx = act.g.x, gy = act.g.edge - 2;
         if (shotAge < 130 && D.shot.kind !== 'ricochet') {
           const r = shotAge < 60 ? 7 : 5;
           for (let k = 0; k < 8; k++) { const an = k * 0.785 + 0.3; line(c, gx, gy, gx + Math.cos(an) * r * (k % 2 ? 0.6 : 1), gy + Math.sin(an) * r * (k % 2 ? 0.6 : 1), PAL.lamp1); }
