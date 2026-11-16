@@ -1,12 +1,25 @@
-// Sound effects API (Web Audio synthesis, no asset files). Implementation owned by the "sounds+panels" agent.
+// Sound effects + music API (Web Audio synthesis, no asset files).
 // All functions are safe to call before user gesture (they no-op until unlock()).
+// Graph: effects -> master (effects volume) ┐
+//        music  -> musicGain (music volume) ┴> mainOut (mute) -> compressor -> out
+import { useEffect } from 'react';
+import { createMusic, whistle as whistleVoice, type MusicEngine, type MusicMode } from './music';
+
+export type { MusicMode } from './music';
 
 let ctx: AudioContext | null = null;
-let master: GainNode | null = null;
+let master: GainNode | null = null;   // effects volume
+let mainOut: GainNode | null = null;  // mute
+let musicGain: GainNode | null = null; // music volume
 let fxBus: GainNode | null = null; // send into the shared convolution room reverb
 let noiseBuf: AudioBuffer | null = null;
+let impulse: AudioBuffer | null = null;
+let engine: MusicEngine | null = null;
+let wantMusic: MusicMode = 'off';
 let muted = readMuted();
 let volume = readVolume();
+let musicVolume = readMusicVolume();
+const MUSIC_TRIM = 0.85; // music sits under the effects at equal slider positions
 
 function readMuted(): boolean {
   try { return localStorage.getItem('nah.muted') === '1'; } catch { return false; }
@@ -19,13 +32,23 @@ function readVolume(): number {
     return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.7;
   } catch { return 0.7; }
 }
-const level = () => (muted ? 0 : volume);
-function applyLevel() {
-  if (!ctx || !master) return;
-  const t = ctx.currentTime;
-  master.gain.cancelScheduledValues(t);
-  master.gain.setTargetAtTime(level(), t, 0.05);
+function readMusicVolume(): number {
+  try {
+    const raw = localStorage.getItem('nah.musicVolume');
+    if (raw == null) return 0.45;
+    const v = parseFloat(raw);
+    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.45;
+  } catch { return 0.45; }
 }
+function applyLevel() {
+  if (!ctx || !master || !mainOut || !musicGain) return;
+  const t = ctx.currentTime;
+  for (const [g, v] of [[master, volume], [mainOut, muted ? 0 : 1], [musicGain, musicVolume * MUSIC_TRIM]] as const) {
+    g.gain.cancelScheduledValues(t);
+    g.gain.setTargetAtTime(v, t, 0.05);
+  }
+}
+const musicAudible = () => !!engine && engine.playing() && !muted && musicVolume > 0.01;
 
 /** Wooden room impulse: stereo decaying noise with early reflections, darker as it decays. */
 function roomImpulse(c: AudioContext, secs = 1.2): AudioBuffer {
@@ -62,14 +85,20 @@ function init(): boolean {
     if (!AC) return false;
     ctx = new AC();
     master = ctx.createGain();
-    master.gain.value = level();
+    master.gain.value = volume;
+    mainOut = ctx.createGain();
+    mainOut.gain.value = muted ? 0 : 1;
+    musicGain = ctx.createGain();
+    musicGain.gain.value = musicVolume * MUSIC_TRIM;
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -12;
     comp.knee.value = 6;
     comp.ratio.value = 5;
     comp.attack.value = 0.002;
     comp.release.value = 0.18;
-    master.connect(comp).connect(ctx.destination);
+    master.connect(mainOut);
+    musicGain.connect(mainOut);
+    mainOut.connect(comp).connect(ctx.destination);
 
     // shared convolution room
     fxBus = ctx.createGain();
@@ -77,7 +106,8 @@ function init(): boolean {
     const pre = ctx.createDelay(0.1);
     pre.delayTime.value = 0.012;
     const conv = ctx.createConvolver();
-    conv.buffer = roomImpulse(ctx, 1.2);
+    impulse = roomImpulse(ctx, 1.2);
+    conv.buffer = impulse;
     const hp = ctx.createBiquadFilter();
     hp.type = 'highpass'; hp.frequency.value = 140;
     const damp = ctx.createBiquadFilter();
@@ -100,6 +130,15 @@ function init(): boolean {
 }
 
 const ready = () => !!ctx && !!master;
+
+function startMusic() {
+  if (!ready()) return;
+  if (!engine) {
+    if (wantMusic === 'off') return;
+    engine = createMusic({ ctx: ctx!, dest: musicGain!, noise: noiseBuf!, impulse: impulse!, pluckBuf: (f) => pluckBuf(f) });
+  }
+  engine.setMode(wantMusic); // no-op when already in that mode
+}
 const now = () => ctx!.currentTime;
 
 function noise(loop = false): AudioBufferSourceNode {
@@ -206,6 +245,13 @@ function bell(t: number, f: number, peak: number, wet = 0.8) {
   }
 }
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+function whistle(t: number, midi: number, dur: number, peak: number, wet = 0.6) {
+  const w = ctx!.createGain();
+  w.gain.value = wet;
+  w.connect(fxBus!);
+  whistleVoice(ctx!, noiseBuf!, t, midi, dur, peak, master!, w);
+  window.setTimeout(() => w.disconnect(), (t - ctx!.currentTime + dur + 1) * 1000);
+}
 
 // ---------- loops ----------
 let fuseNodes: { stop: () => void } | null = null;
@@ -316,6 +362,8 @@ function startAmbience() {
   let glassTimer = 0;
   const play = () => {
     if (!alive || !ready()) return;
+    timer = window.setTimeout(play, 2500 + Math.random() * 4500);
+    if (musicAudible()) return; // free-time piano would clash with the music loop; keep wind + glass
     const tt = now() + 0.02;
     const root = 55 + 12 * Math.floor(Math.random() * 2); // G3 / G4
     const pick = () => root + PENTA[Math.floor(Math.random() * PENTA.length)] + (Math.random() < 0.25 ? 12 : 0);
@@ -326,7 +374,6 @@ function startAmbience() {
       at += Math.random() < 0.5 ? 0.22 : 0.33;
     }
     if (Math.random() < 0.35) { pianoNote(tt, root - 12, 0.02); pianoNote(tt, root - 5, 0.014); }
-    timer = window.setTimeout(play, 2500 + Math.random() * 4500);
   };
   const clink = () => {
     if (!alive || !ready()) return;
@@ -352,21 +399,30 @@ function startAmbience() {
 }
 
 export const sfx = {
-  // --- music (stub API; implemented by the audio agent) ---
-  music(_mode: 'off' | 'lobby' | 'veto' | 'roulette' | 'result') {},
-  setMusicVolume(_v: number) {},
-  getMusicVolume(): number { return 0.5; },
-  unlock() {               // call on first user click/keydown; resumes AudioContext
+  // --- music ---
+  music(mode: MusicMode) { // background music mode; same mode = no-op; ~1s crossfade; starts only after unlock()
+    wantMusic = mode;
+    startMusic();
+  },
+  getMusicMode(): MusicMode { return wantMusic; },
+  setMusicVolume(v: number) { // music volume 0..1 (persisted 'nah.musicVolume')
+    musicVolume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : musicVolume;
+    try { localStorage.setItem('nah.musicVolume', String(Math.round(musicVolume * 1000) / 1000)); } catch {}
+    applyLevel();
+  },
+  getMusicVolume(): number { return musicVolume; },
+  unlock() {               // call on first user click/keydown; resumes AudioContext (idempotent)
     if (!init()) return;
     if (wantAmbience) startAmbience();
     if (wantFuse) startFuse();
+    startMusic();
   },
   setMuted(m: boolean) {
     muted = m;
     try { localStorage.setItem('nah.muted', m ? '1' : '0'); } catch {}
     applyLevel();
   },
-  setVolume(v: number) {   // master volume 0..1 (persisted)
+  setVolume(v: number) {   // effects volume 0..1 (persisted 'nah.volume')
     volume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : volume;
     try { localStorage.setItem('nah.volume', String(Math.round(volume * 1000) / 1000)); } catch {}
     applyLevel();
@@ -507,86 +563,296 @@ export const sfx = {
     out(g, 0.2);
     s.start(t, Math.random(), 0.35);
   },
-  chair() {                // player sits down
+  chair() {                // player sits down (same as chairScrape)
+    sfx.chairScrape();
+  },
+  chairScrape() {          // wooden chair dragged on boards (stick-slip judder), creak, settle thud
     if (!ready()) return;
     const t = now();
-    // creak: buzzy saw with wobbling pitch through a resonant bandpass
-    const o = ctx!.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(140, t);
-    o.frequency.linearRampToValueAtTime(190, t + 0.18);
-    o.frequency.linearRampToValueAtTime(120, t + 0.4);
-    const bp = filt('bandpass', 900, 6);
-    const am = ctx!.createOscillator();
-    am.type = 'square';
-    am.frequency.value = 34;
-    const amg = ctx!.createGain();
-    amg.gain.value = 0.06;
+    const v = rnd(0.9, 1.1);
+    // stick-slip scrape: resonant bandpassed noise chopped by a speeding-up square
+    const s = noise();
+    const bp = filt('bandpass', 750 * v, 3.5);
+    bp.frequency.setValueAtTime(650 * v, t);
+    bp.frequency.linearRampToValueAtTime(980 * v, t + 0.3);
     const g = ctx!.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.1, t + 0.05);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
-    am.connect(amg).connect(g.gain);
-    o.connect(bp).connect(g);
-    out(g, 0.3);
-    o.start(t); am.start(t);
-    o.stop(t + 0.45); am.stop(t + 0.45);
-    // scrape + settle thud
-    noiseHit(t + 0.05, 'bandpass', 1200, 0.12, 0.25, 0, 2);
-    tone(t + 0.42, 'sine', 110, 55, 0.4, 0.12);
-    noiseHit(t + 0.42, 'lowpass', 900, 0.2, 0.05);
+    g.gain.exponentialRampToValueAtTime(0.32, t + 0.04);
+    g.gain.setValueAtTime(0.3, t + 0.24);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+    const chop = ctx!.createGain();
+    chop.gain.value = 0.5;
+    const am = ctx!.createOscillator();
+    am.type = 'square';
+    am.frequency.setValueAtTime(22, t);
+    am.frequency.linearRampToValueAtTime(48, t + 0.3);
+    const amg = ctx!.createGain();
+    amg.gain.value = 0.5;
+    am.connect(amg).connect(chop.gain);
+    s.connect(bp).connect(chop).connect(g);
+    out(g, 0.25);
+    s.start(t, Math.random(), 0.4);
+    am.start(t); am.stop(t + 0.38);
+    // creak
+    const o = ctx!.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(150 * v, t + 0.05);
+    o.frequency.linearRampToValueAtTime(210 * v, t + 0.22);
+    const cb = filt('bandpass', 1100, 7);
+    const cg = ctx!.createGain();
+    env(cg, t + 0.05, 0.05, 0.04, 0.2);
+    o.connect(cb).connect(cg);
+    out(cg, 0.2);
+    o.start(t + 0.05); o.stop(t + 0.35);
+    // settle
+    tone(t + 0.38, 'sine', 120, 55, 0.45, 0.12, 0.2);
+    noiseHit(t + 0.38, 'lowpass', 900, 0.25, 0.05, 0.2);
   },
-  win() {                  // Western sting: whistle over a strummed chord, ending on a bell
+  boots() {                // two footsteps on wooden boards
     if (!ready()) return;
-    const t = now() + 0.03;
-    // strummed chords (A minor -> E -> A), Karplus-Strong plucks
-    const strum = (at: number, notes: number[], vel: number, down = true) => {
-      const ns = down ? notes : [...notes].reverse();
-      ns.forEach((m, i) => pluck(t + at + i * 0.022, m, vel * rnd(0.85, 1.1)));
-    };
-    strum(0, [45, 52, 57, 60, 64], 0.32);
-    strum(0.45, [45, 52, 57, 60, 64], 0.2, false);
-    strum(0.9, [40, 47, 52, 56, 59], 0.3);
-    strum(1.35, [45, 52, 57, 61, 64], 0.36);
-    // whistled melody: sine + vibrato + breath noise
-    const notes: [number, number, number][] = [
-      [76, 0.0, 0.16], [81, 0.18, 0.16], [84, 0.36, 0.28], [83, 0.68, 0.14], [79, 0.84, 0.14], [81, 1.02, 0.9],
-    ];
-    for (const [m, at, dur] of notes) {
-      const f = 440 * Math.pow(2, (m - 69) / 12);
-      const st = t + at;
+    const t = now() + 0.01;
+    [0, 0.34].forEach((at, i) => {
+      const tt = t + at + rnd(-0.01, 0.01);
+      const v = rnd(0.9, 1.1) * (i ? 0.92 : 1);
+      noiseHit(tt, 'highpass', 2400 * v, 0.18, 0.012, 0.1);                  // heel click
+      tone(tt + 0.012, 'sine', 130 * v, 60, 0.6, 0.09, 0.25, 0.002);           // board thud
+      noiseHit(tt + 0.012, 'bandpass', 380 * v, 0.5, 0.07, 0.3, 1.2);         // wood body
+      noiseHit(tt + 0.07, 'bandpass', 900 * v, 0.08, 0.05, 0.1, 2);           // sole scuff
+    });
+  },
+  spurs() {                // spur jingle: two little rattling rowels
+    if (!ready()) return;
+    const t = now() + 0.01;
+    [0, 0.26].forEach((at) => {
+      const n = 3 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < n; i++) {
+        const tt = t + at + i * rnd(0.022, 0.04);
+        const f = rnd(3600, 5200);
+        tone(tt, 'sine', f, f * 0.99, rnd(0.03, 0.05), rnd(0.12, 0.22), 0.5, 0.001);
+        tone(tt, 'sine', f * 1.47, f * 1.46, 0.015, 0.08, 0.4, 0.001);
+        noiseHit(tt, 'highpass', 6000, 0.08, 0.006);
+      }
+    });
+  },
+  cardSlap() {             // crisp paper card slapped down on felt
+    if (!ready()) return;
+    const t = now();
+    const v = rnd(0.92, 1.08);
+    noiseHit(t, 'bandpass', 2600 * v, 0.7, 0.025, 0.15, 0.9);  // paper snap
+    noiseHit(t, 'lowpass', 700, 0.45, 0.04, 0.1);              // air push
+    tone(t, 'sine', 190 * v, 90, 0.28, 0.05, 0.1, 0.001);       // felt thump
+    noiseHit(t + 0.01, 'highpass', 5000, 0.12, 0.015);          // edge flick
+  },
+  cardSlide() {            // card sliding back across felt: soft swish
+    if (!ready()) return;
+    const t = now();
+    const s = noise();
+    const bp = filt('bandpass', 2800, 1.1);
+    bp.frequency.setValueAtTime(3200, t);
+    bp.frequency.exponentialRampToValueAtTime(1400, t + 0.22);
+    const g = ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+    s.connect(bp).connect(g);
+    out(g, 0.1);
+    s.start(t, Math.random(), 0.3);
+  },
+  cardRiffle() {           // deck riffle: a fast burr of card flicks, then the deck squares up
+    if (!ready()) return;
+    const t0 = now() + 0.01;
+    let at = 0;
+    let gap = 0.03;
+    for (let i = 0; i < 22; i++) {
+      const p = rnd(0.85, 1.15);
+      noiseHit(t0 + at, 'bandpass', 3400 * p, 0.28 * rnd(0.7, 1), 0.012, 0.1, 1.6);
+      at += gap;
+      gap = i < 12 ? Math.max(0.012, gap * 0.86) : gap * 1.1;
+    }
+    noiseHit(t0, 'bandpass', 2000, 0.06, at, 0.1, 0.6);         // paper bed
+    noiseHit(t0 + at + 0.03, 'lowpass', 1200, 0.4, 0.03, 0.15); // tap square
+    tone(t0 + at + 0.03, 'sine', 170, 90, 0.2, 0.05, 0.1, 0.001);
+  },
+  clink() {                // tin star pinned: bright metal clink with a short ring
+    if (!ready()) return;
+    const t = now();
+    const v = rnd(0.95, 1.05);
+    noiseHit(t, 'highpass', 5000, 0.35, 0.01, 0.2);
+    for (const [f, a, d] of [[2950, 0.12, 0.35], [4180, 0.08, 0.25], [6320, 0.05, 0.16], [8900, 0.025, 0.1]] as const) {
+      tone(t, 'sine', f * v, f * v * 0.998, a, d, 0.6, 0.001);
+    }
+    tone(t + 0.07, 'sine', 4180 * v, 4170 * v, 0.03, 0.12, 0.6, 0.001); // tiny bounce
+  },
+  hammerNail() {           // hammer on a nail into wood: metal tick + wood thunk
+    if (!ready()) return;
+    const t = now();
+    const v = rnd(0.9, 1.1);
+    noiseHit(t, 'highpass', 3500, 0.6, 0.012, 0.2);
+    tone(t, 'square', 1900 * v, 1500 * v, 0.06, 0.02, 0.2, 0.001);
+    tone(t, 'sine', 2600 * v, 2580 * v, 0.05, 0.09, 0.3, 0.001);   // nail ring
+    tone(t, 'sine', 170 * v, 65, 0.9, 0.14, 0.4, 0.001);            // wall thunk
+    noiseHit(t + 0.004, 'bandpass', 600 * v, 0.6, 0.08, 0.4, 1.4);  // wood knock
+  },
+  cylinderOpen() {         // revolver cylinder swings out: metal swing + latch click
+    if (!ready()) return;
+    const t = now();
+    noiseHit(t, 'bandpass', 2400, 0.3, 0.015, 0.1, 3); // release
+    const s = noise();
+    const bp = filt('bandpass', 900, 5);
+    bp.frequency.setValueAtTime(900, t + 0.01);
+    bp.frequency.exponentialRampToValueAtTime(2600, t + 0.17);
+    const g = ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.14, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
+    s.connect(bp).connect(g);
+    out(g, 0.2);
+    s.start(t + 0.01, Math.random(), 0.22);
+    tone(t + 0.02, 'sine', 1250, 1320, 0.03, 0.18, 0.4, 0.01);     // metal ring
+    const tc = t + 0.2;                                            // latch
+    noiseHit(tc, 'highpass', 4200, 0.6, 0.012, 0.2);
+    tone(tc, 'square', 2200, 1600, 0.06, 0.012);
+    tone(tc, 'sine', 300, 150, 0.2, 0.04);
+    noiseHit(tc + 0.02, 'bandpass', 2800, 0.2, 0.01, 0.1, 3);
+  },
+  drawSting() {            // "DRAW!": cymbal swell into a low orchestral hit + one high whistle
+    if (!ready()) return;
+    const t = now();
+    const hit = t + 0.45;
+    // cymbal swell (reverse-cymbal style)
+    const s = noise();
+    const hp = filt('highpass', 5200, 0.7);
+    const g = ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.3, hit - 0.01);
+    g.gain.linearRampToValueAtTime(0.0001, hit + 0.02);
+    s.connect(hp).connect(g);
+    out(g, 0.6);
+    s.start(t, Math.random() * 0.5, 0.5);
+    // the hit: low drum + brassy stab (Am) + crash
+    tone(hit, 'sine', 95, 38, 1.2, 0.7, 0.8, 0.002);
+    noiseHit(hit, 'lowpass', 1600, 0.8, 0.25, 0.9);
+    noiseHit(hit, 'highpass', 4500, 0.35, 0.8, 0.8);
+    const lp = filt('lowpass', 2400, 1);
+    lp.frequency.setValueAtTime(2400, hit);
+    lp.frequency.exponentialRampToValueAtTime(500, hit + 0.5);
+    const sg = ctx!.createGain();
+    sg.gain.setValueAtTime(0.0001, hit);
+    sg.gain.exponentialRampToValueAtTime(0.16, hit + 0.01);
+    sg.gain.exponentialRampToValueAtTime(0.0001, hit + 0.6);
+    lp.connect(sg);
+    out(sg, 0.8);
+    for (const m of [45, 52, 57, 60, 64]) {
+      const o = ctx!.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
+      o.detune.value = rnd(-8, 8);
+      o.connect(lp);
+      o.start(hit); o.stop(hit + 0.65);
+    }
+    whistle(hit + 0.08, 93, 0.6, 0.12, 0.7); // single high A
+  },
+  hatPop() {               // hat drops onto a head: soft felt fwump
+    if (!ready()) return;
+    const t = now();
+    noiseHit(t, 'lowpass', 420, 0.55, 0.11, 0.1);
+    tone(t, 'sine', 150, 70, 0.35, 0.09, 0.05, 0.004);
+    noiseHit(t, 'bandpass', 1200, 0.06, 0.04, 0, 1);
+  },
+  swish() {                // cloth swish (outfit option)
+    if (!ready()) return;
+    const t = now();
+    const v = rnd(0.85, 1.15);
+    const s = noise();
+    const bp = filt('bandpass', 1400 * v, 0.9);
+    bp.frequency.setValueAtTime(900 * v, t);
+    bp.frequency.exponentialRampToValueAtTime(3000 * v, t + 0.08);
+    bp.frequency.exponentialRampToValueAtTime(1100 * v, t + 0.17);
+    const g = ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    s.connect(bp).connect(g);
+    out(g, 0.1);
+    s.start(t, Math.random(), 0.22);
+  },
+  coin() {                 // coin flipped: thumb flick + spinning ting
+    if (!ready()) return;
+    const t = now();
+    noiseHit(t, 'highpass', 4000, 0.3, 0.008);
+    const f = rnd(3900, 4300);
+    const g = ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.11, t + 0.013);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    const spinG = ctx!.createGain();
+    spinG.gain.value = 0.6;
+    const lfo = ctx!.createOscillator();
+    lfo.frequency.setValueAtTime(30, t);
+    lfo.frequency.linearRampToValueAtTime(14, t + 0.5);
+    const lg = ctx!.createGain();
+    lg.gain.value = 0.4;
+    lfo.connect(lg).connect(spinG.gain);
+    for (const [mul, a] of [[1, 1], [1.53, 0.5], [2.4, 0.25]] as const) {
       const o = ctx!.createOscillator();
       o.type = 'sine';
-      o.frequency.setValueAtTime(f * 0.96, st); // scoop into the note
-      o.frequency.exponentialRampToValueAtTime(f, st + 0.04);
-      const vib = ctx!.createOscillator();
-      vib.frequency.value = 5.8;
-      const vg = ctx!.createGain();
-      vg.gain.setValueAtTime(0, st);
-      vg.gain.linearRampToValueAtTime(f * 0.014, st + dur);
-      vib.connect(vg).connect(o.frequency);
-      const g = ctx!.createGain();
-      g.gain.setValueAtTime(0.0001, st);
-      g.gain.exponentialRampToValueAtTime(0.16, st + 0.03);
-      g.gain.setValueAtTime(0.14, st + dur * 0.75);
-      g.gain.exponentialRampToValueAtTime(0.0001, st + dur + 0.14);
-      o.connect(g);
-      out(g, 0.7);
-      o.start(st); vib.start(st);
-      o.stop(st + dur + 0.2); vib.stop(st + dur + 0.2);
-      // breath
-      const br = noise();
-      const bp = filt('bandpass', f, 6);
-      const bg = ctx!.createGain();
-      env(bg, st, 0.05, 0.02, dur);
-      br.connect(bp).connect(bg);
-      out(bg, 0.5);
-      br.start(st, Math.random(), dur + 0.1);
+      o.frequency.value = f * mul;
+      const og = ctx!.createGain();
+      og.gain.value = a;
+      o.connect(og).connect(spinG);
+      o.start(t + 0.01); o.stop(t + 0.52);
     }
-    // bell on the resolve + a low boom
-    const bt = t + 1.35;
-    bell(bt, 1320, 0.22);
-    tone(bt, 'sine', 110, 55, 0.45, 0.6, 0.4);
+    spinG.connect(g);
+    out(g, 0.5);
+    lfo.start(t); lfo.stop(t + 0.52);
+  },
+  spit() {                 // comic "ptoo" ... ping! into the spittoon
+    if (!ready()) return;
+    const t = now();
+    noiseHit(t, 'lowpass', 1500, 0.4, 0.02);                 // "p"
+    const o = ctx!.createOscillator();                        // "too"
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(720, t + 0.03);
+    o.frequency.exponentialRampToValueAtTime(330, t + 0.16);
+    const lp = filt('lowpass', 1400, 2);
+    const g = ctx!.createGain();
+    env(g, t + 0.03, 0.22, 0.01, 0.13);
+    o.connect(lp).connect(g);
+    out(g, 0.1);
+    o.start(t + 0.03); o.stop(t + 0.2);
+    noiseHit(t + 0.03, 'bandpass', 900, 0.15, 0.1, 0, 2);     // breathy
+    const tp = t + 0.36;                                      // spittoon ping
+    tone(tp, 'sine', 1750, 1740, 0.09, 0.4, 0.5, 0.001);
+    tone(tp, 'sine', 2730, 2720, 0.04, 0.25, 0.5, 0.001);
+    noiseHit(tp, 'bandpass', 2000, 0.12, 0.02, 0.2, 2);
+  },
+  win() {                  // victory: bright hammer clack -> big low boom -> 3-note rising whistle (<1.8s)
+    if (!ready()) return;
+    const t = now() + 0.02;
+    // hammer clack
+    noiseHit(t, 'highpass', 3800, 0.9, 0.014, 0.3);
+    tone(t, 'square', 2300, 1500, 0.08, 0.016, 0.2, 0.001);
+    noiseHit(t + 0.004, 'bandpass', 2600, 0.35, 0.02, 0.2, 3);
+    // boom
+    const b = t + 0.11;
+    tone(b, 'sine', 96, 36, 1.3, 0.9, 0.7, 0.003);
+    tone(b, 'sine', 180, 80, 0.4, 0.18, 0.3, 0.002);
+    const n = noise();
+    const lp = filt('lowpass', 1400, 0.9);
+    lp.frequency.setValueAtTime(1400, b);
+    lp.frequency.exponentialRampToValueAtTime(140, b + 0.6);
+    const ng = ctx!.createGain();
+    ng.gain.setValueAtTime(0.0001, b);
+    ng.gain.exponentialRampToValueAtTime(0.9, b + 0.004);
+    ng.gain.exponentialRampToValueAtTime(0.0001, b + 0.7);
+    n.connect(lp).connect(ng);
+    out(ng, 1.0);
+    n.start(b, Math.random(), 0.75);
+    // rising whistle A5 – C#6 – E6
+    const w = t + 0.42;
+    whistle(w, 81, 0.12, 0.13, 0.6);
+    whistle(w + 0.15, 85, 0.12, 0.13, 0.6);
+    whistle(w + 0.3, 88, 0.4, 0.15, 0.6);
   },
   tick() {                 // countdown tick (last 5s)
     if (!ready()) return;
@@ -595,3 +861,19 @@ export const sfx = {
     tone(t, 'sine', 1900, 1500, 0.08, 0.03);
   },
 };
+
+/** Phase -> music mode. Home (undefined) and lobby/nominate -> 'lobby'. */
+export function musicForPhase(phase: string | undefined): MusicMode {
+  switch (phase) {
+    case 'veto': return 'veto';
+    case 'roulette': return 'roulette';
+    case 'result': return 'result';
+    default: return 'lobby';
+  }
+}
+
+/** Keep background music in step with the game phase. Never turns music off on unmount (avoids fade flicker on remounts). */
+export function useMusicForPhase(phase: string | undefined) {
+  const mode = musicForPhase(phase);
+  useEffect(() => { sfx.music(mode); }, [mode]);
+}
