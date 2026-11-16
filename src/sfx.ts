@@ -1165,7 +1165,7 @@ function synthRain(): RainNodes {
 /** Phase -> music mode. Home (undefined) and lobby/nominate -> 'lobby'. */
 export function musicForPhase(phase: string | undefined): MusicMode {
   switch (phase) {
-    case 'veto': return 'veto';
+    case 'veto': case 'slide': case 'duel': return 'veto'; // tense groove (rain ducks under it like in veto)
     case 'roulette': return 'roulette';
     case 'result': return 'result';
     default: return 'lobby';

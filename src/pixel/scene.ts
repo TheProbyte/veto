@@ -118,7 +118,7 @@ const DOOR_OUT = (c: Ctx, d: Rect, dawn: boolean, sun = false) => {
   c.fillRect(d.x + 2, d.y + d.h - bh - 3, Math.max(2, d.w - 6), 3);
   px(c, d.x + Math.round(d.w * 0.7), d.y + d.h - bh + 3, dawn ? '#ffd39a' : PAL.lamp1);
   px(c, d.x + Math.round(d.w * 0.3), d.y + d.h - bh + 4, dawn ? '#c4587a' : PAL.lamp3);
-  if (sun) { circle(c, d.x + Math.round(d.w * 0.62), d.y + d.h - bh - 4, Math.max(2, Math.round(d.w * 0.16)), '#fff3c4'); c.fillStyle = '#4a2438'; c.fillRect(d.x, d.y + d.h - bh, d.w, bh); }
+  if (sun) circle(c, d.x + Math.round(d.w * 0.62), d.y + Math.round(Math.min(d.h * 0.24, d.h - bh - 4)), Math.max(2, Math.round(d.w * 0.16)), '#fff3c4');
   c.fillStyle = dawn ? '#5a3a22' : '#140c08'; c.fillRect(d.x, d.y + d.h - 3, d.w, 3);
   // jambs + lintel in shadow: the opening reads as a recess in the wall
   c.fillStyle = PAL.ink; c.fillRect(d.x, d.y, d.w, 1); c.fillRect(d.x, d.y, 1, d.h); c.fillRect(d.x + d.w - 1, d.y, 1, d.h);
@@ -209,11 +209,13 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
     // mid: between the shelf (bottle tops included) and the right window, frames clear by 2px
     const gapL = sx1 + 5, gapR = winR - 8;
     const bottom = floorUnder(gapL, gapR);
-    const dh = bottom - doorTop;
+    // about a window and a third tall: the lintel lands a little under the window heads
+    const dh = Math.min(bottom - doorTop, Math.round(wh * 1.35));
     const dw = Math.min(28, Math.max(16, Math.round(dh * 0.52)), gapR - gapL);
-    if (!L.portrait && dw >= 16 && dh >= 20) door = { x: Math.round((gapL + gapR) / 2 - dw / 2), y: doorTop, w: dw, h: dh };
+    if (!L.portrait && dw >= 16 && dh >= 20) door = { x: Math.round((gapL + gapR) / 2 - dw / 2), y: bottom - dh, w: dw, h: dh };
     else {
-      // the right window's column
+      // the right window's column (portrait: taller than a window, so the lintel and the tops of the
+      // batwings still show above the front row's hats)
       const cxR = winR + ww / 2;
       let dw2 = Math.max(16, Math.min(26, Math.round(ww * 1.15)));
       let x = Math.round(cxR - dw2 / 2);
@@ -464,7 +466,7 @@ const IDLE_MS: Record<string, number> = { cards: 1900, sip: 2000, hat: 1100, loo
 const IDLE_KINDS = ['cards', 'sip', 'hat', 'look'] as const;
 /** slow clap contact times (ms): sfx.clap() lands its claps on these */
 const CLAPS = [250, 670, 1090];
-const CLAP_HOLD = 150;
+const CLAP_HOLD = 220; // >= 2 frames at 10fps
 const YEE = { up: 220, catch: 1100, h: 24 };
 
 interface Anim { kind: string; v: number; emote: boolean }
@@ -744,7 +746,8 @@ export class SceneRenderer {
     const seats = D.players.map((p) => p.seat);
     const geoms = D.players.map((p) => ({ p, g: seatGeom(L, p.seat, seats) })).sort((a, b) => b.g.depth - a.g.depth);
     const shooterG = geoms.find((x) => x.p.id === D.shooter);
-    if ((D.shooter ?? '') !== this.turn.id) this.turn = { id: D.shooter ?? '', v: vt };
+    // (a renderer rebuilt mid-turn, e.g. on resize, doesn't replay the draw)
+    if ((D.shooter ?? '') !== this.turn.id) this.turn = { id: D.shooter ?? '', v: dtReal === 0 ? -1e9 : vt };
     const turnAge = vt - this.turn.v;
 
     // lamp swing (pendulum), biased toward the shooter
@@ -1221,10 +1224,15 @@ export class SceneRenderer {
       }
       case 'angry': {
         if (age < 1800) {
+          // solid, outlined steam puffs jetting from both ears
           for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
             const ph = ((age / 500) + i / 3) % 1;
-            const p = B(24 + side * (12 + ph * 8) + hx, 17 - ph * 16);
-            puff(c, p.x, p.y, Math.max(1, Math.round((1 + ph * 2.2) * Math.max(1, s))), (1 - ph) * 1.3, '#f4ece0', '#a89c90');
+            if (ph > 0.85 && tw) continue;
+            const p = B(24 + side * (12 + ph * 9) + hx, 17 - ph * 15);
+            const r = Math.max(1, Math.round((1 + ph * 1.6) * k));
+            circle(c, p.x, p.y, r + 1, PAL.ink);
+            circle(c, p.x, p.y, r, ph < 0.55 ? '#f4ece0' : '#b8aea4');
+            if (r > 1) px(c, p.x - 1, p.y - 1, PAL.white);
           }
           // pulsing vein mark by the temple
           const p = B(37, 3);

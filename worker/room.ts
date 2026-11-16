@@ -746,7 +746,7 @@ export class Room extends DurableObject<Env> {
     x.hands = {};
     s.draft = { hand: [], handCounts: {}, burns: {}, deck: 0, offers: [] };
     // deal round-robin so a small pool still spreads evenly
-    const seats = s.players.filter((p) => p.connected).map((p) => (x.hands[p.id] = []));
+    const seats = s.players.filter((p) => p.connected).map((p) => (x.hands[p.id] = [] as number[]));
     for (let k = 0; k < DRAFT_HAND; k++) for (const h of seats) { const a = this.top(); if (a !== undefined) h.push(a); }
   }
 
@@ -1073,7 +1073,8 @@ export class Room extends DurableObject<Env> {
     for (const p of s.players) { p.shieldUsed = false; p.revengeOn = undefined; p.badges = undefined; }
     s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; g.cracks = 0; g.lastWords = undefined; });
     s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.duel = undefined; s.result = undefined;
-    s.slide = undefined; s.launch = undefined; s.draft = undefined;
+    s.slide = undefined; s.launch = undefined;
+    this.clearDraft();
     x.fireMs = {}; x.misfires = []; x.finaleAt = 0; x.slideAt = 0;
     s.turnOrder = shuffle(s.players.filter((p) => p.connected).map((p) => p.id));
     if (!s.turnOrder.length) s.turnOrder = [pid];
