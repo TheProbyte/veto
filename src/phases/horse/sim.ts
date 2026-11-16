@@ -27,12 +27,12 @@ export const TAU = 60;               // ms: body shape eases toward tuck / open 
 export const DRAG = 0.9;             // 1/s horizontal drag while fully open
 export const STRADDLE_DEG = 25;      // within this of upright...
 export const STRADDLE_DX = 7;        // ...and this far from the saddle centre = you're on the horse
-export const SADDLE_MID = 39;        // nominal saddle centre x: a plain hold-from-take-off lands ~42, a delayed tuck ~31
-export const OFFSET_RANGE = 4;       // per-player saddle offset: SADDLE_MID ± this (every offset can still score 99+)
+export const SADDLE_MID = 40;        // nominal saddle centre x: a plain hold-from-take-off lands ~42, a delayed tuck ~31
+export const OFFSET_RANGE = 2;       // per-player saddle offset: SADDLE_MID ± this (kept small so a plain hold is fair for everyone)
 export const MAX_INPUTS = 16;
 
 export interface Frame { t: number; x: number; y: number; deg: number; tuck: number }
-export type Outcome = 'perfect' | 'clean' | 'solid' | 'wobbly' | 'short' | 'long' | 'back' | 'face';
+export type Outcome = 'perfect' | 'clean' | 'wobbly' | 'short' | 'long' | 'back' | 'face';
 export interface Jump {
   frames: Frame[];      // one per DT, up to and including the landing
   landMs: number;       // ms after take-off when the hip reached saddle height
@@ -81,14 +81,17 @@ export function heldAt(inputs: readonly number[], t: number): boolean {
 
 export const wrapDeg = (d: number) => ((((d + 180) % 360) + 360) % 360) - 180;
 
-/** labels + scores. Thresholds: >=95 perfect, >=80 clean, >=60 solid, straddled below that = wobbly (min 20); misses 0..10. */
+/**
+ * labels + scores, matching the server's label bands (>=95 Perfect, >=75 Clean, >=40 Wobbly, else Missed):
+ * straddled = 40..100 (perfect >= 95, clean >= 75, else wobbly); any miss = 0..10.
+ */
 export function judge(err: number, dx: number): { straddled: boolean; score: number; outcome: Outcome; label: string } {
   const ae = Math.abs(err), ad = Math.abs(dx);
   const straddled = ae <= STRADDLE_DEG && ad <= STRADDLE_DX;
   if (straddled) {
-    const s = Math.max(20, Math.min(100, Math.round(100 - 55 * Math.pow(ae / STRADDLE_DEG, 1.3) - 25 * Math.pow(ad / STRADDLE_DX, 1.5))));
-    const outcome: Outcome = s >= 95 ? 'perfect' : s >= 80 ? 'clean' : s >= 60 ? 'solid' : 'wobbly';
-    const label = { perfect: 'Perfect landing!', clean: 'Clean landing', solid: 'Solid landing', wobbly: 'Wobbly' }[outcome as 'perfect'];
+    const s = Math.max(40, Math.min(100, Math.round(100 - 55 * Math.pow(ae / STRADDLE_DEG, 1.3) - 20 * Math.pow(ad / STRADDLE_DX, 2))));
+    const outcome: Outcome = s >= 95 ? 'perfect' : s >= 75 ? 'clean' : 'wobbly';
+    const label = outcome === 'perfect' ? 'Perfect landing!' : outcome === 'clean' ? 'Clean landing' : 'Wobbly';
     return { straddled, score: s, outcome, label };
   }
   const over = Math.max(0, ae - STRADDLE_DEG) / 60 + Math.max(0, ad - STRADDLE_DX) / 12;
@@ -96,7 +99,7 @@ export function judge(err: number, dx: number): { straddled: boolean; score: num
   let outcome: Outcome;
   if (ad > STRADDLE_DX && (ae <= STRADDLE_DEG || ad - STRADDLE_DX > (ae - STRADDLE_DEG) / 6)) outcome = dx < 0 ? 'short' : 'long';
   else outcome = err < 0 ? 'face' : 'back'; // under-rotated = still pitching forward = faceplant
-  const label = { short: 'Missed the horse', long: 'Overshot the horse', back: 'Landed on his back', face: 'Faceplant' }[outcome as 'short'];
+  const label = outcome === 'short' ? 'Missed the horse' : outcome === 'long' ? 'Overshot the horse' : outcome === 'back' ? 'Landed on his back' : 'Faceplant';
   return { straddled, score, outcome, label };
 }
 
@@ -152,4 +155,19 @@ export function frameAt(j: Jump, t: number): Frame {
   const a = f[i], b = f[i + 1];
   const u = (t - a.t) / Math.max(1e-6, b.t - a.t);
   return { t, x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, deg: a.deg + (b.deg - a.deg) * u, tuck: a.tuck + (b.tuck - a.tuck) * u };
+}
+
+/**
+ * A stand-in timeline whose landing matches a stored score (bots: the server rolls a random score and a random
+ * timeline). Searches a plain hold [0, r] for the closest score with the same on/off-the-horse result.
+ */
+export function fakeInputsFor(score100: number, saddle: number): number[] {
+  const want = score100 >= 40;
+  let best: number[] = [0, 525], bd = Infinity;
+  for (let r = 80; r <= 1300; r += 5) {
+    const j = simulate([0, r], saddle);
+    const d = Math.abs(j.score - score100) + (j.straddled === want ? 0 : 1000);
+    if (d < bd) { bd = d; best = [0, r]; }
+  }
+  return best;
 }

@@ -51,7 +51,7 @@
   position: absolute; left: 50%; top: 14%; transform: translateX(-50%); z-index: 3; pointer-events: none; text-align: center;
   padding: 8px 18px 6px; background: rgba(22,13,8,.92); white-space: nowrap;
   box-shadow: 0 calc(-1 * var(--pu)) 0 0 var(--ink), 0 var(--pu) 0 0 var(--ink), calc(-1 * var(--pu)) 0 0 0 var(--ink), var(--pu) 0 0 0 var(--ink), inset 0 0 0 var(--pu) var(--wood3);
-  animation: hd-stamp .5s steps(6) both;
+  animation: hd-stamp .5s steps(6) both, hd-fade .5s steps(4) 2.8s forwards;
 }
 .hd-result-label { font-family: var(--title); font-size: clamp(18px, 5.4vw, 36px); color: #ffe9a8; text-shadow: var(--pt) var(--pt) 0 var(--ink); }
 .hd-result-score { font-family: var(--px); font-weight: 700; font-size: clamp(30px, 9vw, 64px); line-height: 1; color: var(--amber); text-shadow: calc(var(--pt) * 2) calc(var(--pt) * 2) 0 var(--ink); }

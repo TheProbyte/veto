@@ -13,7 +13,7 @@ import { bustFor, legacyStyle, styleSig, type BustLook } from '../../pixel/sprit
 import { hashStr } from '../../pixel/palette';
 import { BUZZ, buzz } from '../../scene/haptics';
 import {
-  HIP0, MAX_INPUTS, ROOF, SEAT, X0, cleanInputs, frameAt, horseVariant, judge, saddleX, simulate, type Jump, type Outcome,
+  HIP0, MAX_INPUTS, ROOF, SEAT, X0, cleanInputs, fakeInputsFor, frameAt, horseVariant, judge, saddleX, simulate, type Jump, type Outcome,
 } from './sim';
 import {
   HORSE_AX, HORSE_AY, POSES, RIDER_C, drawSky, ease, horseSprite, mixPose, renderBackdrop, riderSprite, toScreen,
@@ -31,6 +31,17 @@ const BLEND_MS = 260;
 export const showScore = (r: MiniResult | undefined) => (r ? Math.round(r.score / 10) : 0);
 
 interface Replay { inputs: number[]; jump: Jump; start: number } // start: performance.now() of the take-off (-Infinity = already landed)
+
+/** replay from a timeline; if a stored score disagrees with it (server bots roll random timelines), fake one that matches */
+function buildReplay(data: number[], saddle: number, stored: MiniResult | undefined, start: number): Replay {
+  let inputs = cleanInputs(data);
+  let jump = simulate(inputs, saddle);
+  if (stored) {
+    const want = showScore(stored);
+    if (Math.abs(jump.score - want) > 2 || jump.straddled !== (want >= 40)) { inputs = fakeInputsFor(want, saddle); jump = simulate(inputs, saddle); }
+  }
+  return { inputs, jump, start };
+}
 interface Diver { pid: string; lane: number; saddle: number; variant: number; look: BustLook; sig: string; name: string }
 
 function lookOf(p: Player | undefined, pid: string) {
@@ -67,7 +78,7 @@ function flightShot(j: Jump, el: number, perf: number, variant: number): Shot {
     const deg = 360 + j.err * settle * Math.cos(tl / 75);
     const sitIn = ease(tl / 160);
     let p = mixPose(shape, POSES.sit, sitIn);
-    if (j.score >= 80 && tl > 600) p = mixPose(POSES.sit, POSES.sitUp, ease(Math.min(1, (tl - 600) / 220)) * (0.75 + 0.25 * Math.sin((tl - 600) / 140)));
+    if (j.score >= 75 && tl > 600) p = mixPose(POSES.sit, POSES.sitUp, ease(Math.min(1, (tl - 600) / 220)) * (0.75 + 0.25 * Math.sin((tl - 600) / 140)));
     return { x: f.x, y: SEAT - (tl < 140 ? 1 : 0), deg, pose: p, farLeg: tl < 120, horse: tl < 140 ? 'thud' : 'idle', horseFrame: tail < 260 ? 1 : tail < 520 ? 2 : 0, horseDx: 0, dust: tl, landed: true, straddled: true };
   }
   // miss: keep tumbling into the dirt, the horse rears and bolts
@@ -84,10 +95,10 @@ function flightShot(j: Jump, el: number, perf: number, variant: number): Shot {
 }
 
 /** final pose for a result with no replay data (bots): seated if they scored, else in the dirt */
-function staticShot(score100: number, variant: number): Shot {
+function staticShot(score100: number, variant: number, saddle: number): Shot {
   const ok = score100 >= 20;
   const err = ok ? 0 : (variant & 1 ? -40 : 40);
-  const j = { ...judge(err, ok ? 0 : 12), frames: [{ t: 0, x: X0 + 44, y: SEAT, deg: 360 + err, tuck: 0 }], landMs: 0, err, dx: 0 } as Jump;
+  const j = { ...judge(err, ok ? 0 : 12), frames: [{ t: 0, x: ok ? saddle : saddle - 12, y: SEAT, deg: 360 + err, tuck: 0 }], landMs: 0, err, dx: 0 } as Jump;
   return flightShot(j, 20000, 0, variant);
 }
 
@@ -151,6 +162,7 @@ export default function Horse(p: RoomProps) {
   const [mine, setMine] = useState<{ score: number; label: string; outcome: Outcome } | null>(null);
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
   const [goFlash, setGoFlash] = useState(false);
+  const [landedAt, setLandedAt] = useState(0); // Date.now() of my landing: the big result shows a beat before the scoreboard
 
   // results already in at mount: final poses, no replays (also: I already jumped -> no second jump)
   const initDone = useRef(false);
@@ -158,10 +170,7 @@ export default function Horse(p: RoomProps) {
     initDone.current = true;
     for (const [pid, r] of Object.entries(mini.results)) {
       landedSeen.current.add(pid);
-      if (r.data && r.data.length) {
-        const inputs = cleanInputs(r.data);
-        replays.current.set(pid, { inputs, jump: simulate(inputs, saddleX(mini.seed, pid)), start: -Infinity });
-      }
+      if (r.data && r.data.length) replays.current.set(pid, buildReplay(r.data, saddleX(mini.seed, pid), r, -Infinity));
     }
     if (mini.results[me]) { my.current.phase = 'landed'; my.current.sent = true; }
   }
@@ -171,13 +180,13 @@ export default function Horse(p: RoomProps) {
   const startReplay = (pid: string, data: number[] | undefined) => {
     const m = live.current.mini;
     if (!m || pid === live.current.me || replays.current.has(pid) || !data || !data.length) return;
-    const inputs = cleanInputs(data);
-    replays.current.set(pid, { inputs, jump: simulate(inputs, saddleX(m.seed, pid)), start: performance.now() });
+    replays.current.set(pid, buildReplay(data, saddleX(m.seed, pid), m.results[pid], performance.now()));
     sfx.whoosh();
   };
   const startRef = useRef(startReplay);
   startRef.current = startReplay;
-  useEffect(() => on((e: RoomEvent) => { if (e.t === 'mini') startRef.current(e.pid, e.data); }), [on]);
+  const onRef = useRef(on);
+  useEffect(() => onRef.current((e: RoomEvent) => { if (e.t === 'mini') startRef.current(e.pid, e.data); }), []);
   useEffect(() => {
     if (!mini) return;
     for (const [pid, r] of Object.entries(mini.results)) if (r.data) startReplay(pid, r.data);
@@ -307,7 +316,7 @@ export default function Horse(p: RoomProps) {
             if (fin.straddled) { sfx.stamp(); buzz(BUZZ.crack); if (fin.outcome === 'perfect') { sfx.win(); buzz(BUZZ.win); } }
             else { sfx.glass(); buzz(BUZZ.hit); }
             setPhase('landed'); setHeld(false); my.current.held = false;
-            setMine({ score: fin.score, label: fin.label, outcome: fin.outcome });
+            setMine({ score: fin.score, label: fin.label, outcome: fin.outcome }); setLandedAt(Date.now());
             shot = flightShot(fin, el, perf, d.variant);
           } else shot = flightShot(j, el, perf, d.variant);
         } else if (rep) {
@@ -316,10 +325,10 @@ export default function Horse(p: RoomProps) {
           if (shot.landed && !landedSeen.current.has(d.pid)) {
             landedSeen.current.add(d.pid);
             if (rep.jump.straddled) sfx.stamp(); else sfx.glass();
-            setToast({ text: `${d.name}: ${rep.jump.label}${rep.jump.straddled ? ` ${rep.jump.score}` : ''}`, key: perf });
+            setToast({ text: `${d.name}: ${rep.jump.label}`, key: perf });
           }
         } else if (m.results[d.pid]) {
-          shot = staticShot(showScore(m.results[d.pid]), d.variant);
+          shot = staticShot(showScore(m.results[d.pid]), d.variant, d.saddle);
         } else shot = standingShot(perf + i * 517, d, go);
         // horse
         const hs = horseSprite(d.variant, shot.horse, shot.horseFrame);
@@ -374,7 +383,7 @@ export default function Horse(p: RoomProps) {
   const started = now >= mini.startedAt;
   const timeUp = now >= mini.deadline;
   const iDone = !!mini.results[me] || phase === 'landed';
-  const showBoard = !playing || iDone || timeUp || mini.winner !== undefined;
+  const showBoard = !playing || (iDone && Date.now() - landedAt > 1800) || timeUp || mini.winner !== undefined;
 
   let line: ReactNode;
   if (mini.winner !== undefined) line = <span className="hd-verdict"><b>{gameName(mini.winner)}</b> wins!</span>;
@@ -384,7 +393,7 @@ export default function Horse(p: RoomProps) {
   else if (phase === 'air') line = <span>{held ? 'TUCK!' : 'Open up… spot the saddle'}</span>;
   else line = <span>Waiting on the others… <em className={left <= 5 ? 'hot' : ''}>{left}s</em></span>;
 
-  const holdLabel = !started ? 'STEADY…' : timeUp && phase === 'ready' ? "TIME'S UP" : phase === 'air' ? (held ? 'TUCK' : 'OPEN') : 'HOLD';
+  const holdLabel = !started ? 'STEADY…' : phase === 'landed' ? (mine && mine.score >= 40 ? 'YEEHAW' : 'OOF') : timeUp && phase === 'ready' ? "TIME'S UP" : phase === 'air' ? (held ? 'TUCK' : 'OPEN') : 'HOLD';
 
   return createPortal(
     <div className={`hd${phase === 'air' ? ' in-air' : ''}`}>
@@ -414,13 +423,13 @@ export default function Horse(p: RoomProps) {
             <button
               type="button"
               className={`hd-hold${held ? ' held' : ''}`}
-              disabled={!started || (timeUp && phase === 'ready')}
+              disabled={!started || phase === 'landed' || (timeUp && phase === 'ready')}
               onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ } pressRef.current.press(); }}
               onPointerUp={() => pressRef.current.release()}
               onContextMenu={(e) => e.preventDefault()}
             >
               <span className="hd-hold-big">{holdLabel}</span>
-              <small>{phase === 'air' ? 'hold = spin faster · let go = slow down' : 'tap = jump · hold = tuck'}</small>
+              <small>{phase === 'air' ? 'hold = spin faster · let go = slow down' : 'tap = jump · hold = tuck · tuck early = fly farther'}</small>
             </button>
           )}
       </footer>
