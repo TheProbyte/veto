@@ -28,6 +28,7 @@ export default function Home() {
       <div className="nh-dust" aria-hidden>
         {dust.map((d) => <span key={d.i} style={{ left: `${d.left}%`, top: `${d.top}%`, width: d.size, height: d.size, animationDuration: `${d.dur}s`, animationDelay: `${d.delay}s` }} />)}
       </div>
+      <div className="nh-counter" aria-hidden />
       <div className="nh-vignette" aria-hidden />
       <div className="nh-grain" aria-hidden />
 
@@ -42,14 +43,14 @@ export default function Home() {
           <li><b>III</b><span>Shoot 'em down</span><small>Take turns. Last box standing wins.</small></li>
         </ol>
 
-        <button className="nh-btn nh-btn-big" onClick={go}>Open a table</button>
+        <button className="nh-btn nh-btn-big" onClick={go} onMouseEnter={() => sfx.hover()}>Open a table</button>
 
         <form className="nh-join" onSubmit={join}>
           <label htmlFor="nh-code">Got a code?</label>
           <div className="nh-join-row">
             <input id="nh-code" className="nh-input nh-input-code" value={code} maxLength={12}
               onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="ABCDE" autoComplete="off" spellCheck={false} />
-            <button className="nh-btn nh-btn-sm" disabled={code.trim().length < 3}>Join</button>
+            <button className="nh-btn nh-btn-sm" disabled={code.trim().length < 3} onMouseEnter={() => sfx.hover()}>Join</button>
           </div>
         </form>
       </main>

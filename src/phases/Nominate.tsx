@@ -3,6 +3,7 @@ import { boxArt, headerArt, MAX_NOMS, type PoolGame, type Player } from '../../s
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import { Avatar } from './Lobby';
+import Pitches from './Pitches';
 import './panels.css';
 
 function Art({ appid, kind }: { appid: number; kind: 'box' | 'header' }) {
@@ -20,6 +21,7 @@ function hrs(h: number) {
 export default function Nominate({ state, me, send }: RoomProps) {
   const [coopOnly, setCoopOnly] = useState(true);
   const [fresh, setFresh] = useState(false);
+  const [minHours, setMinHours] = useState(0);
   const byId = useMemo(() => new Map(state.players.map((p) => [p.id, p])), [state.players]);
   const isHost = !!byId.get(me)?.host;
 
@@ -30,7 +32,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
   }, [state.board]);
   const myCount = state.board.filter((b) => b.by.includes(me)).length;
 
-  const visible = state.pool.filter((g) => !(coopOnly && g.coop === false) && !(fresh && g.recent));
+  const visible = state.pool.filter((g) => !(coopOnly && g.coop === false) && !(fresh && g.recent) && g.hours >= minHours);
   const all = visible.filter((g) => g.tier === 'all');
   const almost = visible.filter((g) => g.tier === 'almost');
 
@@ -100,6 +102,14 @@ export default function Nominate({ state, me, send }: RoomProps) {
       <div className="nh-filters">
         <label className="nh-toggle"><input type="checkbox" checked={coopOnly} onChange={(e) => { sfx.click(); setCoopOnly(e.target.checked); }} /><span />Multiplayer/co-op only</label>
         <label className="nh-toggle"><input type="checkbox" checked={fresh} onChange={(e) => { sfx.click(); setFresh(e.target.checked); }} /><span />Not played in last 2 weeks</label>
+        <label className="nh-select">Group hours ≥
+          <select value={minHours} onChange={(e) => { sfx.click(); setMinHours(Number(e.target.value)); }}>
+            <option value={0}>Any</option>
+            <option value={10}>10h</option>
+            <option value={50}>50h</option>
+            <option value={100}>100h</option>
+          </select>
+        </label>
       </div>
 
       {state.poolLoading && <div className="nh-loading"><i className="nh-spin" /> Rifling through everyone's libraries…</div>}
@@ -124,13 +134,16 @@ export default function Nominate({ state, me, send }: RoomProps) {
         </div>
       )}
 
+      <Pitches state={state} me={me} send={send} />
+
       <section className="nh-board">
         <div className="nh-label">On the table <span className="nh-count">{state.board.length}</span></div>
         {state.board.length === 0 ? <div className="nh-board-empty">Felt's bare. Toss something in.</div> : (
           <div className="nh-strip">
             {state.board.map((b) => (
-              <div key={b.appid} className="nh-box" title={b.name}>
-                <div className="nh-box-art"><Art appid={b.appid} kind="box" /><span className="nh-box-name">{b.name}</span></div>
+              <div key={b.appid} className={`nh-box ${b.tier === 'pitch' ? 'is-pitch' : ''}`} title={b.name}>
+                <div className="nh-box-art"><Art appid={b.appid} kind="box" /><span className="nh-box-name">{b.name}</span>
+                  {b.tier === 'pitch' && <span className="nh-ptag">PITCH</span>}</div>
                 <div className="nh-box-by">
                   {b.by.length ? b.by.map((id) => <Avatar key={id} p={byId.get(id)} size={16} />) : <small>house</small>}
                 </div>
