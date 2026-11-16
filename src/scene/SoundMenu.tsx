@@ -1,8 +1,10 @@
-// Sound button (fixed top-right) + popover with Music / Effects sliders, Mute and Test.
+// Sound button (fixed top-right) + popover with Music / Effects / Voice sliders (each with -/+ 5% buttons),
+// Mute and Test. Slider positions are shown in %; the gain is position² (see sliderGain in sfx.ts).
 // Also drives background music from the game phase: <SoundMenu phase={state.phase} />.
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { sfx, useMusicForPhase } from '../sfx';
+import { hasVoice, playVoice } from '../voice';
 
 const CSS = `
 .snd-root { position: fixed; z-index: 80; top: calc(env(safe-area-inset-top, 0px) + 8px); right: calc(env(safe-area-inset-right, 0px) + 8px); font-family: 'Pixelify Sans', 'Silkscreen', monospace; color: #e8d5b5; }
@@ -13,12 +15,19 @@ const CSS = `
 .snd-btn:active { box-shadow: 0 -3px 0 0 #0b0705, 0 3px 0 0 #0b0705, -3px 0 0 0 #0b0705, 3px 0 0 0 #0b0705, inset 0 3px 0 0 #160d08; }
 .snd-btn[aria-pressed="true"] { color: #c9b08a; }
 .snd-btn:focus-visible, .snd-pop button:focus-visible, .snd-pop input:focus-visible { outline: 2px dashed #ffb35c; outline-offset: 4px; }
-.snd-pop { position: absolute; top: 56px; right: 0; width: min(280px, calc(100vw - 24px)); box-sizing: border-box; padding: 14px 14px 12px;
+.snd-pop { position: absolute; top: 56px; right: 0; width: min(300px, calc(100vw - 24px)); box-sizing: border-box; padding: 14px 14px 12px;
   background: #2a1a10;
   background-image: repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0 2px, transparent 2px 9px);
   box-shadow: 0 -3px 0 0 #0b0705, 0 3px 0 0 #0b0705, -3px 0 0 0 #0b0705, 3px 0 0 0 #0b0705, inset 0 0 0 3px #5a3a22, 6px 6px 0 0 rgba(0,0,0,.45); }
 .snd-title { margin: 0 0 10px; font-family: 'Rye', serif; font-weight: 400; font-size: 18px; color: #ffb35c; letter-spacing: .03em; text-shadow: 2px 2px 0 #0b0705; }
-.snd-row { display: grid; grid-template-columns: 64px 1fr 40px; align-items: center; gap: 8px; margin: 0 0 10px; }
+.snd-row { margin: 0 0 8px; }
+.snd-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0 2px 2px; }
+.snd-ctl { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; gap: 10px; }
+.snd-step { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 0; cursor: pointer; touch-action: manipulation; font-family: 'Silkscreen', monospace; font-size: 16px; line-height: 1;
+  background: #3b2416; color: #ffb35c;
+  box-shadow: 0 -2px 0 0 #0b0705, 0 2px 0 0 #0b0705, -2px 0 0 0 #0b0705, 2px 0 0 0 #0b0705, inset 0 -3px 0 0 #160d08, inset 0 3px 0 0 #7a5232; }
+.snd-step:hover { background: #5a3a22; }
+.snd-step:disabled { opacity: .4; cursor: default; }
 .snd-lbl { font-family: 'Silkscreen', 'Pixelify Sans', monospace; font-size: 12px; text-transform: uppercase; color: #c9b08a; }
 .snd-val { font-family: 'Silkscreen', monospace; font-size: 12px; text-align: right; color: #ffb35c; }
 .snd-range { -webkit-appearance: none; appearance: none; width: 100%; height: 36px; margin: 0; background: transparent; cursor: pointer; touch-action: none; }
@@ -49,12 +58,15 @@ function Icon({ quiet }: { quiet: boolean }) {
   );
 }
 
+interface Slider { id: string; label: string; value: number; set: (v: number) => void; test?: () => void }
+
 export default function SoundMenu({ phase }: { phase?: string } = {}) {
   useMusicForPhase(phase);
   const [open, setOpen] = useState(false);
   const [muted, setMuted] = useState(() => sfx.isMuted());
   const [music, setMusic] = useState(() => sfx.getMusicVolume());
   const [fx, setFx] = useState(() => sfx.getVolume());
+  const [voice, setVoice] = useState(() => sfx.getVoiceVolume());
   const root = useRef<HTMLDivElement>(null);
   const testT = useRef(0);
 
@@ -67,6 +79,11 @@ export default function SoundMenu({ phase }: { phase?: string } = {}) {
     return () => { window.removeEventListener('pointerdown', off); window.removeEventListener('keydown', esc); };
   }, [open]);
   useEffect(() => () => window.clearTimeout(testT.current), []);
+  // reopening: pick up anything changed elsewhere
+  useEffect(() => {
+    if (!open) return;
+    setMusic(sfx.getMusicVolume()); setFx(sfx.getVolume()); setVoice(sfx.getVoiceVolume()); setMuted(sfx.isMuted());
+  }, [open]);
 
   const unmute = () => { if (muted) { sfx.setMuted(false); setMuted(false); } };
   // setVolume smooths over ~50ms, so the test click waits for the new level
@@ -80,7 +97,21 @@ export default function SoundMenu({ phase }: { phase?: string } = {}) {
     sfx.setMuted(m);
     setMuted(m);
   };
-  const quiet = muted || (fx <= 0 && music <= 0);
+  const testVoice = () => {
+    window.clearTimeout(testT.current);
+    testT.current = window.setTimeout(() => { if (!playVoice('emote_yeehaw', 'emote')) sfx.click(); }, 160);
+  };
+  const quiet = muted || (fx <= 0 && music <= 0 && voice <= 0);
+  const sliders: Slider[] = [
+    { id: 'music', label: 'Music', value: music, set: (v) => { setMusic(v); sfx.setMusicVolume(v); } },
+    { id: 'fx', label: 'Effects', value: fx, set: (v) => { setFx(v); sfx.setVolume(v); setVoice(sfx.getVoiceVolume()); }, test: testClick },
+    { id: 'voice', label: 'Voice', value: voice, set: (v) => { setVoice(v); sfx.setVoiceVolume(v); }, test: hasVoice('emote_yeehaw') ? testVoice : testClick },
+  ];
+  const change = (s: Slider, v: number) => {
+    v = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100; // no float drift from the +/- steps
+    s.set(v); sfx.unlock();
+    if (v > 0) unmute();
+  };
 
   if (typeof document === 'undefined') return null;
   // portal to <body> so a transformed ancestor (screen shake) can't break position: fixed
@@ -98,36 +129,31 @@ export default function SoundMenu({ phase }: { phase?: string } = {}) {
       {open && (
         <div className="snd-pop" role="dialog" aria-label="Sound">
           <h2 className="snd-title">Sound</h2>
-          <label className="snd-row">
-            <span className="snd-lbl">Music</span>
-            <input
-              className="snd-range" type="range" min={0} max={1} step={0.05} value={music}
-              style={{ ['--snd-p' as string]: `${music * 100}%` }}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setMusic(v); sfx.setMusicVolume(v); sfx.unlock();
-                if (v > 0) unmute();
-              }}
-              aria-label="Music volume"
-            />
-            <b className="snd-val">{Math.round(music * 100)}</b>
-          </label>
-          <label className="snd-row">
-            <span className="snd-lbl">Effects</span>
-            <input
-              className="snd-range" type="range" min={0} max={1} step={0.05} value={fx}
-              style={{ ['--snd-p' as string]: `${fx * 100}%` }}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setFx(v); sfx.setVolume(v); sfx.unlock();
-                if (v > 0) unmute();
-              }}
-              onPointerUp={testClick}
-              onKeyUp={testClick}
-              aria-label="Effects volume"
-            />
-            <b className="snd-val">{Math.round(fx * 100)}</b>
-          </label>
+          {sliders.map((sl) => {
+            const pct = Math.round(sl.value * 100);
+            return (
+              <div className="snd-row" key={sl.id}>
+                <div className="snd-head">
+                  <label className="snd-lbl" htmlFor={`snd-${sl.id}`}>{sl.label}</label>
+                  <b className="snd-val">{pct}%</b>
+                </div>
+                <div className="snd-ctl">
+                  <button type="button" className="snd-step" aria-label={`${sl.label} down 5%`} disabled={sl.value <= 0}
+                    onClick={() => { change(sl, sl.value - 0.05); sl.test?.(); }}>-</button>
+                  <input
+                    id={`snd-${sl.id}`} className="snd-range" type="range" min={0} max={1} step={0.01} value={sl.value}
+                    style={{ ['--snd-p' as string]: `${pct}%` }}
+                    onChange={(e) => change(sl, Number(e.target.value))}
+                    onPointerUp={sl.test}
+                    onKeyUp={sl.test}
+                    aria-label={`${sl.label} volume`} aria-valuetext={`${pct}%`}
+                  />
+                  <button type="button" className="snd-step" aria-label={`${sl.label} up 5%`} disabled={sl.value >= 1}
+                    onClick={() => { change(sl, sl.value + 0.05); sl.test?.(); }}>+</button>
+                </div>
+              </div>
+            );
+          })}
           <div className="snd-actions">
             <button type="button" className="snd-act" aria-pressed={muted} onClick={toggleMute}>{muted ? 'Unmute' : 'Mute'}</button>
             <button type="button" className="snd-act" onClick={() => { sfx.unlock(); unmute(); testClick(); }}>Test</button>

@@ -173,7 +173,7 @@ export default function Duel({ state, me, send, skew }: RoomProps) {
         {amChamp && !decided && (
           <button className="duel-bang px-btn" disabled={myTap !== undefined || jumped} aria-label="Bang">{jumped ? 'FOUL' : myTap !== undefined ? fmt(myTap) : 'BANG!'}</button>
         )}
-        {amChamp && !decided && <div className="duel-note">{myTap !== undefined ? 'Waiting on the other gun…' : drawn ? 'NOW!' : 'Wait for DRAW!, then tap.'}</div>}
+        {amChamp && !decided && <div className="duel-note">{myTap !== undefined ? 'Waiting on the other gun…' : drawn ? 'NOW!' : 'Tap on DRAW!'}</div>}
         {!amChamp && !decided && <div className="duel-spect px-box">SPECTATING</div>}
       </div>
       {drawn && !decided && <div className="duel-flash" />}

@@ -693,3 +693,188 @@
   .gp-result .sad { width: 100%; margin-top: 0; }
   .gp-result .sad-host .btn-rematch, .gp-result .sad-host .btn-again { flex-basis: 120px; font-size: 14px; }
 }
+
+/* ================= veto: revolver, sheriff badge, terse head, hushed carousel ================= */
+.vt .vt-instr { line-height: 1.15; }
+.vt .vt-instr u { text-decoration: none; color: #ff6a50; }
+.veto .vt-count span { display: inline; opacity: .8; }
+.carousel { transition: opacity .9s steps(6), filter .9s steps(6); }
+.carousel.vt-hush { opacity: .28; filter: grayscale(.5); transition: opacity .25s steps(3), filter .25s steps(3); }
+.cbox .vt-fine canvas { image-rendering: pixelated; }
+.vt-crack { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; pointer-events: none; z-index: 1; }
+.fx-crackov { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+.cbox.center .crosshair { z-index: 2; }
+
+/* tin-star badge, top-right of each box: faint = tap to pin; gold = my (private) star is here */
+.vt-badge {
+  position: absolute; z-index: 5; top: -16px; right: -16px; width: 56px; height: 56px; padding: 0; border: 0; background: none;
+  display: grid; place-items: center; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.vt-badge.small { top: -12px; right: -12px; width: 46px; height: 46px; }
+.vt-badge .tinstar { transition: opacity .15s steps(2), transform .15s steps(2); filter: drop-shadow(2px 2px 0 rgba(0,0,0,.7)); }
+.vt-badge.open .tinstar { opacity: .42; filter: grayscale(.4) drop-shadow(2px 2px 0 rgba(0,0,0,.6)); }
+.vt-badge.open:hover .tinstar, .vt-badge.open:focus-visible .tinstar { opacity: .95; transform: scale(1.12) rotate(-8deg); filter: drop-shadow(2px 2px 0 rgba(0,0,0,.7)); }
+.vt-badge.open:active .tinstar { transform: scale(.9); }
+.vt-badge.pinned { cursor: default; }
+.vt-badge.pinned .tinstar {
+  opacity: 1; filter: sepia(1) saturate(5) hue-rotate(-12deg) brightness(1.18) drop-shadow(2px 2px 0 #000) drop-shadow(0 0 6px rgba(255,179,92,.85));
+  animation: vt-gold 1.6s steps(2) infinite;
+}
+@keyframes vt-gold { 50% { filter: sepia(1) saturate(5) hue-rotate(-12deg) brightness(1.45) drop-shadow(2px 2px 0 #000) drop-shadow(0 0 10px rgba(255,179,92,1)); } }
+.vt-badge:focus-visible { outline: 2px solid var(--amber); outline-offset: -6px; }
+.vt-badge-pin { display: grid; place-items: center; animation: px-pin .7s steps(10) both; }
+
+/* the gun bar: desktop = in flow under the carousel, sticky to the bottom edge */
+.vt-gunbar {
+  position: sticky; bottom: 0; z-index: 30; display: flex; align-items: flex-end; justify-content: center; gap: clamp(20px, 3vw, 44px);
+  margin-top: 46px; height: 176px; pointer-events: none;
+}
+.vt-gunbar > * { pointer-events: auto; }
+.vt-arrow { width: 64px; height: 64px; padding: 0; display: grid; place-items: center; font-size: 22px; margin-bottom: 44px; }
+.vt-gunbar.idle .vt-arrow { opacity: .35; }
+.vt-hint {
+  position: absolute; left: calc(50% + 150px); bottom: 58px; white-space: nowrap; pointer-events: none;
+  font-family: var(--px-sm); font-size: 10px; letter-spacing: .06em; color: var(--parch2); opacity: .7; text-shadow: 2px 2px 0 var(--ink);
+}
+@media (pointer: coarse) { .vt-hint { display: none; } }
+
+.vt-gun { --gw: 108px; position: relative; width: calc(var(--gw) + 24px); height: 100%; flex: none; }
+.vt-gun-hit {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; overflow: visible;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.vt-gun-hit:disabled { cursor: default; }
+.vt-gun-hit:focus-visible { outline: 2px dashed var(--amber); outline-offset: 2px; }
+.vt-gun-body {
+  position: absolute; left: 50%; bottom: -30px; width: var(--gw); aspect-ratio: 36 / 72; display: block;
+  transform: translateX(-50%); transform-origin: 50% 85%;
+  transition: transform .4s steps(6), filter .4s steps(4);
+  filter: drop-shadow(4px 4px 0 rgba(0,0,0,.6));
+}
+.vt-gun-sp { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.vt-gun.down .vt-gun-body { transform: translateX(-50%) translateY(46%) rotate(18deg); filter: brightness(.45) grayscale(.6) drop-shadow(4px 4px 0 rgba(0,0,0,.6)); }
+.vt-gun.up .vt-gun-body { animation: vt-sway 3.2s steps(8) infinite; }
+.vt-gun.up.cocked .vt-gun-body { animation: none; transform: translateX(-50%) translateY(4px) rotate(-1deg); filter: drop-shadow(4px 4px 0 rgba(0,0,0,.6)) drop-shadow(0 0 8px rgba(255,138,61,.55)); }
+.vt-gun.red.up .vt-gun-body { filter: drop-shadow(4px 4px 0 rgba(0,0,0,.6)) drop-shadow(0 0 10px rgba(255,40,30,.8)); }
+@keyframes vt-sway { 0%, 100% { rotate: 0deg; } 50% { rotate: 1.2deg; translate: 0 -2px; } }
+.vt-gun-body[data-kick='1'] { animation: vt-recoil .5s steps(7) both !important; }
+@keyframes vt-recoil {
+  0% { translate: 0 0; rotate: 0deg; }
+  14% { translate: 2px 22px; rotate: -9deg; }
+  40% { translate: 1px 8px; rotate: -3deg; }
+  100% { translate: 0 0; rotate: 0deg; }
+}
+.vt-flash { position: absolute; left: 50%; top: -14%; width: 92%; height: auto; aspect-ratio: 1; image-rendering: pixelated; pointer-events: none; animation: vt-flash .32s steps(3) forwards; }
+@keyframes vt-flash { 0% { opacity: 1; transform: translate(-50%, -50%) scale(.6); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.25); } }
+.vt-smoke { position: absolute; left: 50%; top: -4%; width: 60%; height: auto; aspect-ratio: 18 / 14; image-rendering: pixelated; opacity: 0; pointer-events: none; animation: vt-smoke 1.3s steps(12) forwards; }
+@keyframes vt-smoke { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.4); } 12% { opacity: .9; } 100% { opacity: 0; transform: translate(calc(-50% + var(--x) * 2), calc(-50% + var(--y) - 70px)) scale(1.8); } }
+.vt-gun-lbl {
+  position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 2; white-space: nowrap; pointer-events: none;
+  padding: 4px 8px 2px; font-family: var(--px); font-size: 13px; color: var(--parch2); background: rgba(11,7,5,.88); box-shadow: 0 0 0 2px var(--ink);
+  max-width: 46vw; overflow: hidden; text-overflow: ellipsis;
+}
+.vt-gun-lbl.live { font-size: 18px; font-weight: 700; letter-spacing: .14em; color: #fff2d6; background: #9e1b1b; box-shadow: 0 0 0 2px var(--ink), inset -2px -2px 0 #5e0f0f, inset 2px 2px 0 #d0392b; animation: pulse 1s steps(2) infinite; }
+.vt-gun.red .vt-gun-lbl.live { background: #c0140f; }
+.vt-gun.cocked .vt-gun-lbl.live { animation: none; background: #c4581f; }
+
+/* phones (portrait): a fixed thumb bar, gun in the middle poking up out of it */
+@media (max-width: 640px) {
+  .saloon.phase-veto .saloon-front { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+  .vt-gunbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; margin: 0; height: calc(96px + env(safe-area-inset-bottom));
+    justify-content: space-between; align-items: center; gap: 8px; pointer-events: auto;
+    padding: 0 max(14px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(14px, env(safe-area-inset-left));
+    background: #160d08; box-shadow: 0 -4px 0 0 var(--ink), inset 0 2px 0 0 var(--wood3);
+  }
+  .vt-arrow { width: 64px; height: 64px; margin: 0; font-size: 22px; }
+  .vt-gun { --gw: 80px; align-self: stretch; width: 128px; height: 100%; }
+  .vt-gun-hit { height: 140px; } /* extends above the bar: the whole raised gun is the trigger */
+  .vt-gun-body { bottom: -22px; }
+  .vt-gun-lbl { bottom: 6px; font-size: 12px; max-width: 150px; }
+  .vt-gun-lbl.live { font-size: 17px; }
+  .emo.ph-veto { --emo-bottom: calc(112px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 640px) and (max-height: 600px) {
+  .vt-gun { --gw: 70px; }
+}
+/* phones (landscape): no bar background, the gun sits bottom-right under the thumb, arrows bottom-left */
+@media (max-height: 500px) and (orientation: landscape) {
+  .saloon.phase-veto .saloon-front { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .vt-gunbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; margin: 0; height: 110px; justify-content: flex-start; align-items: flex-end; gap: 12px;
+    padding: 0 max(16px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+  .vt-arrow { width: 56px; height: 56px; margin: 0; }
+  .vt-gun { --gw: 64px; order: 3; margin-left: auto; width: 110px; height: 110px; }
+  .vt-gun-hit { height: 120px; }
+  .vt-gun-body { bottom: -26px; }
+  .emo.ph-veto { --emo-bottom: calc(80px + env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vt-gun.up .vt-gun-body, .vt-gun-lbl.live, .vt-badge.pinned .tinstar { animation: none; }
+  .vt-gun-body[data-kick='1'] { animation-duration: .01s !important; }
+  .vt-smoke { display: none; }
+}
+
+/* last words: bigger and easier to read while the table waits */
+.gpx-words { font-size: clamp(17px, 2.8vw, 22px); line-height: 1.35; max-width: min(88vw, 420px); padding: 12px 16px 10px; }
+.gpx-words small { font-size: 10px; opacity: .7; letter-spacing: .08em; }
+@keyframes gpx-words { 0% { opacity: 0; transform: translateX(-50%) scale(.6); } 6% { opacity: 1; transform: translateX(-50%) scale(1.05); } 9%, 92% { opacity: 1; transform: translateX(-50%) scale(1); } 100% { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
+
+/* ================= whiskey slide: full-screen saloon, hold-the-glass ================= */
+.sl { background: #0b0705; }
+.sl-stage { position: absolute; inset: 0; z-index: 0; }
+.sl-stage .sl-cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.sl-skid { pointer-events: none; }
+.sl::before { /* keep the header legible over the back wall */
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 190px; z-index: 1; pointer-events: none;
+  background: linear-gradient(rgba(11,7,5,.78), rgba(11,7,5,.35) 60%, rgba(11,7,5,0));
+}
+.sl-head, .sl-roster, .sl-ctl { position: relative; z-index: 2; }
+.sl-zone { position: relative; flex: 1 1 auto; min-height: 150px; pointer-events: none; }
+.sl.my-turn .sl-stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 60px rgba(255,179,92,.14); }
+.sl-roster { max-width: 820px; }
+.sl-card { background-color: rgba(22,13,8,.9); }
+
+.sl-glass-sp { z-index: 1; }
+.sl-glass-refl {
+  position: absolute; left: 0; top: 96%; width: 100%; height: 100%; image-rendering: pixelated; pointer-events: none;
+  transform-origin: 50% 0; transform: scaleY(-.55); opacity: .22;
+  -webkit-mask-image: linear-gradient(to top, #000, transparent 70%); mask-image: linear-gradient(to top, #000, transparent 70%);
+}
+.sl-glass.mine:not(.held) .sl-glass-sp { animation: sl-ready 1s steps(2) infinite; }
+.sl-glass.held { transition: transform .08s steps(2); }
+.sl-glass.held .sl-glass-sp { filter: drop-shadow(0 0 3px #ffe7b8) drop-shadow(0 6px 4px rgba(0,0,0,.6)); }
+
+/* the hit area around MY glass: press and hold */
+.sl-grab {
+  position: absolute; z-index: 140; transform: translate(-50%, -50%); padding: 0; border: 0; border-radius: 50%; background: transparent;
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  box-shadow: inset 0 0 0 2px rgba(255,179,92,.55), 0 0 0 2px rgba(11,7,5,.5); animation: sl-grab 1.2s steps(3) infinite;
+}
+.sl-grab:disabled { cursor: default; animation: none; box-shadow: inset 0 0 0 2px rgba(232,213,181,.18); }
+.sl-grab.held { cursor: grabbing; animation: none; box-shadow: inset 0 0 0 3px #ffb35c, 0 0 18px 4px rgba(255,179,92,.35); }
+.sl-grab:focus-visible { outline: 2px dashed var(--amber); outline-offset: 2px; }
+@keyframes sl-grab { 50% { box-shadow: inset 0 0 0 2px rgba(255,231,184,.9), 0 0 0 6px rgba(255,179,92,.18); } }
+
+/* vertical power meter beside the glass (bottom = soft, top = off the end) */
+.sl-vmeter {
+  position: absolute; z-index: 141; width: 16px; transform: translateY(-100%); pointer-events: none; opacity: .5; transition: opacity .12s steps(2);
+  background: linear-gradient(to top, #2a1a10, #7a5232 84%); box-shadow: 0 0 0 2px var(--ink), 0 0 0 4px #5a3a22;
+}
+.sl-vmeter.left { transform: translate(-100%, -100%); }
+.sl-vmeter.on { opacity: 1; box-shadow: 0 0 0 2px var(--ink), 0 0 0 4px var(--amber); }
+.sl-vz-fell { position: absolute; left: 0; right: 0; top: 0; background: repeating-linear-gradient(135deg, #9e1b1b 0 4px, #5e0f0f 4px 8px); }
+.sl-vz-sweet { position: absolute; left: 0; right: 0; background: #ffb35c; box-shadow: inset 0 0 0 2px #ffe7b8; }
+.sl-vneedle { position: absolute; left: -5px; right: -5px; height: 4px; margin-bottom: -2px; background: #fff6e4; box-shadow: 0 0 0 2px var(--ink); }
+
+.sl-ctl { min-height: 44px; justify-content: center; }
+.sl-tip {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 14px 6px; text-align: center;
+  font-family: var(--px); font-size: clamp(15px, 2.4vw, 19px); color: #ffe9a8; background: rgba(11,7,5,.82); box-shadow: 0 0 0 2px var(--ink);
+}
+.sl-tip small { font-family: var(--px-sm); font-size: 9px; letter-spacing: .1em; color: var(--parch2); opacity: .75; }
+.sl-tip.hot { color: #fff6e4; background: #9e1b1b; }
+@media (pointer: coarse) { .sl-tip small { display: none; } }
+@media (max-width: 640px) { .sl::before { height: 170px; } }
+@media (prefers-reduced-motion: reduce) { .sl-grab, .sl-glass.mine .sl-glass-sp { animation: none; } }

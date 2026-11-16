@@ -1,10 +1,14 @@
-// Sound effects + music API (Web Audio synthesis; optional recorded rain/thunder from public/sfx, see sfxManifest).
-// All functions are safe to call before user gesture (they no-op until unlock()).
-// Graph: effects -> master (effects volume) ┐
-//        music  -> musicGain (music volume) ┴> mainOut (mute) -> compressor -> out
+// Sound effects + music API (Web Audio synthesis; optional recorded rain/thunder from public/sfx, see sfxManifest;
+// optional recorded music + win sting from /media, see mediaManifest). All functions are safe to call before a
+// user gesture (they no-op until unlock()).
+// Graph: effects -> master (effects volume) ──────────────────────┐
+//        music (procedural engine | media tracks) -> musicGain -> musicDuck ┤
+//        voice clips (src/voice.ts, routed via routeVoice) -> voiceGain ┴> mainOut (mute) -> compressor -> out
+// Sliders are 0..1 positions; the gain is position² (perceptual taper) times a per-bus trim.
 import { useEffect } from 'react';
 import { createMusic, whistle as whistleVoice, type MusicEngine, type MusicMode } from './music';
 import { SFX_FILES } from './sfxManifest';
+import { MEDIA_FILES } from './mediaManifest';
 
 export type { MusicMode } from './music';
 
@@ -12,50 +16,69 @@ let ctx: AudioContext | null = null;
 let master: GainNode | null = null;   // effects volume
 let mainOut: GainNode | null = null;  // mute
 let musicGain: GainNode | null = null; // music volume
+let musicDuck: GainNode | null = null; // dips the music under the recorded win sting
+let voiceGain: GainNode | null = null; // voice volume (routed voice clips)
 let fxBus: GainNode | null = null; // send into the shared convolution room reverb
 let noiseBuf: AudioBuffer | null = null;
 let impulse: AudioBuffer | null = null;
 let engine: MusicEngine | null = null;
 let wantMusic: MusicMode = 'off';
+// v2 keys: the old 'nah.volume' / 'nah.musicVolume' were linear and much louder; everyone starts at the new defaults
+const KEY_FX = 'nah.vol2.fx', KEY_MUSIC = 'nah.vol2.music', KEY_VOICE = 'nah.vol2.voice';
+const DEFAULT_FX = 0.35, DEFAULT_MUSIC = 0.25;
 let muted = readMuted();
-let volume = readVolume();
-let musicVolume = readMusicVolume();
-const MUSIC_TRIM = 0.85; // music sits under the effects at equal slider positions
+let volume = readLevel(KEY_FX, DEFAULT_FX);
+let musicVolume = readLevel(KEY_MUSIC, DEFAULT_MUSIC);
+/** null = follows the Effects slider (until the Voice slider is moved) */
+let voiceVolume: number | null = readLevel(KEY_VOICE, null);
+// overall mix trims on top of the slider curve (all buses ~-2.5 dB lower than before, music a bit more)
+const FX_TRIM = 0.75;
+const MUSIC_TRIM = 0.62;   // music sits under the effects at equal slider positions
+const VOICE_TRIM = 0.45;   // the recordings are hot (-1.5 dBFS peaks) and pick up the compressor's makeup gain
+const MEDIA_TRIM = 0.32;   // recorded music is mastered loud; this puts it near the procedural music's level
+const STING_TRIM = 0.4;    // recorded win sting, on the effects bus
+/** perceptual taper: slider position -> linear gain (0.5 -> -12 dB, 0.35 -> -18 dB, 0.25 -> -24 dB) */
+export const sliderGain = (v: number) => v * v;
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 function readMuted(): boolean {
   try { return localStorage.getItem('nah.muted') === '1'; } catch { return false; }
 }
-function readVolume(): number {
+function readLevel<T extends number | null>(key: string, dflt: T): number | T {
   try {
-    const raw = localStorage.getItem('nah.volume');
-    if (raw == null) return 0.7;
+    const raw = localStorage.getItem(key);
+    if (raw == null) return dflt;
     const v = parseFloat(raw);
-    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.7;
-  } catch { return 0.7; }
+    return Number.isFinite(v) ? clamp01(v) : dflt;
+  } catch { return dflt; }
 }
-function readMusicVolume(): number {
-  try {
-    const raw = localStorage.getItem('nah.musicVolume');
-    if (raw == null) return 0.45;
-    const v = parseFloat(raw);
-    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.45;
-  } catch { return 0.45; }
+function saveLevel(key: string, v: number) {
+  try { localStorage.setItem(key, String(Math.round(v * 1000) / 1000)); } catch {}
 }
+const voicePos = () => voiceVolume ?? volume;
+const fxLevel = () => sliderGain(volume) * FX_TRIM;
+const voiceLevel = () => sliderGain(voicePos()) * VOICE_TRIM;
+const levelListeners = new Set<() => void>();
 function applyLevel() {
+  for (const f of levelListeners) { try { f(); } catch { /* listener error */ } }
   if (!ctx || !master || !mainOut || !musicGain) return;
   const t = ctx.currentTime;
   // hidden page: also fade the output (a backstop for browsers that don't honour ctx.suspend())
-  for (const [g, v] of [[master, volume], [mainOut, muted || bgHidden ? 0 : 1], [musicGain, musicVolume * MUSIC_TRIM]] as const) {
+  const pairs: [GainNode | null, number][] = [
+    [master, fxLevel()], [mainOut, muted || bgHidden ? 0 : 1], [musicGain, sliderGain(musicVolume) * MUSIC_TRIM], [voiceGain, voiceLevel()],
+  ];
+  for (const [g, v] of pairs) {
+    if (!g) continue;
     g.gain.cancelScheduledValues(t);
     g.gain.setTargetAtTime(v, t, 0.05);
   }
   if (rainBus) { // the rain bed bypasses the compressor: its own volume + mute
     const g = rainBus.out.gain;
     g.cancelScheduledValues(t);
-    g.setTargetAtTime(muted || bgHidden ? 0 : volume * RAIN_MAKEUP, t, 0.05);
+    g.setTargetAtTime(muted || bgHidden ? 0 : fxLevel() * RAIN_MAKEUP, t, 0.05);
   }
 }
-const musicAudible = () => !!engine && engine.playing() && !muted && musicVolume > 0.01;
+const musicAudible = () => ((!!engine && engine.playing()) || mediaPlaying()) && !muted && musicVolume > 0.01;
 
 /** Wooden room impulse: stereo decaying noise with early reflections, darker as it decays. */
 function roomImpulse(c: AudioContext, secs = 1.2): AudioBuffer {
@@ -95,19 +118,25 @@ function init(): boolean {
     const coarse = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
     try { ctx = new AC(coarse ? { latencyHint: 'playback' } : undefined); } catch { ctx = new AC(); }
     master = ctx.createGain();
-    master.gain.value = volume;
+    master.gain.value = fxLevel();
     mainOut = ctx.createGain();
     mainOut.gain.value = muted || bgHidden ? 0 : 1;
     musicGain = ctx.createGain();
-    musicGain.gain.value = musicVolume * MUSIC_TRIM;
+    musicGain.gain.value = sliderGain(musicVolume) * MUSIC_TRIM;
+    musicDuck = ctx.createGain();
+    voiceGain = ctx.createGain();
+    voiceGain.gain.value = voiceLevel();
+    // with the lower levels this is a safety limiter that rarely engages; threshold/knee/ratio are what
+    // RAIN_MAKEUP is calibrated against, so only the timing changed (slower attack + release: no pumping)
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -12;
     comp.knee.value = 6;
     comp.ratio.value = 5;
-    comp.attack.value = 0.002;
-    comp.release.value = 0.18;
+    comp.attack.value = 0.004;
+    comp.release.value = 0.3;
     master.connect(mainOut);
-    musicGain.connect(mainOut);
+    musicGain.connect(musicDuck).connect(mainOut);
+    voiceGain.connect(mainOut);
     mainOut.connect(comp).connect(ctx.destination);
 
     // shared convolution room
@@ -166,7 +195,7 @@ function setBackground(hidden: boolean) {
   if (hidden === bgHidden) return;
   bgHidden = hidden;
   engine?.setPaused(hidden);
-  if (hidden) { applyLevel(); reconcileCtx(); }
+  if (hidden) { pauseMedia(); applyLevel(); reconcileCtx(); }
   else { reconcileCtx(); applyLevel(); startMusic(); syncLoops(); }
   for (const f of bgListeners) { try { f(hidden); } catch { /* listener error */ } }
 }
@@ -191,11 +220,15 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined') {
 
 function startMusic() {
   if (!ready()) return;
-  if (!engine) {
-    if (wantMusic === 'off') return;
+  // a recorded track (when listed in mediaManifest and playable) replaces the procedural music for its modes
+  const tr = trackFor(wantMusic);
+  const useMedia = !!tr && mediaUsable(tr);
+  const proc: MusicMode = useMedia ? 'off' : wantMusic;
+  if (!engine && proc !== 'off') {
     engine = createMusic({ ctx: ctx!, dest: musicGain!, noise: noiseBuf!, impulse: impulse!, pluckBuf: (f) => pluckBuf(f), paused: bgHidden });
   }
-  engine.setMode(wantMusic); // no-op when already in that mode
+  engine?.setMode(proc); // no-op when already in that mode
+  setMediaTrack(useMedia ? tr : null, wantMusic === 'result' ? RESULT_MEDIA_LEVEL : 1);
 }
 const now = () => ctx!.currentTime;
 
@@ -237,13 +270,29 @@ function filt(type: BiquadFilterType, freq: number, q = 0.7): BiquadFilterNode {
   return f;
 }
 
+/** The loudest one-shots (shot, stamp, draw sting) used to slam the compressor (-10 dB of gain reduction that
+ * pumped the whole mix and squashed them down). At the new, lower levels the compressor mostly idles, so these
+ * are tamed at the source instead: they keep about the same balance against the rest as before, peaking lower. */
+const HOT_TRIM = 0.55;
+let outScale = 1;
+function hot(build: () => void) {
+  outScale = HOT_TRIM;
+  try { build(); } finally { outScale = 1; }
+}
 /** Route a node into master (and optionally the reverb bus). */
 function out(node: AudioNode, wet = 0) {
-  node.connect(master!);
+  let src = node;
+  if (outScale !== 1) {
+    const s = ctx!.createGain();
+    s.gain.value = outScale;
+    node.connect(s);
+    src = s;
+  }
+  src.connect(master!);
   if (wet > 0 && fxBus) {
     const w = ctx!.createGain();
     w.gain.value = wet;
-    node.connect(w).connect(fxBus);
+    src.connect(w).connect(fxBus);
   }
 }
 
@@ -481,15 +530,40 @@ export const sfx = {
     duckRain();
   },
   getMusicMode(): MusicMode { return wantMusic; },
-  setMusicVolume(v: number) { // music volume 0..1 (persisted 'nah.musicVolume')
-    musicVolume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : musicVolume;
-    try { localStorage.setItem('nah.musicVolume', String(Math.round(musicVolume * 1000) / 1000)); } catch {}
+  setMusicVolume(v: number) { // music slider position 0..1 (gain = v², persisted 'nah.vol2.music')
+    musicVolume = Number.isFinite(v) ? clamp01(v) : musicVolume;
+    saveLevel(KEY_MUSIC, musicVolume);
     applyLevel();
   },
   getMusicVolume(): number { return musicVolume; },
+  /** voice slider position 0..1 (barkeep + emote barks); until it's set it follows the effects slider */
+  setVoiceVolume(v: number) {
+    voiceVolume = Number.isFinite(v) ? clamp01(v) : voicePos();
+    saveLevel(KEY_VOICE, voiceVolume);
+    applyLevel();
+  },
+  getVoiceVolume(): number { return voicePos(); },
+  /** for voice clips that aren't routed through Web Audio: the HTMLAudioElement.volume to use (0 when muted).
+   * Includes the compressor's makeup gain the routed path gets, so both paths sound the same. */
+  voiceElementVolume(): number { return muted ? 0 : clamp01(voiceLevel() * RAIN_MAKEUP); },
+  /** route a voice clip through the voice bus (voice volume + mute + output chain). Only once per element; after
+   * that the element is silent outside Web Audio. Returns a per-clip gain setter, or null before unlock(). */
+  routeVoice(el: HTMLMediaElement): ((gain: number) => void) | null {
+    if (!live() || !voiceGain) return null;
+    try {
+      const src = ctx!.createMediaElementSource(el);
+      const g = ctx!.createGain();
+      src.connect(g).connect(voiceGain);
+      return (v: number) => { g.gain.value = Math.max(0, v); };
+    } catch { return null; }
+  },
+  /** called whenever a level or mute changes (slider moves); returns an unsubscribe */
+  onLevels(f: () => void): () => void { levelListeners.add(f); return () => { levelListeners.delete(f); }; },
+  isUnlocked(): boolean { return live(); },
   unlock() {               // call on first user click/keydown; resumes AudioContext (idempotent)
     if (!init()) return;
     preloadFiles();
+    primeMedia();
     if (wantAmbience) startAmbience();
     if (wantFuse) startFuse();
     startMusic();
@@ -499,9 +573,9 @@ export const sfx = {
     try { localStorage.setItem('nah.muted', m ? '1' : '0'); } catch {}
     applyLevel();
   },
-  setVolume(v: number) {   // effects volume 0..1 (persisted 'nah.volume')
-    volume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : volume;
-    try { localStorage.setItem('nah.volume', String(Math.round(volume * 1000) / 1000)); } catch {}
+  setVolume(v: number) {   // effects slider position 0..1 (gain = v², persisted 'nah.vol2.fx')
+    volume = Number.isFinite(v) ? clamp01(v) : volume;
+    saveLevel(KEY_FX, volume);
     applyLevel();
   },
   getVolume(): number { return volume; },
@@ -518,37 +592,39 @@ export const sfx = {
   },
   shot() {                 // gunshot (veto hit): crack + body + sub thump, echoing in the room
     if (!ready()) return;
-    const t = now();
-    const v = rnd(0.88, 1.12); // per-shot variation
-    // crack: sharp highpassed transient
-    const c = noise();
-    const hp = filt('highpass', 2200 * v, 0.8);
-    const cg = ctx!.createGain();
-    cg.gain.setValueAtTime(0.0001, t);
-    cg.gain.exponentialRampToValueAtTime(1.6, t + 0.0012);
-    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
-    c.connect(hp).connect(cg);
-    out(cg, 0.8);
-    c.start(t, Math.random(), 0.08);
-    // body: lowpassed noise with a falling cutoff
-    const b = noise();
-    const lp = filt('lowpass', 5000 * v, 1.1);
-    lp.frequency.setValueAtTime(5000 * v, t);
-    lp.frequency.exponentialRampToValueAtTime(260, t + 0.3);
-    const bg = ctx!.createGain();
-    bg.gain.setValueAtTime(0.0001, t);
-    bg.gain.exponentialRampToValueAtTime(1.3, t + 0.003);
-    bg.gain.exponentialRampToValueAtTime(0.3, t + 0.05);
-    bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
-    b.connect(lp).connect(bg);
-    out(bg, 1.0);
-    b.start(t, Math.random(), 0.5);
-    // sub thump 50-60Hz + a punchier upper knock
-    const sub = rnd(50, 60);
-    tone(t, 'sine', sub * 2.2, sub, 1.25, 0.32, 0.15, 0.002);
-    tone(t, 'sine', 160 * v, 70, 0.6, 0.09, 0, 0.001);
-    // late room slap off the far wall
-    noiseHit(t + rnd(0.07, 0.1), 'bandpass', 900 * v, 0.12, 0.25, 0.9, 0.8);
+    hot(() => {
+      const t = now();
+      const v = rnd(0.88, 1.12); // per-shot variation
+      // crack: sharp highpassed transient
+      const c = noise();
+      const hp = filt('highpass', 2200 * v, 0.8);
+      const cg = ctx!.createGain();
+      cg.gain.setValueAtTime(0.0001, t);
+      cg.gain.exponentialRampToValueAtTime(1.6, t + 0.0012);
+      cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+      c.connect(hp).connect(cg);
+      out(cg, 0.8);
+      c.start(t, Math.random(), 0.08);
+      // body: lowpassed noise with a falling cutoff
+      const b = noise();
+      const lp = filt('lowpass', 5000 * v, 1.1);
+      lp.frequency.setValueAtTime(5000 * v, t);
+      lp.frequency.exponentialRampToValueAtTime(260, t + 0.3);
+      const bg = ctx!.createGain();
+      bg.gain.setValueAtTime(0.0001, t);
+      bg.gain.exponentialRampToValueAtTime(1.3, t + 0.003);
+      bg.gain.exponentialRampToValueAtTime(0.3, t + 0.05);
+      bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+      b.connect(lp).connect(bg);
+      out(bg, 1.0);
+      b.start(t, Math.random(), 0.5);
+      // sub thump 50-60Hz + a punchier upper knock
+      const sub = rnd(50, 60);
+      tone(t, 'sine', sub * 2.2, sub, 1.25, 0.32, 0.15, 0.002);
+      tone(t, 'sine', 160 * v, 70, 0.6, 0.09, 0, 0.001);
+      // late room slap off the far wall
+      noiseHit(t + rnd(0.07, 0.1), 'bandpass', 900 * v, 0.12, 0.25, 0.9, 0.8);
+    });
   },
   ricochet() {             // shot deflected by tin star: metallic ping with a fast downward sweep
     if (!ready()) return;
@@ -577,12 +653,14 @@ export const sfx = {
   },
   stamp() {                // thick wooden THUNK
     if (!ready()) return;
-    const t = now();
-    tone(t, 'sine', 140, 48, 1.3, 0.26, 0.35, 0.002);
-    tone(t, 'triangle', 260, 120, 0.4, 0.07, 0.2, 0.001);
-    noiseHit(t, 'bandpass', 520, 0.9, 0.09, 0.4, 1.4);   // wood knock
-    noiseHit(t, 'lowpass', 1800, 0.5, 0.025, 0.2);         // contact snap
-    noiseHit(t + 0.012, 'bandpass', 230, 0.45, 0.16, 0.3, 2); // hollow box
+    hot(() => {
+      const t = now();
+      tone(t, 'sine', 140, 48, 1.3, 0.26, 0.35, 0.002);
+      tone(t, 'triangle', 260, 120, 0.4, 0.07, 0.2, 0.001);
+      noiseHit(t, 'bandpass', 520, 0.9, 0.09, 0.4, 1.4);   // wood knock
+      noiseHit(t, 'lowpass', 1800, 0.5, 0.025, 0.2);         // contact snap
+      noiseHit(t + 0.012, 'bandpass', 230, 0.45, 0.16, 0.3, 2); // hollow box
+    });
   },
   click() {                // revolver cylinder click / UI tick
     if (!ready()) return;
@@ -798,40 +876,42 @@ export const sfx = {
   },
   drawSting() {            // "DRAW!": cymbal swell into a low orchestral hit + one high whistle
     if (!ready()) return;
-    const t = now();
-    const hit = t + 0.45;
-    // cymbal swell (reverse-cymbal style)
-    const s = noise();
-    const hp = filt('highpass', 5200, 0.7);
-    const g = ctx!.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.3, hit - 0.01);
-    g.gain.linearRampToValueAtTime(0.0001, hit + 0.02);
-    s.connect(hp).connect(g);
-    out(g, 0.6);
-    s.start(t, Math.random() * 0.5, 0.5);
-    // the hit: low drum + brassy stab (Am) + crash
-    tone(hit, 'sine', 95, 38, 1.2, 0.7, 0.8, 0.002);
-    noiseHit(hit, 'lowpass', 1600, 0.8, 0.25, 0.9);
-    noiseHit(hit, 'highpass', 4500, 0.35, 0.8, 0.8);
-    const lp = filt('lowpass', 2400, 1);
-    lp.frequency.setValueAtTime(2400, hit);
-    lp.frequency.exponentialRampToValueAtTime(500, hit + 0.5);
-    const sg = ctx!.createGain();
-    sg.gain.setValueAtTime(0.0001, hit);
-    sg.gain.exponentialRampToValueAtTime(0.16, hit + 0.01);
-    sg.gain.exponentialRampToValueAtTime(0.0001, hit + 0.6);
-    lp.connect(sg);
-    out(sg, 0.8);
-    for (const m of [45, 52, 57, 60, 64]) {
-      const o = ctx!.createOscillator();
-      o.type = 'sawtooth';
-      o.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
-      o.detune.value = rnd(-8, 8);
-      o.connect(lp);
-      o.start(hit); o.stop(hit + 0.65);
-    }
-    whistle(hit + 0.08, 93, 0.6, 0.12, 0.7); // single high A
+    hot(() => {
+      const t = now();
+      const hit = t + 0.45;
+      // cymbal swell (reverse-cymbal style)
+      const s = noise();
+      const hp = filt('highpass', 5200, 0.7);
+      const g = ctx!.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, hit - 0.01);
+      g.gain.linearRampToValueAtTime(0.0001, hit + 0.02);
+      s.connect(hp).connect(g);
+      out(g, 0.6);
+      s.start(t, Math.random() * 0.5, 0.5);
+      // the hit: low drum + brassy stab (Am) + crash
+      tone(hit, 'sine', 95, 38, 1.2, 0.7, 0.8, 0.002);
+      noiseHit(hit, 'lowpass', 1600, 0.8, 0.25, 0.9);
+      noiseHit(hit, 'highpass', 4500, 0.35, 0.8, 0.8);
+      const lp = filt('lowpass', 2400, 1);
+      lp.frequency.setValueAtTime(2400, hit);
+      lp.frequency.exponentialRampToValueAtTime(500, hit + 0.5);
+      const sg = ctx!.createGain();
+      sg.gain.setValueAtTime(0.0001, hit);
+      sg.gain.exponentialRampToValueAtTime(0.16, hit + 0.01);
+      sg.gain.exponentialRampToValueAtTime(0.0001, hit + 0.6);
+      lp.connect(sg);
+      out(sg, 0.8);
+      for (const m of [45, 52, 57, 60, 64]) {
+        const o = ctx!.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
+        o.detune.value = rnd(-8, 8);
+        o.connect(lp);
+        o.start(hit); o.stop(hit + 0.65);
+      }
+      whistle(hit + 0.08, 93, 0.6, 0.12, 0.7); // single high A
+    });
   },
   hatPop() {               // hat drops onto a head: soft felt fwump
     if (!ready()) return;
@@ -907,33 +987,10 @@ export const sfx = {
     tone(tp, 'sine', 2730, 2720, 0.04, 0.25, 0.5, 0.001);
     noiseHit(tp, 'bandpass', 2000, 0.12, 0.02, 0.2, 2);
   },
-  win() {                  // victory: bright hammer clack -> big low boom -> 3-note rising whistle (<1.8s)
+  win() {                  // victory: the recorded sting if there is one, else a soft two-note bell "ding-ding" (<1 s)
     if (!ready()) return;
-    const t = now() + 0.02;
-    // hammer clack
-    noiseHit(t, 'highpass', 3800, 0.9, 0.014, 0.3);
-    tone(t, 'square', 2300, 1500, 0.08, 0.016, 0.2, 0.001);
-    noiseHit(t + 0.004, 'bandpass', 2600, 0.35, 0.02, 0.2, 3);
-    // boom
-    const b = t + 0.11;
-    tone(b, 'sine', 96, 36, 1.3, 0.9, 0.7, 0.003);
-    tone(b, 'sine', 180, 80, 0.4, 0.18, 0.3, 0.002);
-    const n = noise();
-    const lp = filt('lowpass', 1400, 0.9);
-    lp.frequency.setValueAtTime(1400, b);
-    lp.frequency.exponentialRampToValueAtTime(140, b + 0.6);
-    const ng = ctx!.createGain();
-    ng.gain.setValueAtTime(0.0001, b);
-    ng.gain.exponentialRampToValueAtTime(0.9, b + 0.004);
-    ng.gain.exponentialRampToValueAtTime(0.0001, b + 0.7);
-    n.connect(lp).connect(ng);
-    out(ng, 1.0);
-    n.start(b, Math.random(), 0.75);
-    // rising whistle A5 – C#6 – E6
-    const w = t + 0.42;
-    whistle(w, 81, 0.12, 0.13, 0.6);
-    whistle(w + 0.15, 85, 0.12, 0.13, 0.6);
-    whistle(w + 0.3, 88, 0.4, 0.15, 0.6);
+    if (playSting()) return;
+    synthWin();
   },
   tick() {                 // countdown tick (last 5s)
     if (!ready()) return;
@@ -1134,7 +1191,7 @@ function recordedThunder(k: number): boolean {
   // files are peak-normalized (-0.4 dBFS): scale by intensity, a touch duller when distant
   const lp = filt('lowpass', 2500 + k * k * 12000, 0.5);
   const g = ctx!.createGain();
-  g.gain.value = 0.3 + 0.55 * k;
+  g.gain.value = (0.3 + 0.55 * k) * (k >= 0.8 ? 0.7 : 0.85); // the big one peaks lower now
   s.connect(lp).connect(g);
   out(g, 0.2);
   s.start(t);
@@ -1171,7 +1228,7 @@ function rainChain() {
   // effects volume + mute, but after the compressor: shots / thunder would otherwise pump the steady bed
   // (a shot pulled the whole mix down ~12 dB for half a second, which is heard as the rain stuttering)
   const o = ctx!.createGain();
-  o.gain.value = muted || bgHidden ? 0 : volume * RAIN_MAKEUP;
+  o.gain.value = muted || bgHidden ? 0 : fxLevel() * RAIN_MAKEUP;
   input.connect(lp).connect(warm).connect(duck).connect(o).connect(ctx!.destination);
   rainBus = { input, duck, out: o };
   return rainBus;
@@ -1322,6 +1379,166 @@ function synthRain(): RainNodes {
     try { s.stop(); lfo.stop(); } catch { /* already stopped */ }
     fade.disconnect();
   });
+}
+
+/* ---- win: soft two-note bell "ding-ding" (G5 -> C6), short decays and a small reverb send, < 1 s ---- */
+function synthWin() {
+  const t = now() + 0.02;
+  const ding = (at: number, midi: number, peak: number) => {
+    const f = 440 * Math.pow(2, (midi - 69) / 12);
+    for (const [mul, a, d] of [[1, 1, 0.72], [2, 0.3, 0.38], [3.01, 0.1, 0.2], [4.17, 0.04, 0.1]] as const) {
+      tone(at, 'sine', f * mul, f * mul, peak * a, d, 0.12, 0.004);
+    }
+  };
+  ding(t, 79, 0.085);
+  ding(t + 0.17, 84, 0.075);
+}
+
+/* ---- recorded music + win sting (/media/*, listed in mediaManifest), streamed, never decoded whole ----
+ * Each listed file gets one <audio> element -> MediaElementAudioSourceNode -> own gain. Tracks loop on the
+ * music bus and crossfade (1.5 s) between 'lobby' (lobby / nominate / result, quieter in result) and
+ * 'showdown' (veto / slide / duel / roulette). The sting plays on the effects bus and dips the music under it.
+ * Hidden page: elements pause (and resume where they were). A load / play error falls back to the procedural
+ * music for that track (and to the synth ding for the sting). */
+type Track = 'lobby' | 'showdown';
+const TRACK_FILE: Record<Track, string> = { lobby: 'music_lobby.mp3', showdown: 'music_showdown.mp3' };
+const STING_FILE = 'sting_win.mp3';
+const MEDIA_FADE = 1.5;
+const RESULT_MEDIA_LEVEL = 0.6;
+const hasMedia = (n: string) => MEDIA_FILES.has(n) || MEDIA_FILES.has('/media/' + n) || MEDIA_FILES.has('media/' + n);
+const trackFor = (m: MusicMode): Track | null =>
+  m === 'off' ? null : m === 'lobby' || m === 'result' ? 'lobby' : 'showdown';
+interface MediaEl { el: HTMLAudioElement; g: GainNode; failed: boolean; stopTimer: number; target: number }
+const mediaEls = new Map<string, MediaEl>();
+let mediaBus: GainNode | null = null;
+let mediaCur: Track | null = null;
+
+function mediaEl(file: string, dest: AudioNode, loop: boolean): MediaEl | null {
+  let m = mediaEls.get(file);
+  if (m) return m;
+  if (!live() || !hasMedia(file)) return null;
+  try {
+    const el = new Audio();
+    el.preload = 'auto';
+    el.loop = loop;
+    el.src = `/media/${file}`;
+    const src = ctx!.createMediaElementSource(el);
+    const g = ctx!.createGain();
+    g.gain.value = 0;
+    src.connect(g).connect(dest);
+    m = { el, g, failed: false, stopTimer: 0, target: 0 };
+    const me = m;
+    el.addEventListener('error', () => { me.failed = true; if (loop) startMusic(); });
+    mediaEls.set(file, m);
+    return m;
+  } catch { return null; }
+}
+function trackEl(tr: Track): MediaEl | null {
+  if (!live()) return null;
+  if (!mediaBus) {
+    mediaBus = ctx!.createGain();
+    mediaBus.gain.value = MEDIA_TRIM;
+    mediaBus.connect(musicGain!);
+  }
+  return mediaEl(TRACK_FILE[tr], mediaBus, true);
+}
+/** the recording for this track is listed and hasn't failed */
+function mediaUsable(tr: Track): boolean {
+  if (!hasMedia(TRACK_FILE[tr])) return false;
+  const m = trackEl(tr);
+  return !!m && !m.failed;
+}
+function mediaPlaying(): boolean {
+  if (!mediaCur) return false;
+  const m = mediaEls.get(TRACK_FILE[mediaCur]);
+  return !!m && !m.failed && !m.el.paused;
+}
+function fadeTo(m: MediaEl, v: number) {
+  const t = now(), g = m.g.gain;
+  m.target = v;
+  g.cancelScheduledValues(t);
+  g.setValueAtTime(g.value, t);
+  g.linearRampToValueAtTime(v, t + MEDIA_FADE);
+}
+function playEl(m: MediaEl, onFail: () => void) {
+  const p = m.el.play();
+  if (p && typeof p.catch === 'function') p.catch((e: unknown) => {
+    // a pause() racing the play() isn't a failure; anything else (not allowed / not supported) is
+    if ((e as { name?: string })?.name === 'AbortError') return;
+    m.failed = true;
+    onFail();
+  });
+}
+/** crossfade to `tr` (null = no recorded music) at `level` */
+function setMediaTrack(tr: Track | null, level: number) {
+  if (!live()) return;
+  mediaCur = tr;
+  for (const k of Object.keys(TRACK_FILE) as Track[]) {
+    if (!hasMedia(TRACK_FILE[k])) continue;
+    const m = k === tr ? trackEl(k) : mediaEls.get(TRACK_FILE[k]);
+    if (!m) continue;
+    if (k === tr && !m.failed) {
+      clearTimeout(m.stopTimer); m.stopTimer = 0;
+      if (m.target !== level) fadeTo(m, level);
+      if (m.el.paused && !bgHidden) playEl(m, () => { if (mediaCur === k) startMusic(); });
+    } else if (m.target > 0 || (!m.el.paused && !m.stopTimer)) {
+      fadeTo(m, 0);
+      clearTimeout(m.stopTimer);
+      m.stopTimer = window.setTimeout(() => {
+        m.stopTimer = 0;
+        if (m.target === 0) { m.el.pause(); try { m.el.currentTime = 0; } catch { /* not seekable yet */ } }
+      }, MEDIA_FADE * 1000 + 150);
+    }
+  }
+}
+/** page hidden: pause every element where it is (startMusic() resumes the current track on return) */
+function pauseMedia() {
+  for (const m of mediaEls.values()) if (!m.el.paused) m.el.pause();
+}
+/** in the unlock gesture: create the listed elements and start / prime them, so iOS lets them play later */
+let primed = false;
+function primeMedia() {
+  if (!live() || primed) return;
+  primed = true;
+  for (const tr of Object.keys(TRACK_FILE) as Track[]) if (hasMedia(TRACK_FILE[tr])) trackEl(tr);
+  const sting = stingEl();
+  for (const m of [...mediaEls.values()]) {
+    if (m.failed || !m.el.paused || m.target > 0 || m === sting && stingBusy) continue;
+    // muted (gain 0) play + immediate pause: marks the element as user-activated
+    const p = m.el.play();
+    if (p && typeof p.then === 'function') p.then(() => { if (m.target === 0 && !(m === sting && stingBusy)) m.el.pause(); }).catch(() => {});
+  }
+  startMusic();
+}
+let stingBusy = false;
+let stingTimer = 0;
+function stingEl(): MediaEl | null {
+  return hasMedia(STING_FILE) ? mediaEl(STING_FILE, master!, false) : null;
+}
+/** plays the recorded win sting; false = not listed / failed (use the synth) */
+function playSting(): boolean {
+  const m = stingEl();
+  if (!m || m.failed) return false;
+  try { m.el.currentTime = 0; } catch { /* not loaded yet */ }
+  const t = now();
+  m.g.gain.cancelScheduledValues(t);
+  m.g.gain.setValueAtTime(STING_TRIM, t);
+  m.target = STING_TRIM;
+  stingBusy = true;
+  duckMusic(true);
+  const done = () => { stingBusy = false; clearTimeout(stingTimer); duckMusic(false); };
+  m.el.onended = done;
+  clearTimeout(stingTimer);
+  stingTimer = window.setTimeout(done, 8000); // backstop if 'ended' never fires
+  playEl(m, () => { done(); if (ready()) synthWin(); });
+  return true;
+}
+function duckMusic(on: boolean) {
+  if (!musicDuck || !ctx) return;
+  const g = musicDuck.gain, t = now();
+  g.cancelScheduledValues(t);
+  g.setValueAtTime(g.value, t);
+  g.setTargetAtTime(on ? 0.35 : 1, t, on ? 0.08 : 0.6);
 }
 
 /** Phase -> music mode. Home (undefined) and lobby/nominate -> 'lobby'. */

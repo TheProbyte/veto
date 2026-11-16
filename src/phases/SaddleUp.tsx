@@ -105,7 +105,7 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
       )}
       {!owned && (
         <div className="sad-buy">
-          <span>{pitched ? 'A pitched buy: nobody owns it yet.' : !meP?.steam || meP.steam.private ? "Can't see your library: own it?" : 'Not in your library.'}</span>
+          <span>{pitched ? 'Nobody owns it yet.' : !meP?.steam || meP.steam.private ? 'Own it?' : 'Not in your library.'}</span>
           <a href={store} target="_blank" rel="noreferrer">Buy on Steam</a>
           <a href={`${store}#game_area_purchase`} target="_blank" rel="noreferrer" title="Use 'Purchase as a gift' on the store page">Gift a copy</a>
         </div>
@@ -114,14 +114,14 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
         <div className="sad-host">
           {launch && (
             <button className="px-btn sad-go" title="3-2-1, then Steam opens for everyone ready" disabled={counting && !stale && left > -2000} onClick={() => { sfx.spurs(); send({ t: 'saddleUp' }); }}>
-              Saddle up! <small>3-2-1, then Steam opens for everyone ready</small>
+              Saddle up! <small>Launches for everyone ready</small>
             </button>
           )}
           {children}
         </div>
       ) : (
         <div className="wait-host sad-wait">
-          {launch ? <>When the posse's ready, the host calls "Saddle up!" </> : null}The host can call a rematch or another round.
+          Waiting on the host.
         </div>
       )}
 
@@ -134,7 +134,7 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
           {n <= 0 && (ready[me] === 'ready'
             ? <div className="sad-cd-sub">Opening Steam…</div>
             : <a className="px-btn sad-cd-store" href={store} target="_blank" rel="noreferrer">Get it on Steam</a>)}
-          {n > 0 && ready[me] !== 'ready' && <div className="sad-cd-sub">You're not marked ready: Steam won't open for you.</div>}
+          {n > 0 && ready[me] !== 'ready' && <div className="sad-cd-sub">Not ready: Steam won't open for you.</div>}
         </div>,
         document.body,
       )}

@@ -98,7 +98,7 @@ interface Section {
   step: number;
   stepDur: number;
   stopAt: number;    // no new steps at/after this time (Infinity while current)
-  doneAt?: number;   // result: when to hand back to the lobby groove
+  melody?: boolean;  // lobby groove: whistle the tune every other cycle (off in the result phase)
   play(t: number, step: number): void;
   nodes: AudioNode[];
   srcs: AudioScheduledSourceNode[];
@@ -190,20 +190,10 @@ export function createMusic(d: MusicDeps): MusicEngine {
     const ns = down ? notes : [...notes].reverse();
     ns.forEach((m, i) => pluck(t + i * spread, m, vel * rnd(0.85, 1.08), to, 1.8));
   }
-  function bell(t: number, f: number, peak: number, to: AudioNode) {
-    for (const [mult, a, dd] of [[1, 1, 1.6], [2.76, 0.3, 0.8], [5.4, 0.12, 0.4]] as const) {
-      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * mult;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(peak * a, t + 0.003);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dd);
-      o.connect(g).connect(to);
-      o.start(t); o.stop(t + dd + 0.05);
-      o.onended = () => g.disconnect();
-    }
-  }
-
   // ---------- sections ----------
+  /** result phase: the lobby groove, quieter and without the whistle (no cadence; the win ding is enough) */
+  const RESULT_LEVEL = 0.6;
+  const levelFor = (m: Kind) => (m === 'result' ? RESULT_LEVEL : 1);
   function groove(kind: 'lobby' | 'veto', t0: number): Section {
     const veto = kind === 'veto';
     const bpm = veto ? 92 : 76;
@@ -229,8 +219,8 @@ export function createMusic(d: MusicDeps): MusicEngine {
     const hat = veto ? biquad('highpass', 7000, 0.7, out, nodes) : null;
     const wsend = gain(0.55, wet, nodes);
     const chords = veto ? VETO_CHORDS : CHORDS;
-    return {
-      kind, out, wet, next: t0, step: 0, stepDur, stopAt: Infinity, nodes, srcs,
+    const sec: Section = {
+      kind, out, wet, next: t0, step: 0, stepDur, stopAt: Infinity, nodes, srcs, melody: true,
       play(t, step) {
         const s = step % 16;
         const bar = Math.floor(step / 16) % 8;
@@ -253,12 +243,13 @@ export function createMusic(d: MusicDeps): MusicEngine {
           if (s === 6) kick(t, 0.36, out);           // ... and 2&
           if (s % 2 === 0) noiseHit(t, s % 4 === 2 ? 0.07 : 0.04, 0.03, hat!);
           else if (s === 15) noiseHit(t, 0.025, 0.02, hat!);
-        } else if (cycle % 2 === 1 && s % 2 === 0) {
+        } else if (sec.melody && cycle % 2 === 1 && s % 2 === 0) {
           const n = MELODY.get(bar * 8 + (s >> 1));
           if (n) whistle(ctx, d.noise, t, n[0], n[1] * stepDur * 2 * 0.92, 0.075, out, wsend);
         }
       },
     };
+    return sec;
   }
 
   function roulette(t0: number): Section {
@@ -300,43 +291,6 @@ export function createMusic(d: MusicDeps): MusicEngine {
     };
   }
 
-  function result(t0: number): Section {
-    const nodes: AudioNode[] = [];
-    const out = gain(1, bus, nodes);
-    const wet = gain(1, verbIn, nodes);
-    const send = gain(0.45, wet, nodes);
-    const gLp = biquad('lowpass', 3600, 0.7, out, nodes);
-    gLp.connect(send);
-    const gtr = biquad('peaking', 220, 1.2, gLp, nodes);
-    gtr.gain.value = 4;
-    const bassLp = biquad('lowpass', 520, 0.8, out, nodes);
-    const A = [45, 52, 57, 61, 64, 69];
-    const E = [40, 47, 52, 56, 59, 64];
-    const tc = t0 + 1.9; // let the win() sting + Result's nail thunks (~0.95-1.55s) finish first
-    strum(tc, A, 0.3, gtr);
-    strum(tc + 0.5, A, 0.16, gtr, false);
-    strum(tc + 0.75, A, 0.2, gtr);
-    strum(tc + 1.0, E, 0.3, gtr);
-    strum(tc + 1.5, E, 0.16, gtr, false);
-    strum(tc + 1.75, E, 0.2, gtr);
-    strum(tc + 2.0, A, 0.38, gtr, true, 0.03);
-    bassNote(tc, 33, 0.4, 0.9, bassLp);
-    bassNote(tc + 1.0, 28, 0.4, 0.9, bassLp);
-    bassNote(tc + 2.0, 33, 0.5, 1.6, bassLp);
-    kick(tc + 2.0, 0.5, out);
-    const hook: [number, number, number][] = [
-      [0, 76, 0.2], [0.25, 81, 0.2], [0.5, 85, 0.42], [1.0, 83, 0.2], [1.25, 80, 0.2], [1.5, 83, 0.42], [2.0, 81, 1.1],
-    ];
-    for (const [at, m, dur] of hook) whistle(ctx, d.noise, tc + at, m, dur, 0.085, out, send);
-    bell(tc + 2.0, 1760, 0.05, send);
-    bell(tc + 2.0, 880, 0.06, out);
-    return {
-      kind: 'result', out, wet, next: t0, step: 0, stepDur: 0.25, stopAt: Infinity, nodes, srcs: [],
-      doneAt: tc + 3.4,
-      play() {},
-    };
-  }
-
   // ---------- engine ----------
   function fadeOut(sec: Section | null, t: number) {
     if (!sec) return;
@@ -355,15 +309,25 @@ export function createMusic(d: MusicDeps): MusicEngine {
   function start(kind: Kind) {
     const t = ctx.currentTime + 0.05;
     fadeOut(cur, t);
-    const sec = kind === 'roulette' ? roulette(t) : kind === 'result' ? result(t) : groove(kind, t);
-    if (kind !== 'result') {
-      for (const g of [sec.out.gain, sec.wet.gain]) {
-        g.setValueAtTime(0, t);
-        g.linearRampToValueAtTime(1, t + 1);
-      }
+    const sec = kind === 'roulette' ? roulette(t) : groove(kind === 'veto' ? 'veto' : 'lobby', t);
+    sec.melody = kind !== 'result';
+    const lvl = levelFor(kind);
+    for (const g of [sec.out.gain, sec.wet.gain]) {
+      g.setValueAtTime(0, t);
+      g.linearRampToValueAtTime(lvl, t + 1);
     }
     cur = sec;
     ensureTimer();
+  }
+  /** lobby <-> result: same groove, only the level and the whistle change (no restart) */
+  function relevel(sec: Section, kind: Kind) {
+    const t = ctx.currentTime + 0.02;
+    sec.melody = kind !== 'result';
+    for (const g of [sec.out.gain, sec.wet.gain]) {
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(levelFor(kind), t + 1.5);
+    }
   }
 
   function tick() {
@@ -383,7 +347,6 @@ export function createMusic(d: MusicDeps): MusicEngine {
           sec.step++;
         }
       }
-      if (cur && cur.doneAt !== undefined && requested === 'result' && now >= cur.doneAt) start('lobby');
       if (fading.length) {
         fading = fading.filter((s) => {
           if (now < s.stopAt + 2.5) return true;
@@ -426,7 +389,6 @@ export function createMusic(d: MusicDeps): MusicEngine {
   return {
     setMode(m) {
       if (broken || m === requested) return;
-      const prev = requested;
       requested = m;
       if (m === 'off') {
         fadeOut(cur, ctx.currentTime + 0.02);
@@ -434,8 +396,8 @@ export function createMusic(d: MusicDeps): MusicEngine {
         ensureTimer(); // keep ticking to dispose the faded section
         return;
       }
-      // result already handed back to the lobby groove: keep it playing
-      if (m === 'lobby' && cur?.kind === 'lobby' && prev === 'result') return;
+      // lobby <-> result share the lobby groove: keep it playing, just move the level
+      if ((m === 'lobby' || m === 'result') && cur?.kind === 'lobby') { relevel(cur, m); return; }
       start(m);
     },
     mode: () => requested,

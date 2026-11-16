@@ -48,7 +48,7 @@ export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | '
       } catch (e) {
         if (ac.signal.aborted) return;
         setHits([]);
-        setErr("Couldn't reach the general store.");
+        setErr("Couldn't reach the store.");
       } finally {
         if (!ac.signal.aborted) setBusy(false);
       }
@@ -78,16 +78,16 @@ export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | '
   const nominate = (p: Pitch, e: MouseEvent<HTMLElement>) => {
     const mineNow = (nomBy.get(p.appid) || []).includes(me);
     if (!mineNow && myCount >= MAX_NOMS) { sfx.click(); return; }
-    tossOrTake(p.appid, mineNow, e.currentTarget.closest('.nh-pcard')?.querySelector('.nh-game-art') ?? null, send);
+    tossOrTake(p.appid, mineNow, e.currentTarget.closest('.nm-pcard')?.querySelector('.nm-art') ?? null, send);
   };
 
   const voters = (p: Pitch, v: 'buy' | 'nope') =>
     Object.entries(p.votes || {}).filter(([, x]) => x === v).map(([id]) => byId.get(id)).filter(Boolean) as Player[];
 
   return (
-    <section className="nh-pitches">
-      <h3 className="nh-tier pitch"><span>Pitched buys:</span> worth the money? <em>{state.pitches.length}</em></h3>
-      <div className="nh-sub nh-pitch-note">Nobody owns it yet? Pitch a store game. Pitched buys need two shots to kill.</div>
+    <section className="nm-buy" aria-label="Buy something new">
+      <h3 className="nm-sec-h">Buy something new {state.pitches.length > 0 && <em>{state.pitches.length}</em>}</h3>
+      <p className="nm-hint">Pitch a store game. It takes two shots to kill.</p>
 
       <div className="nh-psearch">
         <input className="nh-input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the Steam store…"
@@ -108,17 +108,18 @@ export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | '
                 <span className="nh-hit-name" title={h.name}>{h.name}</span>
                 {h.price && <span className="nh-hit-price">{h.price}</span>}
                 <button type="button" className="nh-btn nh-btn-xs" disabled={done || have} onClick={() => pitch(h)}>
-                  {done ? 'Pitched' : have ? 'In pool' : 'Pitch it'}
+                  {done ? 'Pitched' : have ? 'Owned' : 'Pitch it'}
                 </button>
               </li>
             );
           })}
         </ul>
       )}
-      {!busy && !err && q.trim().length >= 2 && hits.length === 0 && <div className="nh-empty sm">Store's got nothing by that name.</div>}
+      {!busy && !err && q.trim().length >= 2 && hits.length === 0 && <div className="nm-empty sm">Nothing by that name.</div>}
 
       {state.pitches.length > 0 && (
-        <div className="nh-pgrid">
+        <div className="nm-felt nm-felt-buy">
+        <div className="nm-grid">
           {state.pitches.map((p) => {
             const by = nomBy.get(p.appid) || [];
             const mine = by.includes(me);
@@ -128,51 +129,41 @@ export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | '
             const nope = voters(p, 'nope');
             const pitcher = byId.get(p.by);
             const others = by.filter((id) => id !== me).map((id) => byId.get(id)).filter(Boolean) as Player[];
+            const names = (l: Player[]) => (l.length ? l.map((v) => (v.id === me ? 'You' : v.name)).join(', ') : 'nobody yet');
             return (
-              <div key={p.appid} className={`nh-pcard ${mine ? 'is-mine' : ''} ${by.length ? 'is-nom' : ''} ${myVote ? `voted-${myVote}` : ''}`}>
-                <div className="nh-game-art">
-                  <Cover appid={p.appid} name={p.name} kind="header" />
-                  {mine && <span className="nh-ribbon">YOURS</span>}
-                  {p.discount ? <span className="nh-disc">-{p.discount}%</span> : null}
-                  <span className="nh-ptag">PITCH</span>
-                </div>
-                <div className="nh-game-body">
-                  <div className="nh-game-name" title={p.name}>{p.name}</div>
-                  <div className="nh-game-meta">
-                    <span className="nh-price">{p.price || 'Price ?'}</span>
-                    <span className="nh-pby"><Avatar p={pitcher} size={14} /> {pitcher?.name ?? 'someone'}</span>
-                  </div>
-                  <div className="nh-votes">
-                    <button type="button" className={`nh-vote buy ${myVote === 'buy' ? 'on' : ''}`} aria-pressed={myVote === 'buy'} onClick={() => vote(p, 'buy')}>
-                      I'd buy it <b>{buy.length}</b>
+              <div key={p.appid} className={`nm-card nm-pcard ${mine ? 'is-mine' : ''} ${by.length ? 'is-nom' : ''} ${myVote ? `voted-${myVote}` : ''}`}>
+                <span className="nm-face">
+                  <span className="nm-art">
+                    <Cover appid={p.appid} name={p.name} kind="header" />
+                    {p.discount ? <span className="nm-disc">-{p.discount}%</span> : null}
+                    <span className="nm-ptag">{p.price || '$ ?'}</span>
+                    {others.length > 0 && <span className="nm-by">{others.slice(0, 3).map((o) => <Avatar key={o.id} p={o} size={16} />)}</span>}
+                  </span>
+                  <span className="nm-name" title={p.name}>{p.name}</span>
+                  <span className="nm-meta"><span className="nm-hrs">Pitched by <b>{p.by === me ? 'you' : pitcher?.name ?? 'someone'}</b></span>
+                    {p.by === me && (
+                      <button type="button" className="nm-withdraw" onClick={() => { sfx.unlock(); sfx.whoosh(); send({ t: 'unpitch', appid: p.appid }); }}>withdraw</button>
+                    )}
+                  </span>
+                  <span className="nh-votes">
+                    <button type="button" className={`nh-vote buy ${myVote === 'buy' ? 'on' : ''}`} aria-pressed={myVote === 'buy'} title={`Would buy: ${names(buy)}`} onClick={() => vote(p, 'buy')}>
+                      I'd buy <b>{buy.length}</b>
                       {burst?.appid === p.appid && burst.v === 'buy' && <span key={burst.n} className="nh-coins" aria-hidden><i /><i /><i /></span>}
                     </button>
-                    <button type="button" className={`nh-vote nope ${myVote === 'nope' ? 'on' : ''}`} aria-pressed={myVote === 'nope'} onClick={() => vote(p, 'nope')}>
+                    <button type="button" className={`nh-vote nope ${myVote === 'nope' ? 'on' : ''}`} aria-pressed={myVote === 'nope'} title={`Nope: ${names(nope)}`} onClick={() => vote(p, 'nope')}>
                       Nope <b>{nope.length}</b>
                       {burst?.appid === p.appid && burst.v === 'nope' && <span key={burst.n} className="nh-spit" aria-hidden><i /><i /><i /></span>}
                     </button>
-                  </div>
-                  {(buy.length > 0 || nope.length > 0) && (
-                    <div className="nh-voters">
-                      {buy.map((v) => <span key={v.id} className="nh-voter buy" title={`${v.name}: buy`}><Avatar p={v} size={16} /></span>)}
-                      {nope.map((v) => <span key={v.id} className="nh-voter nope" title={`${v.name}: nope`}><Avatar p={v} size={16} /></span>)}
-                    </div>
-                  )}
-                  {others.length > 0 && (
-                    <div className="nh-noms">{others.map((o) => <Avatar key={o.id} p={o} size={16} />)}<small>tossed in</small></div>
-                  )}
-                  <div className="nh-pacts">
-                    <button type="button" className={`nh-btn nh-btn-xs ${mine ? 'is-done' : ''}`} disabled={full} onClick={(e) => nominate(p, e)} aria-pressed={mine}>
-                      {mine ? 'On the table ✓' : 'Toss it in'}
-                    </button>
-                    {p.by === me && (
-                      <button type="button" className="nh-linkbtn" onClick={() => { sfx.unlock(); sfx.whoosh(); send({ t: 'unpitch', appid: p.appid }); }}>withdraw</button>
-                    )}
-                  </div>
-                </div>
+                  </span>
+                  <button type="button" className={`nh-btn nh-btn-xs nm-toss ${mine ? 'is-done' : ''}`} disabled={full} onClick={(e) => nominate(p, e)} aria-pressed={mine}>
+                    {mine ? 'On the table ✓' : 'Toss it in'}
+                  </button>
+                  {mine && <span className="nm-stamp" aria-hidden>✓ Yours</span>}
+                </span>
               </div>
             );
           })}
+        </div>
         </div>
       )}
     </section>

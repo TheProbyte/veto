@@ -4,6 +4,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { RoomState, ShotEvent } from '../../shared/types';
 import { PixelArt } from '../pixel/PixelCanvas';
+import { FINE_H, FINE_W } from '../pixel/pixelize';
 import TinStar from '../scene/TinStar';
 import { sfx } from '../sfx';
 import './gameplay.css';
@@ -44,8 +45,8 @@ export function useShotExtras(state: RoomState, skew: number) {
     const words = s.lastWords ?? (s.kind === 'hit' || s.kind === 'misfire' ? game?.lastWords : undefined);
     const reduce = reduced();
     const slowMs = s.slowmo ? (reduce ? 1100 : 1800) : 0;
-    const wordsAt = s.slowmo ? 450 : 250;
-    const wordsMs = 2200;
+    const wordsAt = s.slowmo ? 500 : 300;
+    const wordsMs = 2800; // the server waits 3.2s before the next fuse: room to read
     const total = Math.max(slowMs + 100, words ? wordsAt + wordsMs + 100 : 0, s.revenge ? 1800 : 0, s.kind === 'ricochet' ? 2100 : 0);
     if (s.slowmo && !reduce) { heartbeat(); window.setTimeout(heartbeat, 620); window.setTimeout(heartbeat, 1240); }
     mount(
@@ -72,10 +73,10 @@ function Extras({ shot, name, actor, owner, words, slowMs, wordsAt, wordsMs }: {
     <div className="gpx" aria-live="polite">
       {slowMs > 0 && (
         <div className="gpx-slow" style={{ '--sd': `${slowMs}ms` } as CSSProperties}>
-          <div className="gpx-slow-label">{name} · last one before the finale</div>
+          <div className="gpx-slow-label">{name} · last one out</div>
           <div className="gpx-slow-box">
-            <div className="gpx-half gpx-l"><PixelArt appid={shot.appid} name={name} holes={1} /></div>
-            <div className="gpx-half gpx-r"><PixelArt appid={shot.appid} name={name} holes={1} /></div>
+            <div className="gpx-half gpx-l"><PixelArt appid={shot.appid} name={name} w={FINE_W} h={FINE_H} /></div>
+            <div className="gpx-half gpx-r"><PixelArt appid={shot.appid} name={name} w={FINE_W} h={FINE_H} /></div>
             <div className="gpx-shards">{SHARDS.map((x, i) => <i key={i} style={{ '--a': `${x.a}deg`, '--d': `${x.d}px` } as CSSProperties} />)}</div>
             <div className="gpx-bullet" />
             <div className="gpx-slow-stamp">NAH.</div>
@@ -98,14 +99,15 @@ export function LastWords({ text, name, ms, slow }: { text: string; name: string
   const [n, setN] = useState(() => (reduced() ? text.length : 0));
   useEffect(() => {
     if (n >= text.length) return;
-    const step = Math.max(14, Math.min(45, 900 / Math.max(1, text.length)));
+    // a touch slower than before, but every quip is fully typed by ~1.3s so the rest of the bubble's life is reading time
+    const step = Math.max(18, Math.min(55, 1300 / Math.max(1, text.length)));
     const t = window.setTimeout(() => setN((k) => k + 1), step);
     if (n % 3 === 0) sfx.click();
     return () => clearTimeout(t);
   }, [n, text]);
   return (
     <div className={`gpx-words ${slow ? 'slow' : ''}`} style={{ '--wd': `${ms}ms` } as CSSProperties}>
-      <small>{name}'s last words</small>
+      <small>{name}:</small>
       {text.slice(0, n)}<span className="caret">{n < text.length ? '▌' : ''}</span>
     </div>
   );

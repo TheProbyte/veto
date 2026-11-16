@@ -20,9 +20,9 @@ function Status({ p }: { p: Player }) {
   if (p.bot) return <span className="nh-chip bot">BOT</span>;
   if (!p.connected) return <span className="nh-chip off">Offline</span>;
   if (p.linking) return <span className="nh-chip wait"><i className="nh-spin" /> Checking…</span>;
-  if (p.steam?.private) return <span className="nh-chip warn">Private library ⚠</span>;
-  if (p.steam) return <span className="nh-chip ok">Linked ({p.steam.gameCount} games) ✓</span>;
-  return <span className="nh-chip none">Not linked yet</span>;
+  if (p.steam?.private) return <span className="nh-chip warn">Private ⚠</span>;
+  if (p.steam) return <span className="nh-chip ok">{p.steam.gameCount} games ✓</span>;
+  return <span className="nh-chip none">Not linked</span>;
 }
 
 const FINALES: { v: Settings['finale']; label: string; short: string }[] = [
@@ -39,6 +39,7 @@ export function rulesSummary(s: Settings) {
   const parts = [`${s.turnSecs}s`, `${s.picks} pick${s.picks === 1 ? '' : 's'}`, fin];
   if (s.nominations === 'draft') parts.push('Card draft');
   if (s.sheriff) parts.push('Sheriff');
+  if (!s.explain) parts.push('Quiet barkeep');
   return parts.join(' · ');
 }
 
@@ -58,7 +59,7 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
   };
   useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
   // follow the server unless I have an edit in flight
-  const sk = `${server.turnSecs}|${server.picks}|${server.finale}|${server.cylinderAt}|${server.nominations}|${server.sheriff}`;
+  const sk = `${server.turnSecs}|${server.picks}|${server.finale}|${server.cylinderAt}|${server.nominations}|${server.sheriff}|${server.explain}`;
   useEffect(() => { if (!pend.current) setDraft(server); }, [sk]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (patch: Partial<Settings>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -119,7 +120,7 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
                 <button key={v} type="button" className={s.nominations === v ? 'on' : ''} aria-pressed={s.nominations === v} onClick={() => { sfx.click(); set({ nominations: v }); }}>{label}</button>
               ))}
             </div>
-            <small className="nh-rule-help">{s.nominations === 'draft' ? "Everyone's dealt 5 cards: play, burn or trade them" : 'Everyone picks freely from the shared pool'}</small>
+            {s.nominations === 'draft' && <small className="nh-rule-help">Dealt 5 cards: play, burn or trade</small>}
           </div>
           <div className="nh-rule-row nh-rule-wide">
             <span className="nh-rule-name">Sheriff</span>
@@ -128,8 +129,22 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
                 <button key={label} type="button" className={s.sheriff === v ? 'on' : ''} aria-pressed={s.sheriff === v} onClick={() => { sfx.click(); set({ sheriff: v }); }}>{label}</button>
               ))}
             </div>
-            <small className="nh-rule-help">{s.sheriff ? "One player gets a badge: one Pardon, one Jail. The posse can vote 'em out." : 'No law in this town'}</small>
+            {s.sheriff && <small className="nh-rule-help">One Pardon, one Jail. The posse can vote 'em out.</small>}
           </div>
+          <div className="nh-rule-row">
+            <span className="nh-rule-name">Barkeep explains</span>
+            <div className="nh-seg" role="group" aria-label="Barkeep explains each step">
+              {([[true, 'On'], [false, 'Off']] as const).map(([v, label]) => (
+                <button key={label} type="button" className={s.explain === v ? 'on' : ''} aria-pressed={s.explain === v} onClick={() => { sfx.click(); set({ explain: v }); }}>{label}</button>
+              ))}
+            </div>
+          </div>
+          {host && (
+            <div className="nh-rule-row nh-rule-reset">
+              <span className="nh-rule-name">Table history</span>
+              <ResetBtn empty={!state.history.length && !(state.record?.rounds > 0)} onReset={() => send({ t: 'resetRecord' })} />
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -148,6 +163,26 @@ function KickBtn({ name, onKick }: { name: string; onKick: () => void }) {
         if (armed) { clearTimeout(t.current); setArmed(false); onKick(); return; }
         setArmed(true); clearTimeout(t.current); t.current = window.setTimeout(() => setArmed(false), 2600);
       }}>{armed ? 'Sure?' : 'Kick'}</button>
+  );
+}
+
+/** 2-tap reset of the table's history + posse record (host only) */
+function ResetBtn({ empty, onReset }: { empty: boolean; onReset: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const [done, setDone] = useState(false);
+  const t = useRef(0);
+  useEffect(() => () => clearTimeout(t.current), []);
+  useEffect(() => { if (!empty) setDone(false); }, [empty]);
+  if (done && empty) return <span className="nh-reset-done">Wiped clean ✓</span>;
+  return (
+    <button type="button" className={`nh-btn nh-btn-sm nh-reset ${armed ? 'is-armed' : ''}`} disabled={empty}
+      aria-label={armed ? 'Confirm: reset table history' : 'Reset table history'}
+      onClick={() => {
+        sfx.unlock(); sfx.click();
+        clearTimeout(t.current);
+        if (armed) { setArmed(false); setDone(true); onReset(); return; }
+        setArmed(true); t.current = window.setTimeout(() => setArmed(false), 3000);
+      }}>{empty ? 'Nothing to reset' : armed ? 'Tap again to wipe' : 'Reset history'}</button>
   );
 }
 
@@ -217,7 +252,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
         <div className="nh-label">Your outfit</div>
         <div className="nh-me nh-me-look">
           {mine?.style ? <span className="nh-me-bust"><BustPreview look={mine.style} scale={1} /></span> : <Avatar p={mine} size={44} />}
-          <div className="nh-me-txt"><b>{mine?.name}</b><span>{mine?.style ? 'Dressed for the occasion' : 'Still in travelling clothes'}</span></div>
+          <div className="nh-me-txt"><b>{mine?.name}</b></div>
           <button type="button" className="nh-btn nh-btn-sm" onClick={() => { sfx.unlock(); sfx.click(); setDressing(true); }}>Change outfit</button>
         </div>
       </section>
@@ -239,7 +274,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
             <Avatar p={mine} size={44} />
             <div className="nh-me-txt">
               <b>{steam.name}</b>
-              <span>{steam.private ? 'Library hidden' : `${steam.gameCount} games in the saddlebag`}</span>
+              <span>{steam.private ? 'Library hidden' : `${steam.gameCount} games`}</span>
             </div>
             <button type="button" className="nh-linkbtn" onClick={() => { sfx.click(); send({ t: 'unlink' }); }}>unlink</button>
           </div>
@@ -247,8 +282,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
         {mine?.linkError && <div className="nh-err">{mine.linkError}</div>}
         {steam?.private && (
           <div className="nh-help">
-            <b>Your game library is hidden.</b>
-            <p>On Steam: <em>Profile → Edit Profile → Privacy Settings</em> → set <em>'Game details'</em> to <strong>Public</strong> (and untick <em>'Always keep my total playtime private'</em>). Then hit Re-check.</p>
+            <p><b>Library hidden.</b> Steam → <em>Edit Profile → Privacy</em>: set <em>Game details</em> to <strong>Public</strong>, then Re-check.</p>
             <button type="button" className="nh-btn nh-btn-sm" disabled={!!mine?.linking}
               onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'link', profile: steam.steamid }); }}>
               {mine?.linking ? <><i className="nh-spin" /> Checking</> : 'Re-check'}
@@ -266,7 +300,6 @@ export default function Lobby({ state, me, send }: RoomProps) {
           <header className="nh-head">
             <div className="nh-kicker">Table {state.code} <span className="nh-step">Step 1 of 2</span></div>
             <h2 className="nh-h">Who are you, stranger?</h2>
-            <div className="nh-sub">Pick your look. Everyone at the table sees it.</div>
           </header>
           <CharacterCreator initial={mine?.style} first={!mine?.style} stats={mine?.stats ?? emptyStats()}
             onSave={(style) => send({ t: 'style', style })} onDone={() => { setDressing(false); document.querySelector('.saloon-front')?.scrollTo({ top: 0 }); }} />
@@ -295,7 +328,6 @@ export default function Lobby({ state, me, send }: RoomProps) {
         <section className="nh-sec nh-practice">
           <div className="nh-label">Practice table</div>
           <div className="nh-practice-row">
-            <span className="nh-practice-txt">Try it solo or show the judges.</span>
             <div className="nh-seg" role="group" aria-label="Hire practice bots">
               <span className="nh-seg-k">Hire</span>
               {[1, 2, 3].map((n) => (
@@ -341,9 +373,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
                 Deal 'em in →
               </button>
               <div className="nh-hint">
-                {canStart
-                  ? `${ready.length} of ${state.players.length} ready. Stragglers can still link later.`
-                  : 'Somebody needs a linked, public Steam library before we deal.'}
+                {canStart ? `${ready.length}/${state.players.length} linked` : 'Link a public Steam library first'}
               </div>
             </div>
           ) : (

@@ -112,6 +112,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
     tempo: () => (sfx.isMuted() || sfx.getMusicVolume() < 0.01 ? 0 : BPM[sfx.getMusicMode()] ?? 0),
     onBolt: (big) => { window.setTimeout(() => sfx.thunder(big ? 0.85 : 0.3 + Math.random() * 0.35), big ? 500 : 900 + Math.random() * 1800); },
   };
+  if (import.meta.env.DEV) (window as unknown as { __nahFx: SceneFX }).__nahFx = sceneFx.current; // TEMP-VERIFY
   const push = (e: SceneFX['queue'][number]) => { const q = sceneFx.current.queue; q.push(e); if (q.length > 24) q.splice(0, q.length - 24); };
   const phaseRef = useRef(state.phase);
   phaseRef.current = state.phase;

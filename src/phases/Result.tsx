@@ -18,7 +18,9 @@ const NAILS: [string, string][] = [['8px', '8px'], ['calc(100% - 22px)', '8px'],
 import { BUZZ, buzz } from '../scene/haptics';
 import { useShotExtras } from './ShotExtras';
 import SaddleUp from './SaddleUp';
+import { settingsOf } from './Lobby';
 import './gameplay.css';
+import './panels.css';
 
 type Tab = 'badges' | 'stats' | 'record' | 'history';
 
@@ -89,10 +91,28 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
   const hasRecord = !!rec && rec.rounds > 0;
   let badgeN = 0;
 
+  // how it was won: the finale that decided it, who tossed it in, what it survived
+  const fin = settingsOf(state).finale;
+  const slide = state.slide?.winner === res.appid ? state.slide : undefined;
+  const how = duel?.winner === res.appid ? (duelMs !== undefined && duelMs >= 0 ? `Quick-draw · ${duelMs} ms` : 'Quick-draw')
+    : slide ? 'Whiskey slide'
+    : fin === 'cylinder' && state.roulette ? 'Revolver roulette'
+    : 'Last one standing';
+  const slider = slide ? slide.champs[slide.games.indexOf(res.appid)] : undefined;
+  const winBy = state.board.find((b) => b.appid === res.appid)?.by ?? [];
+  const dodged = state.shots.filter((s) => s.appid === res.appid && (s.kind === 'ricochet' || s.kind === 'crack')).length;
+  const fired = state.shots.filter((s) => s.kind !== 'misfire').length;
+  const wonBits = [
+    winBy.length ? `Tossed in by ${winBy.map((id) => (id === me ? 'you' : nameOf(id))).join(', ')}` : 'Dealt by the house',
+    slider ? `slid by ${slider === me ? 'you' : nameOf(slider)}` : '',
+    dodged ? `dodged ${dodged} shot${dodged === 1 ? '' : 's'}` : '',
+    fired ? `${fired} fired` : '',
+  ].filter(Boolean);
+
   // phones: everything past the first screen sits behind a small tab strip (CSS shows every panel on desktop)
   const tabs: { k: Tab; label: string; n?: number }[] = [];
   if (badgeRows.length) tabs.push({ k: 'badges', label: 'Badges', n: badgeRows.reduce((a, r) => a + r.list.length, 0) });
-  if (stats.length || never || (duelMs !== undefined && duelMs >= 0)) tabs.push({ k: 'stats', label: 'Stats' });
+  tabs.push({ k: 'stats', label: 'Stats' });
   if (hasRecord) tabs.push({ k: 'record', label: 'Record' });
   if (hist.length) tabs.push({ k: 'history', label: 'History' });
   const panel = (k: Tab) => ({ id: `rx-${k}`, className: `rx-panel ${tab === k ? 'open' : ''}` });
@@ -120,7 +140,7 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
       <div className="result-actions">
         <a className="btn-launch px-btn" href={`steam://run/${res.appid}`}>LAUNCH</a>
         <a className="store-link" href={`https://store.steampowered.com/app/${res.appid}`} target="_blank" rel="noreferrer">
-          Don't own it? Store page
+          Store page
         </a>
       </div>
 
@@ -141,6 +161,23 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
           ))}
         </div>
       )}
+
+      <div className="rx-side">
+      <div {...panel('stats')}>
+        <div className="rx-won px-box">
+          <div className="gp-sec">How it was won</div>
+          <b className="rx-won-how">{how}</b>
+          <span className="rx-won-sub">{wonBits.join(' · ')}</span>
+        </div>
+        {(stats.length > 0 || never) && (
+          <div className="stat-chips">
+            {stats.map((s) => <div className="chip px-box" key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
+            {never && (
+              <div className="chip px-box gp-never"><span>Never survives</span><b>{never.name}: {never.noms}× tossed, 0 wins</b></div>
+            )}
+          </div>
+        )}
+      </div>
 
       {badgeRows.length > 0 && (
         <div {...panel('badges')}>
@@ -163,25 +200,11 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
         </div>
       )}
 
-      {(stats.length > 0 || never || (duelMs !== undefined && duelMs >= 0)) && (
-        <div {...panel('stats')}>
-          {duelMs !== undefined && duelMs >= 0 && <div className="gp-duelwin">Won by quick-draw (<b>{duelMs} ms</b>)</div>}
-          {(stats.length > 0 || never) && (
-            <div className="stat-chips">
-              {stats.map((s) => <div className="chip px-box" key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
-              {never && (
-                <div className="chip px-box gp-never"><span>Never survives</span><b>{never.name}: nominated {never.noms}×, never won</b></div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {hasRecord && rec && (
         <div {...panel('record')}>
           <div className="gp-record px-box">
             <div className="gp-sec">Posse record</div>
-            <div className="gp-record-top"><b>{rec.rounds}</b> round{rec.rounds === 1 ? '' : 's'} played at this table</div>
+            <div className="gp-record-top"><b>{rec.rounds}</b> round{rec.rounds === 1 ? '' : 's'} here</div>
             <div className="gp-record-grid">
               {rec.wins?.length > 0 && (
                 <div>
@@ -196,7 +219,7 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
                 </div>
               )}
               {longest && longest.best > 1 && (
-                <div className="gp-streak">Longest losing streak: <b>{longest.name}</b>, {longest.best} rounds without a win{longest.cur === longest.best ? ' (and counting)' : ''}</div>
+                <div className="gp-streak">Longest dry spell: <b>{longest.name}</b>, {longest.best} rounds{longest.cur === longest.best ? ' and counting' : ''}</div>
               )}
             </div>
           </div>
@@ -215,7 +238,7 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
           </div>
         </div>
       )}
-
+      </div>
     </div>
   );
 }

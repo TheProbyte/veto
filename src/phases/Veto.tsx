@@ -1,9 +1,10 @@
 import { DEFAULT_SETTINGS } from '../../shared/types';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { PixelArt, PixelSprite } from '../pixel/PixelCanvas';
-import { crosshairDraw } from '../pixel/sprites';
-import { PAL } from '../pixel/palette';
+import { crosshairDraw, drawCrack, drawFlash, drawSmoke, holeAt, type DrawFn } from '../pixel/sprites';
+import { PAL, hashStr, rnd } from '../pixel/palette';
 import { bayer } from '../pixel/dither';
+import { FINE_H, FINE_W, pixelize } from '../pixel/pixelize';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import TinStar from '../scene/TinStar';
@@ -11,6 +12,9 @@ import { BUZZ, buzz } from '../scene/haptics';
 import { useShotExtras } from './ShotExtras';
 import SheriffPanel from './SheriffPanel';
 import './gameplay.css';
+
+/** server: pause between a shot and the next fuse (shot FX + last words) */
+const SHOT_PAUSE = 3200;
 
 export default function Veto({ state, me, send, skew, on }: RoomProps) {
   const alive = state.board.filter((g) => g.alive);
@@ -21,23 +25,38 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
   const center = alive[ci];
   const shooterId = state.turnOrder[state.turnIdx];
   const shooter = state.players.find((p) => p.id === shooterId);
-  const myTurn = shooterId === me && state.turnDeadline > 0;
   const mine = state.players.find((p) => p.id === me);
   const nameOf = (id?: string) => state.players.find((p) => p.id === id)?.name ?? '???';
   const settings = state.settings ?? DEFAULT_SETTINGS;
   const turnMs = Math.max(5, settings.turnSecs || 30) * 1000;
   // how many games survive the shootout: 'last' = 1, 'duel' = 2, 'cylinder' / 'slide' = cylinderAt
   const finaleN = settings.finale === 'last' ? 1 : settings.finale === 'duel' ? 2 : (settings.cylinderAt ?? 3);
-  const finaleTail = settings.finale === 'last' ? 'last one standing wins' : settings.finale === 'duel' ? 'then a quick-draw duel decides'
-    : settings.finale === 'slide' ? 'then a whiskey slide decides' : 'then the cylinder decides';
-  const finaleNow = settings.finale === 'last' ? 'last one standing' : settings.finale === 'duel' ? 'the quick-draw decides'
-    : settings.finale === 'slide' ? 'the whiskey slide decides' : 'the cylinder decides';
+  const finaleTail = settings.finale === 'last' ? 'last one wins' : settings.finale === 'duel' ? 'then a duel'
+    : settings.finale === 'slide' ? 'then the whiskey slide' : 'then the cylinder';
   /** the tin star is private: you only ever know about your own */
   const starred = (g?: { shieldedBy?: string[] }) => !!g?.shieldedBy?.includes(me);
-  const revengeOn = myTurn && mine?.revengeOn ? mine.revengeOn : undefined;
   useShotExtras(state, skew);
 
-  useEffect(() => { if (myTurn) { sfx.cock(); buzz(BUZZ.myTurn); } }, [myTurn, state.turnIdx]);
+  // the pause after a shot (server holds the next fuse for SHOT_PAUSE): the carousel stays hushed, the gun holstered
+  const shotT = state.lastShot?.t ?? 0;
+  const [hush, setHush] = useState(() => Date.now() + skew < shotT + SHOT_PAUSE - 200);
+  useEffect(() => {
+    const left = shotT + SHOT_PAUSE - 200 - (Date.now() + skew);
+    if (left <= 0) { setHush(false); return; }
+    setHush(true);
+    const t = window.setTimeout(() => setHush(false), left);
+    return () => clearTimeout(t);
+  }, [shotT]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const myTurn = shooterId === me && state.turnDeadline > 0;
+  const canFire = myTurn && !hush && !!center;
+  const revengeOn = myTurn && mine?.revengeOn ? mine.revengeOn : undefined;
+
+  useEffect(() => { if (myTurn && !hush) { sfx.cock(); buzz(BUZZ.myTurn); } }, [myTurn, hush, state.turnIdx]);
+
+  // warm the fine grid for every live game so re-centering never flashes a placeholder
+  const aliveKey = alive.map((g) => g.appid).join(',');
+  useEffect(() => { for (const g of alive) void pixelize(g.appid, 'box', FINE_W, FINE_H); }, [aliveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const aimAt = useCallback((delta: number) => {
     if (!myTurn || n < 2) return;
@@ -46,10 +65,24 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
     send({ t: 'aim', appid: g.appid });
   }, [myTurn, n, ci, alive, send]);
 
+  // one shot per turn, however it's triggered (pointer release, Space, Enter on the focused gun)
+  const turnKey = `${state.turnIdx}:${state.turnDeadline}`;
+  const latch = useRef('');
+  const [bang, setBang] = useState(0); // recoil / flash animation key
   const fire = useCallback(() => {
-    if (!myTurn || !center) return;
+    if (!canFire || latch.current === turnKey) return false;
+    latch.current = turnKey;
+    setBang(Date.now());
     send({ t: 'fire', appid: center.appid });
-  }, [myTurn, center, send]);
+    return true;
+  }, [canFire, turnKey, center, send]);
+  // the server didn't take it (socket blip): unlock after a moment if the turn hasn't moved on
+  useEffect(() => {
+    if (!bang) return;
+    const k = turnKey;
+    const t = window.setTimeout(() => { if (latch.current === k) latch.current = ''; }, 2500);
+    return () => clearTimeout(t);
+  }, [bang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // keyboard
   const keyRef = useRef({ aimAt, fire });
@@ -66,7 +99,7 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // swipe (touch, pen or mouse): ~30px horizontal flick aims; any real drag cancels the tap-to-fire click
+  // swipe (touch, pen or mouse): ~30px horizontal flick aims; any real drag cancels the tap-to-aim click
   const drag = useRef<{ x: number; y: number; id: number } | null>(null);
   const swiped = useRef(false);
   const onDown = (e: React.PointerEvent) => {
@@ -88,7 +121,12 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
 
   const [epi, setEpi] = useState<number | null>(null);
   const epiGame = dead.find((g) => g.appid === epi);
-  const canShield = !!mine && !mine.shieldUsed && !!center && !starred(center);
+  const starFree = !!mine && !mine.shieldUsed;
+  const pin = (appid: number) => {
+    if (!starFree) return;
+    sfx.click();
+    send({ t: 'shield', appid });
+  };
 
   // tin star spins in and pins on when a shield lands (not for stars already pinned when we arrived)
   const starSeen = useRef<Set<number> | null>(null);
@@ -109,23 +147,24 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
     starSeen.current = now;
   }, [shieldKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const shooterName = shooter?.name ?? 'Someone';
+  const instr = n <= finaleN ? <span>Finale!</span>
+    : hush ? (shooterId === me ? <span className="your-shot">You're up next</span> : <span><b>{shooterName}</b> is up next</span>)
+    : myTurn ? <span className="your-shot">{revengeOn ? 'Revenge! ' : 'Your turn: '}shoot a game you <u>DON'T</u> want</span>
+    : <span><b>{shooterName}</b> is aiming…</span>;
+
   return (
-    <div className={`veto ${myTurn ? 'my-turn' : ''} ${revengeOn ? 'revenge' : ''}`}>
+    <div className={`veto vt ${myTurn ? 'my-turn' : ''} ${revengeOn ? 'revenge' : ''} ${hush ? 'vt-hushed' : ''}`}>
       <div className="veto-head">
-        <div className="veto-count">
-          <b>{n}</b> left {n > finaleN ? <span>· shoot down to {finaleN}, {finaleTail}</span> : <span>· {finaleNow}</span>}
-          {n > finaleN && <span className="gp-fin-short">· shoot down to {finaleN}</span>}
-        </div>
-        <div className="veto-status">
-          {myTurn ? <span className="your-shot">Your shot, partner.</span> : <span><b>{shooter?.name ?? 'Someone'}</b> is taking aim…</span>}
-        </div>
+        <div className="veto-status vt-instr" aria-live="polite">{instr}</div>
+        <div className="veto-count vt-count"><b>{n}</b> left{n > finaleN && <span> · down to {finaleN}, {finaleTail}</span>}</div>
         {revengeOn && <div className="gp-revenge-tag">REVENGE on {nameOf(revengeOn)}</div>}
-        {state.turnDeadline > 0 && <Fuse deadline={state.turnDeadline} skew={skew} mine={myTurn} turnMs={turnMs} />}
+        {state.turnDeadline > 0 && <Fuse deadline={state.turnDeadline} skew={skew} mine={myTurn && !hush} turnMs={turnMs} />}
       </div>
 
       {state.sheriff && <SheriffPanel state={state} me={me} send={send} skew={skew} on={on} finaleN={finaleN} />}
 
-      <div className="carousel" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onEnd} onPointerCancel={onEnd}>
+      <div className={`carousel ${hush ? 'vt-hush' : ''}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onEnd} onPointerCancel={onEnd}>
         {alive.map((g, i) => {
           let d = i - ci;
           if (n > 2) { d = ((d % n) + n) % n; if (d > n / 2) d -= n; }
@@ -137,54 +176,67 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
             zIndex: 10 - a,
             pointerEvents: a > 2 ? 'none' : 'auto',
           } as CSSProperties;
+          const isC = d === 0;
+          const mineStar = starred(g);
           return (
             <div
               key={g.appid}
-              className={`cbox ${d === 0 ? 'center' : ''}`}
+              className={`cbox ${isC ? 'center' : ''}`}
               style={style}
               onClick={() => {
                 if (swiped.current) { swiped.current = false; return; }
-                if (d === 0) fire(); else if (myTurn) { sfx.whoosh(); send({ t: 'aim', appid: g.appid }); }
+                if (!isC && myTurn && !hush) { sfx.whoosh(); send({ t: 'aim', appid: g.appid }); }
               }}
             >
               <div className="cbox-bob">
                 <div className={`gbox ${g.cracks ? 'cracked' : ''}`}>
-                  <PixelArt appid={g.appid} name={g.name} holes={g.cracks ? 1 : 0} cracked={!!g.cracks} />
+                  {isC
+                    ? <PixelArt appid={g.appid} name={g.name} w={FINE_W} h={FINE_H} className="vt-fine" />
+                    : <PixelArt appid={g.appid} name={g.name} holes={g.cracks ? 1 : 0} cracked={!!g.cracks} />}
+                  {isC && !!g.cracks && <PixelSprite draw={crackFor(g.appid)} w={36} h={54} className="vt-crack" />}
                   {g.tier === 'pitch' && <span className="gbox-pitch">PITCH</span>}
                   {!!g.cracks && <span className="gbox-more">1 more</span>}
-                  {starred(g) && (pinning.has(g.appid)
-                    ? <span className="px-star-wrap px-star-pin"><TinStar size={46} className="gbox-star" /></span>
-                    : <TinStar size={46} className="gbox-star" />)}
+                  {a <= 1 && (mineStar || starFree) && (
+                    <button
+                      type="button"
+                      className={`vt-badge ${mineStar ? 'pinned' : 'open'} ${isC ? 'big' : 'small'}`}
+                      disabled={!mineStar && !starFree}
+                      aria-pressed={mineStar}
+                      aria-label={mineStar ? `Your star protects ${g.name}` : `Protect ${g.name} (only you'll know)`}
+                      title={mineStar ? 'Your star is here (only you know)' : "Protect this game (only you'll know)"}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onPointerUp={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); if (!mineStar) pin(g.appid); }}
+                    >
+                      {mineStar && pinning.has(g.appid)
+                        ? <span className="px-star-pin vt-badge-pin"><TinStar size={isC ? 40 : 30} /></span>
+                        : <TinStar size={isC ? 40 : 30} />}
+                    </button>
+                  )}
                 </div>
-                {d === 0 && <div className="cbox-name">{g.name}</div>}
-                {d === 0 && starred(g) && <div className="cbox-shield mine">Your star: a shot here ricochets</div>}
-                {d === 0 && (g.by.length ? <div className="cbox-by">brought by {g.by.map(nameOf).join(', ')}</div> : <div className="cbox-by">dealt by the house</div>)}
+                {isC && <div className="cbox-name">{g.name}</div>}
+                {isC && <div className="cbox-by">{g.by.length ? `by ${g.by.map(nameOf).join(', ')}` : 'house pick'}</div>}
               </div>
-              {d === 0 && <Crosshair hot={myTurn} revenge={!!revengeOn} />}
+              {isC && <Crosshair hot={canFire} revenge={!!revengeOn} />}
             </div>
           );
         })}
         {n === 0 && <div className="veto-empty">Smoke clears…</div>}
       </div>
 
-      {(myTurn || canShield) && (
-        <div className={`veto-controls ${myTurn ? '' : 'idle'}`}>
-          <button className="btn-arrow turn-btn px-btn" disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(-1)} aria-label="Aim left">◀</button>
-          <button className={`btn-fire turn-btn px-btn ${revengeOn ? 'avenge' : ''}`} disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={fire}>{myTurn ? (revengeOn ? 'AVENGE' : 'FIRE') : 'WAIT'}</button>
-          <button className="btn-arrow turn-btn px-btn" disabled={!myTurn} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
-          {canShield && (
-            <button
-              className="btn-shield px-btn"
-              onClick={() => send({ t: 'shield', appid: center.appid })}
-              title="One per player. A shot at this game will ricochet."
-              aria-label={`Pin tin star on ${center.name}`}
-            >
-              <TinStar size={20} /><span className="lbl-long">Pin tin star on {center.name}</span><span className="lbl-short">Star</span>
-            </button>
-          )}
-        </div>
-      )}
-      {myTurn && <div className="veto-hint">← → to aim · Space to fire · swipe on mobile</div>}
+      <div className={`vt-gunbar ${canFire ? 'live' : 'idle'}`}>
+        <button className="vt-arrow px-btn" disabled={!canFire || n < 2} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(-1)} aria-label="Aim left">◀</button>
+        <Revolver
+          live={canFire}
+          revenge={!!revengeOn}
+          bang={bang}
+          onFire={fire}
+          label={canFire ? (revengeOn ? 'AVENGE' : 'FIRE') : hush ? '' : `Waiting on ${shooterName}`}
+          aimName={center?.name}
+        />
+        <button className="vt-arrow px-btn" disabled={!canFire || n < 2} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
+        {canFire && <div className="vt-hint">◀ ▶ aim · Space fires</div>}
+      </div>
 
       {dead.length > 0 && (
         <div className="graveyard">
@@ -212,11 +264,149 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
   );
 }
 
+/** bullet hole + crack overlay for a cracked pitch on the fine grid (drawn at the coarse grid so it reads) */
+const crackCache = new Map<number, DrawFn>();
+function crackFor(appid: number): DrawFn {
+  let f = crackCache.get(appid);
+  if (!f) {
+    const seed = hashStr(String(appid)) % 997;
+    f = (c, w, h) => {
+      holeAt(c, 6 + Math.floor(rnd(seed, 0, 3) * (w - 12)), 8 + Math.floor(rnd(seed, 0, 4) * (h - 16)));
+      drawCrack(c, w, h);
+    };
+    crackCache.set(appid, f);
+  }
+  return f;
+}
+
 const CROSS_COLD = crosshairDraw('rgba(232,213,181,.7)');
 const CROSS_HOT = crosshairDraw('#ff3b2f');
 
 function Crosshair({ hot, revenge }: { hot: boolean; revenge?: boolean }) {
   return <PixelSprite draw={hot ? CROSS_HOT : CROSS_COLD} w={33} h={33} className={`crosshair ${hot ? 'hot' : ''} ${revenge ? 'revenge' : ''}`} />;
+}
+
+/* ---------------- the revolver (fires at the centered game) ---------------- */
+
+const RW = 36, RH = 72;
+/** a single-action revolver seen from the side, barrel up: gunmetal frame, fluted cylinder, walnut grip, hammer */
+const revolverDraw = (cocked: boolean, red: boolean): DrawFn => (c) => {
+  const r = (x: number, y: number, w: number, h: number, col: string) => { c.fillStyle = col; c.fillRect(x, y, w, h); };
+  const M0 = PAL.metal0, M1 = PAL.metal1, M2 = PAL.metal2, M3 = PAL.metal3, M4 = PAL.metal4, INK = PAL.ink;
+  // --- barrel (x 15..22) ---
+  r(15, 2, 8, 26, INK);
+  r(16, 3, 1, 24, M4); r(17, 3, 2, 24, M3); r(19, 3, 2, 24, M2); r(21, 3, 1, 24, M1);
+  r(17, 1, 4, 2, INK); r(18, 0, 2, 2, M3); // front sight
+  r(17, 3, 4, 2, M0); r(18, 3, 2, 1, INK); // muzzle bore
+  for (let y = 6; y < 26; y += 3) if (bayer(17, y) > 0.4) r(17, y, 1, 1, M4); // polish glints
+  // ejector housing along the right side
+  r(22, 8, 4, 20, INK); r(23, 9, 2, 18, M2); r(23, 9, 1, 18, M3); r(23, 11, 2, 1, M1);
+  // barrel band / forcing cone
+  r(13, 26, 14, 4, INK); r(14, 27, 12, 2, M2); r(14, 27, 12, 1, M3);
+  // --- cylinder (x 11..28, y 30..44) ---
+  r(12, 30, 16, 15, INK); r(11, 31, 18, 13, INK);
+  r(12, 31, 16, 13, M2);
+  r(13, 31, 2, 13, M4); r(15, 31, 2, 13, M3); r(24, 31, 3, 13, M1);
+  for (const fx of [18, 22]) { r(fx, 32, 1, 11, M0); r(fx + 1, 32, 1, 11, M3); } // flutes
+  r(12, 34, 16, 1, M1); r(12, 40, 16, 1, M1);
+  r(14, 32, 1, 1, PAL.white); // specular
+  // --- frame / recoil shield (y 44..53) ---
+  r(13, 44, 14, 10, INK); r(14, 45, 12, 8, M2); r(14, 45, 12, 1, M3); r(14, 45, 1, 8, M4); r(24, 46, 2, 7, M1);
+  r(16, 48, 2, 2, PAL.lamp1); r(16, 48, 1, 1, PAL.lamp0); // brass screw
+  // --- hammer (left side) ---
+  if (cocked) {
+    r(8, 47, 6, 5, INK); r(9, 48, 5, 3, M3); r(9, 48, 5, 1, M4);
+    r(4, 50, 6, 4, INK); r(5, 51, 4, 2, M2); r(5, 51, 1, 1, M4); // spur pulled back
+  } else {
+    r(10, 44, 4, 6, INK); r(11, 45, 3, 4, M3); r(11, 45, 1, 4, M4);
+    r(8, 43, 4, 3, INK); r(9, 44, 2, 1, M2); // spur resting forward
+  }
+  // --- trigger guard + trigger (right side) ---
+  r(26, 47, 5, 2, INK); r(30, 47, 2, 10, INK); r(26, 55, 5, 2, INK);
+  r(27, 48, 3, 1, M3); r(30, 49, 1, 6, M2);
+  if (cocked) { r(26, 50, 2, 1, M3); r(27, 51, 1, 2, M2); } else { r(26, 49, 3, 1, M3); r(28, 50, 1, 3, M2); }
+  // --- grip (walnut, angled down-right) ---
+  for (let y = 53; y < RH; y++) {
+    const off = Math.floor((y - 53) / 6);
+    const x0 = 13 + off, x1 = 26 + off;
+    r(x0, y, x1 - x0, 1, INK);
+    for (let x = x0 + 1; x < x1 - 1; x++) {
+      const grain = Math.sin((x - off) * 1.7 + y * 0.35) + (rnd(x, y, 61) - 0.5) * 0.9;
+      const checker = (x + y) % 2 === 0 && y > 57 && y < RH - 4 && x > x0 + 2 && x < x1 - 3;
+      let col: string = grain > 0.7 ? PAL.wood4 : grain < -0.8 ? PAL.wood2 : PAL.wood3;
+      if (checker) col = PAL.wood2;
+      if (x === x0 + 1) col = M3; // backstrap
+      if (x === x0 + 2 && !checker) col = PAL.wood4;
+      c.fillStyle = col; c.fillRect(x, y, 1, 1);
+    }
+  }
+  r(20, 62, 2, 2, PAL.lamp1); r(20, 62, 1, 1, PAL.lamp0); // grip screw
+  if (red) { c.fillStyle = 'rgba(255,40,30,.28)'; c.fillRect(11, 26, 18, 28); }
+};
+const GUN = {
+  rest: revolverDraw(false, false), cocked: revolverDraw(true, false),
+  restR: revolverDraw(false, true), cockedR: revolverDraw(true, true),
+};
+const PUFFS = [[0, 0, 0], [-10, -6, 90], [9, -12, 180]];
+
+function Revolver({ live, revenge, bang, onFire, label, aimName }: {
+  live: boolean; revenge: boolean; bang: number; onFire: () => boolean; label: string; aimName?: string;
+}) {
+  const [cocked, setCocked] = useState(false);
+  const ptr = useRef<number | null>(null);
+  useEffect(() => { if (!live) { setCocked(false); ptr.current = null; } }, [live]);
+  // Space / keyboard fire: show the hammer fall too
+  const [kick, setKick] = useState(0);
+  useEffect(() => {
+    if (!bang) return;
+    setKick(bang); setCocked(false);
+    const t = window.setTimeout(() => setKick((k) => (k === bang ? 0 : k)), 900);
+    return () => clearTimeout(t);
+  }, [bang]);
+  const down = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!live || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    ptr.current = e.pointerId;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* */ }
+    setCocked(true);
+    sfx.click();
+    buzz([8]);
+  };
+  const up = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (ptr.current !== e.pointerId) return;
+    ptr.current = null;
+    if (!onFire()) setCocked(false);
+  };
+  const cancel = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (ptr.current !== e.pointerId) return;
+    ptr.current = null;
+    setCocked(false);
+  };
+  const draw = revenge ? (cocked ? GUN.cockedR : GUN.restR) : (cocked ? GUN.cocked : GUN.rest);
+  return (
+    <div className={`vt-gun ${live ? 'up' : 'down'} ${cocked ? 'cocked' : ''} ${revenge ? 'red' : ''}`}>
+      <button
+        type="button"
+        className="vt-gun-hit"
+        disabled={!live}
+        aria-label={live ? `Fire at ${aimName ?? 'the centered game'}` : label || 'Holstered'}
+        onPointerDown={down} onPointerUp={up} onPointerCancel={cancel} onLostPointerCapture={cancel}
+        onContextMenu={(e) => e.preventDefault()}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onFire(); } }}
+      >
+        <span className="vt-gun-body" key={kick || 'still'} data-kick={kick ? 1 : 0}>
+          <PixelSprite draw={draw} w={RW} h={RH} className="vt-gun-sp" />
+          {kick > 0 && (
+            <>
+              <PixelSprite draw={drawFlash} w={21} h={21} className="vt-flash" />
+              {PUFFS.map(([x, y, d], i) => <PixelSprite key={i} draw={drawSmoke} w={18} h={14} className="vt-smoke" style={{ '--x': `${x}px`, '--y': `${y}px`, animationDelay: `${d}ms` } as CSSProperties} />)}
+            </>
+          )}
+        </span>
+      </button>
+      {label && <div className={`vt-gun-lbl ${live ? 'live' : ''}`}>{label}</div>}
+    </div>
+  );
 }
 
 const FW = 96, FH = 12;

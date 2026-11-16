@@ -15,6 +15,9 @@ export interface Pixelized { cv: HTMLCanvasElement; url: string; src: 'box' | 'h
 /** default target grids (art pixels) */
 export const GRID: Record<CoverKind, [number, number]> = { box: [36, 54], header: [64, 30], square: [48, 48] };
 
+/** the veto's centered box (and its shot FX) use this much finer grid so covers stay recognisable */
+export const FINE_W = 90, FINE_H = 135;
+
 const cache = new Map<string, Promise<Pixelized | null>>();
 const done = new Map<string, Pixelized | null>();
 
@@ -85,6 +88,11 @@ const SALOON = [PAL.ink, PAL.wood1, PAL.wood2, PAL.wood3, PAL.wood4, PAL.lamp0, 
 
 export function processImage(img: CanvasImageSource & { naturalWidth?: number; naturalHeight?: number; width?: number | SVGAnimatedLength; height?: number | SVGAnimatedLength },
   gw: number, gh: number, sat = 1.15, colours = 13): HTMLCanvasElement {
+  // big grids (the veto's centered box, ~90x135) get a gentler treatment: more colours, softer dither,
+  // less contrast and no edge darkening, so the cover stays recognisable while still reading as pixel art.
+  // Small grids (<= 48x72, every other screen) are unchanged.
+  const fine = gw * gh >= 6000;
+  if (fine) { colours = Math.max(colours, 30); sat = Math.min(sat, 1.08); }
   const iw = (img.naturalWidth || (img.width as number)) || 1, ih = (img.naturalHeight || (img.height as number)) || 1;
   // cover-crop to the grid aspect (biased slightly up: titles/logos tend to sit high on box art)
   const ta = gw / gh, ia = iw / ih;
@@ -119,21 +127,21 @@ export function processImage(img: CanvasImageSource & { naturalWidth?: number; n
     const l = 0.299 * R[i] + 0.587 * G[i] + 0.114 * B[i];
     const f = (v: number) => {
       const s = l + (v - l) * sat;
-      return Math.max(0, Math.min(255, (s - meanL) * 1.12 + meanL));
+      return Math.max(0, Math.min(255, (s - meanL) * (fine ? 1.05 : 1.12) + meanL));
     };
-    R[i] = Math.min(255, f(R[i]) * 1.03); G[i] = f(G[i]); B[i] = f(B[i]) * 0.96;
+    R[i] = Math.min(255, f(R[i]) * (fine ? 1.015 : 1.03)); G[i] = f(G[i]); B[i] = f(B[i]) * (fine ? 0.98 : 0.96);
   }
   // 3) palette from the image itself (median cut), nudged toward the saloon palette
   const pal = medianCut(R, G, B, colours).map((c) => {
     let best = SALOON[0], bd = 1e9;
     for (const s of SALOON) { const d = dist(c, s); if (d < bd) { bd = d; best = s; } }
-    const t = 0.16;
+    const t = fine ? 0.05 : 0.16;
     return [c[0] + (best[0] - c[0]) * t, c[1] + (best[1] - c[1]) * t, c[2] + (best[2] - c[2]) * t] as Col;
   });
   // ensure there's a proper dark for outlines
   pal.push(darkest(pal).map((v) => v * 0.45) as Col);
   // 4) ordered dither: Bayer offset, then nearest palette colour
-  const spread = 34;
+  const spread = fine ? 12 : 34;
   const q = new Uint8Array(N);
   for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
     const i = y * gw + x;
@@ -144,7 +152,7 @@ export function processImage(img: CanvasImageSource & { naturalWidth?: number; n
   const lum = pal.map((c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]);
   const out = new Uint8Array(q);
   const dk = pal.length - 1;
-  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+  if (!fine) for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
     const i = y * gw + x, l = lum[q[i]];
     let mx = 0;
     if (x + 1 < gw) mx = Math.max(mx, lum[q[i + 1]] - l);
@@ -162,7 +170,7 @@ export function processImage(img: CanvasImageSource & { naturalWidth?: number; n
     const col = pal[out[i]];
     // 1px darkened rim around the whole cover
     const x = i % gw, y = (i / gw) | 0;
-    const e = x === 0 || y === 0 || x === gw - 1 || y === gh - 1 ? 0.62 : 1;
+    const e = x === 0 || y === 0 || x === gw - 1 || y === gh - 1 ? (fine ? 0.75 : 0.62) : 1;
     id.data[i * 4] = col[0] * e; id.data[i * 4 + 1] = col[1] * e; id.data[i * 4 + 2] = col[2] * e; id.data[i * 4 + 3] = 255;
   }
   c.putImageData(id, 0, 0);
