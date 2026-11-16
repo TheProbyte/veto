@@ -16,6 +16,7 @@ export type NarrKey =
   | 'vote' | 'golf' | 'horse' | 'how_vote' | 'how_golf' | 'how_horse'
   | 'vote_revolver' | 'vote_slide' | 'vote_golf' | 'vote_horse'
   | 'horse_perfect' | 'horse_miss' | 'horse_ride' | 'golf_ace' | 'golf_water' | 'mini_win' | 'mini_close'
+  | 'taunt_coward' | 'taunt_fav'
   | 'how_lobby' | 'how_nominate' | 'how_draft' | 'how_veto' | 'how_star' | 'how_slide' | 'how_cylinder' | 'how_duel' | 'how_result';
 
 export interface NarrLine { id: string; text: string; direction?: string }
@@ -221,6 +222,14 @@ export const NARRATOR: Record<NarrKey, { when: string; lines: NarrLine[] }> = {
   ] },
   mini_close: { when: 'Minigame decided by a hair (top two scores very close)', lines: [
     { id: 'mini_close_1', text: 'Close one. Real close.', direction: 'tense' },
+  ] },
+  taunt_coward: { when: 'Someone shoots a game they own but barely played (≤ 2 h)', lines: [
+    { id: 'taunt_coward_1', text: "Barely played it and you're shootin' it? Coward.", direction: 'mocking' },
+    { id: 'taunt_coward_2', text: "Two hours in and you already hate it. Classic.", direction: 'dry' },
+  ] },
+  taunt_fav: { when: "Someone shoots their own most-played game (50 h+, the most at the table)", lines: [
+    { id: 'taunt_fav_1', text: "Hundreds of hours, and you pull the trigger? Cold blooded.", direction: 'shocked' },
+    { id: 'taunt_fav_2', text: "Shootin' your own favorite. I've seen everything now.", direction: 'baffled' },
   ] },
   how_vote: { when: 'EXPLAIN: finale vote', lines: [
     { id: 'how_vote_1', text: 'Pick how we settle it, and which game you play for. Lock it in.', direction: 'clear' },

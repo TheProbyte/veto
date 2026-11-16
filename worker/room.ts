@@ -25,7 +25,7 @@ const NARR_PRI: Partial<Record<NarrKey, number>> = {
   kill: 1, crack: 2, misfire: 2, fuse_low: 2, first_blood: 3, spree: 4, slowmo: 5,
   draw: 6, cylinder: 6, rematch: 6, ricochet: 7, revenge: 8, duel: 7, duel_foul: 8, duel_win: 8, result: 9, repeat: 9,
   slide: 7, slide_fall: 7, slide_close: 7, slide_win: 8, vote: 7, golf: 7, horse: 7, sheriff: 6, pardon: 7, jail: 6, ousted: 8,
-  draft: 6, trade: 4, burn: 3, saddle: 9, straggler: 7,
+  draft: 6, trade: 4, burn: 3, saddle: 9, straggler: 7, taunt_coward: 3, taunt_fav: 4,
   how_lobby: 6, how_nominate: 6, how_draft: 6, how_veto: 6, how_star: 6, how_slide: 6, how_cylinder: 6, how_duel: 7, how_result: 6,
   how_vote: 6, how_golf: 6, how_horse: 6,
   vote_revolver: 8, vote_slide: 8, vote_golf: 8, vote_horse: 8,
@@ -1115,7 +1115,7 @@ export class Room extends DurableObject<Env> {
       const id = 'bot:' + Math.random().toString(36).slice(2, 10);
       let games = base.filter(() => Math.random() < 0.75);
       if (games.length < 3) games = base.slice(0, 3);
-      const lib: OwnedGame[] = games.map(([appid, gname]) => ({ appid, name: gname, mins: rnd(0, 6000), mins2w: Math.random() < 0.15 ? 60 : 0 }));
+      const lib: OwnedGame[] = games.map(([appid, gname]) => ({ appid, name: gname, mins: rnd(0, 6000), mins2w: Math.random() < 0.15 ? 60 : 0, last: Math.random() < 0.2 ? 0 : Math.floor(Date.now() / 1000) - rnd(0, 600) * 86400 }));
       this.libs.set(id, lib);
       await this.ctx.storage.put(`lib:${id}`, lib);
       s.players.push({
@@ -1325,6 +1325,16 @@ export class Room extends DurableObject<Env> {
     }
   }
 
+  /** Steam-powered taunts: shooting a game you barely played, or your own favourite */
+  taunt(pid: string, appid: number) {
+    const pg = this.s.pool.find((x) => x.appid === appid);
+    if (!pg || !(pid in (pg.hoursBy ?? {}))) return;
+    const mine = pg.hoursBy[pid] ?? 0;
+    const top = Math.max(0, ...Object.values(pg.hoursBy));
+    if (mine <= 2) { if (Math.random() < 0.6) this.narr('taunt_coward'); }
+    else if (mine >= 50 && mine >= top) this.narr('taunt_fav');
+  }
+
   /** a deliberate trigger pull (human or bot) */
   fire(pid: string, g: BoardGame) {
     const p = this.s.players.find((x) => x.id === pid);
@@ -1332,6 +1342,7 @@ export class Room extends DurableObject<Env> {
     if (p?.revengeOn) { revenge = true; p.revengeOn = undefined; }
     if (p && !p.bot) (this.x.fireMs[pid] ??= []).push(Math.max(0, Date.now() - this.x.turnStart));
     this.shoot(pid, g, 'hit', revenge);
+    if (!revenge) this.taunt(pid, g.appid);
     if (p?.bot && Math.random() < 0.1) {
       this.job({ at: Date.now() + 900, k: 'bemote', ph: this.s.phase, pid, emote: pick(['laugh', 'yeehaw', 'tip'] as EmoteId[]) });
     }
@@ -1837,7 +1848,6 @@ export class Room extends DurableObject<Env> {
     s.launch = { ready: {} } satisfies Launch;
     for (const b of s.players.filter((p) => p.bot)) this.job({ at: Date.now() + rnd(1000, 3000), k: 'bready', ph: 'result', pid: b.id });
     this.narr(repeat > 0 ? 'repeat' : 'result');
-    this.explain('how_result', 7200);
     if (ns && Math.random() < 0.5) this.job({ at: Date.now() + 4500, k: 'narr', ph: 'result', key: 'never_survive' });
 
     // lifetime stats (humans only)
@@ -2016,22 +2026,23 @@ export class Room extends DurableObject<Env> {
     const n = linked.length;
     if (!n) { s.pool = []; s.poolLoading = false; this.broadcast(); return; }
 
-    type Agg = { name: string; owners: string[]; mins: number; by: Record<string, number>; recent: boolean };
+    type Agg = { name: string; owners: string[]; mins: number; by: Record<string, number>; recent: boolean; last: number };
     const agg = new Map<number, Agg>();
     for (const { pid, games } of linked) {
       for (const g of games) {
         let a = agg.get(g.appid);
-        if (!a) agg.set(g.appid, (a = { name: g.name, owners: [], mins: 0, by: {}, recent: false }));
+        if (!a) agg.set(g.appid, (a = { name: g.name, owners: [], mins: 0, by: {}, recent: false, last: 0 }));
         a.owners.push(pid);
         a.mins += g.mins;
         a.by[pid] = Math.round(g.mins / 60);
         if (g.mins2w > 0) a.recent = true;
+        if ((g.last ?? 0) > a.last) a.last = g.last ?? 0;
       }
     }
     const ids = linked.map((l) => l.pid);
     const mk = (appid: number, a: Agg, tier: PoolGame['tier']): PoolGame => ({
       appid, name: a.name, tier, owners: a.owners, missing: ids.filter((x) => !a.owners.includes(x)),
-      hours: Math.round(a.mins / 60), hoursBy: a.by, recent: a.recent,
+      hours: Math.round(a.mins / 60), hoursBy: a.by, recent: a.recent, lastPlayed: a.last ? a.last * 1000 : 0,
     });
     const all: PoolGame[] = [];
     const almost: PoolGame[] = [];

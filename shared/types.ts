@@ -255,6 +255,7 @@ export interface PoolGame {
   hours: number; // group total hours
   hoursBy: Record<string, number>; // player id -> hours (owners only)
   recent: boolean; // someone played in last 2 weeks
+  lastPlayed?: number; // ms epoch of the most recent time ANY owner played it (0/undefined = never or unknown)
   coop?: boolean; // multiplayer/co-op per store categories (undefined = unknown yet)
   price?: string; // formatted current price
   discount?: number; // percent

@@ -6,7 +6,7 @@ export interface Env {
   FAKE_STEAM?: string;
 }
 
-export interface OwnedGame { appid: number; name: string; mins: number; mins2w: number }
+export interface OwnedGame { appid: number; name: string; mins: number; mins2w: number; last?: number /* rtime_last_played, epoch s */ }
 export interface StoreBits { coop: boolean; price?: string; discount?: number; free?: boolean; shots?: string[] /* up to 6 screenshot thumbnail URLs (Steam CDN only) */ }
 
 const API = 'https://api.steampowered.com';
@@ -69,6 +69,7 @@ export async function ownedGames(id: string, key: string): Promise<OwnedGame[] |
     name: g.name ?? `App ${g.appid}`,
     mins: g.playtime_forever ?? 0,
     mins2w: g.playtime_2weeks ?? 0,
+    last: g.rtime_last_played || 0,
   }));
 }
 
