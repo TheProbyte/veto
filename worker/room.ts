@@ -28,13 +28,17 @@ export class Room extends DurableObject<Env> {
   s!: RoomState;
   libs = new Map<string, OwnedGame[]>();
   poolGen = 0;
+  alarmAt = 0; // last alarm we set, so we don't rewrite it on every broadcast (storage writes count on the free plan)
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
       this.s = (await ctx.storage.get<RoomState>('s')) ?? fresh('');
       this.s.pitches ??= [];
+      this.alarmAt = (await ctx.storage.getAlarm()) ?? 0;
     });
+    // answered by the runtime without waking the object: keeps phone sockets alive while the room hibernates
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -58,14 +62,15 @@ export class Room extends DurableObject<Env> {
     // if the host walked out, anyone still at the table can run the show
     return host?.id === pid || !host?.connected;
   }
-  broadcast() {
+  /** persist=false for cosmetic/transient updates (aim moves, partial pool loads) to save storage writes */
+  broadcast(persist = true) {
     this.s.now = Date.now();
-    this.ctx.storage.put('s', this.s);
-    const body = this.s;
+    if (persist) this.ctx.storage.put('s', this.s);
+    const json = JSON.stringify(this.s); // serialize once, not once per player
     for (const ws of this.ctx.getWebSockets()) {
       const pid = this.pidOf(ws);
       if (!pid) continue;
-      try { ws.send(JSON.stringify({ t: 'state', state: body, you: pid } satisfies ServerMsg)); } catch {}
+      try { ws.send(`{"t":"state","you":${JSON.stringify(pid)},"state":${json}}`); } catch {}
     }
     this.schedule();
   }
@@ -73,10 +78,16 @@ export class Room extends DurableObject<Env> {
     const s = this.s;
     let at = 0;
     if (s.phase === 'veto') {
-      at = s.board.filter((g) => g.alive).length <= 3 ? Date.now() + SHOT_PAUSE + 600 : s.turnDeadline;
+      if (s.board.filter((g) => g.alive).length <= 3) {
+        // keep an already-pending roulette alarm instead of pushing it back on every broadcast
+        const soon = Date.now() + SHOT_PAUSE + 600;
+        at = this.alarmAt > Date.now() && this.alarmAt <= soon ? this.alarmAt : soon;
+      } else at = s.turnDeadline;
     } else if (s.phase === 'roulette' && s.roulette) {
       at = s.roulette.startedAt + s.roulette.duration + 1500;
     }
+    if (at === this.alarmAt) return;
+    this.alarmAt = at;
     if (at) this.ctx.storage.setAlarm(at);
     else this.ctx.storage.deleteAlarm();
   }
@@ -243,7 +254,7 @@ export class Room extends DurableObject<Env> {
         this.assertTurn(pid);
         if (!s.board.some((g) => g.appid === i.appid && g.alive)) return;
         s.aim = i.appid;
-        this.broadcast();
+        this.broadcast(false);
         return;
       }
       case 'fire': {
@@ -343,6 +354,7 @@ export class Room extends DurableObject<Env> {
   }
 
   async alarm() {
+    this.alarmAt = 0; // it just fired
     const s = this.s;
     const now = Date.now();
     if (s.phase === 'veto') {
@@ -494,7 +506,7 @@ export class Room extends DurableObject<Env> {
       // stream partial results every ~1.5s
       while (idx < todo.length && gen === this.poolGen) {
         await new Promise((r) => setTimeout(r, 1500));
-        if (gen === this.poolGen && Date.now() - last > 1400) { last = Date.now(); this.broadcast(); }
+        if (gen === this.poolGen && Date.now() - last > 1400) { last = Date.now(); this.broadcast(false); }
       }
     };
     await Promise.all([worker(), worker(), worker(), worker(), worker(), worker(), ticker()]);

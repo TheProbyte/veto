@@ -25,12 +25,15 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function search(q: string, env: Env): Promise<Response> {
+// per-isolate memory cache for store search (free; avoids KV writes)
+const SEARCH = new Map<string, { body: string; exp: number }>();
+
+async function search(q: string, _env: Env): Promise<Response> {
   q = q.trim().slice(0, 60);
   if (q.length < 2) return Response.json([]);
-  const key = `search:${q.toLowerCase()}`;
-  const cached = await env.CACHE.get(key);
-  if (cached) return new Response(cached, { headers: { 'content-type': 'application/json' } });
+  const key = q.toLowerCase();
+  const cached = SEARCH.get(key);
+  if (cached && cached.exp > Date.now()) return new Response(cached.body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=600' } });
   try {
     const r = await fetch(`https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(q)}&cc=us&l=en`, {
       headers: { 'User-Agent': 'nah-game-picker/1.0' },
@@ -43,8 +46,9 @@ async function search(q: string, env: Env): Promise<Response> {
       img: x.tiny_image,
     }));
     const body = JSON.stringify(hits);
-    await env.CACHE.put(key, body, { expirationTtl: 3600 });
-    return new Response(body, { headers: { 'content-type': 'application/json' } });
+    if (SEARCH.size > 300) SEARCH.delete(SEARCH.keys().next().value!);
+    SEARCH.set(key, { body, exp: Date.now() + 3600_000 });
+    return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=600' } });
   } catch {
     return Response.json([]);
   }

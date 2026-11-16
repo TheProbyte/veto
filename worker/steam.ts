@@ -74,7 +74,7 @@ export async function storeBits(env: Env, appid: number): Promise<StoreBits | nu
         discount: po?.discount_percent || undefined,
       };
     }
-    await env.CACHE.put(k, JSON.stringify(bits), { expirationTtl: 60 * 60 * 24 * 3 });
+    await env.CACHE.put(k, JSON.stringify(bits), { expirationTtl: 60 * 60 * 24 * 14 });
     return bits;
   } catch {
     return null;

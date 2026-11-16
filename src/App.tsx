@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRoom } from './net';
 import Home from './phases/Home';
 import NameGate from './phases/NameGate';
@@ -23,6 +23,7 @@ export default function App() {
 function Room({ code }: { code: string }) {
   const [name, setName] = useState<string | null>(getName());
   const { state, me, send, connected, error, skew } = useRoom(code, name);
+  useWakeLock(state?.phase === 'veto' || state?.phase === 'roulette');
   if (!name) {
     return <NameGate code={code} onJoin={(n) => { try { localStorage.setItem('nah.name', n); } catch {} setName(n); }} />;
   }
@@ -36,4 +37,22 @@ function Room({ code }: { code: string }) {
       {error && <div className="toast err">{error}</div>}
     </>
   );
+}
+
+/** keep phone screens awake during the shootout + spin */
+function useWakeLock(on: boolean) {
+  useEffect(() => {
+    if (!on) return;
+    const nav = navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<{ release(): Promise<void> }> } };
+    if (!nav.wakeLock) return;
+    let lock: { release(): Promise<void> } | null = null;
+    let dead = false;
+    const grab = () => {
+      if (document.hidden || dead) return;
+      nav.wakeLock!.request('screen').then((l) => { if (dead) l.release(); else lock = l; }).catch(() => {});
+    };
+    grab();
+    document.addEventListener('visibilitychange', grab);
+    return () => { dead = true; document.removeEventListener('visibilitychange', grab); lock?.release().catch(() => {}); };
+  }, [on]);
 }
