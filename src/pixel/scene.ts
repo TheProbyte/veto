@@ -111,7 +111,17 @@ interface WallGeo {
   decor?: Rect[];
   /** the wanted poster's spot (big = room for the "LAST TIME" cover poster) + the bare wall under it */
   poster?: PosterSpot;
+  /** each bottle on the shelf (cork included) + the shelf strip above the plank without / with the bottles (the cat knocks them off) */
+  bottles?: (Rect & { col: string })[];
+  shelfStrip?: { x: number; y: number; bare: ImageData; full: ImageData };
 }
+/** what the shelf cat does when you tap it */
+export type CatAct = 'meow' | 'hiss' | 'knock' | 'leap';
+const CAT_ACTS: CatAct[] = ['meow', 'hiss', 'knock', 'leap'];
+const CAT_MS: Record<CatAct, number> = { meow: 1800, hiss: 1500, knock: 2600, leap: 950 };
+/** a knocked bottle: falling, then shards */
+interface Fall { cv: HTMLCanvasElement; x: number; y: number; vx: number; vy: number; rot: number; spin: number; ground: number; col: string }
+interface Shard { x: number; y: number; vx: number; vy: number; life: number; col: string }
 interface PosterSpot extends Rect { big: boolean; under: ImageData }
 
 /** "LAST TIME" poster: parchment 18x35, two caption lines in a 3x5 font over a 12x18 cover */
@@ -124,6 +134,10 @@ const FONT3: Record<string, string[]> = {
   I: ['###', '.#.', '.#.', '.#.', '###'],
   M: ['#.#', '###', '###', '#.#', '#.#'],
   E: ['###', '#..', '##.', '#..', '###'],
+  O: ['.#.', '#.#', '#.#', '#.#', '.#.'],
+  W: ['#.#', '#.#', '###', '###', '#.#'],
+  H: ['#.#', '#.#', '###', '#.#', '#.#'],
+  '!': ['.#.', '.#.', '.#.', '...', '.#.'],
 };
 function text3(c: Ctx, s: string, x: number, y: number, col: string) {
   c.fillStyle = col;
@@ -346,7 +360,11 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
   });
   const winBot = wy + wh;
 
-  // bottle shelf
+  // bottle shelf (the strip above the plank is kept bare + full, so a bottle can be knocked off and restocked)
+  const stripY = Math.max(0, sy - 17), stripW = Math.min(W, sx1) - Math.max(0, sx0);
+  let bare: ImageData | null = null;
+  if (stripW > 0 && sy - stripY > 0 && sx0 >= 0) { try { bare = c.getImageData(sx0, stripY, stripW, sy - stripY); } catch { bare = null; } }
+  const bottles: (Rect & { col: string })[] = [];
   let bx = sx0 + 2, bi = 0, btop = sy;
   const BOT = ['#1f3318', '#5a2a10', '#2a1a10', '#1e2c3d', '#6b3a12', '#3a0f0f'];
   while (bx < sx1 - 3) {
@@ -359,6 +377,7 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
     c.fillStyle = shade(col, 1.9); c.fillRect(bx, sy - bh + 1, 1, bh - 2);
     if (bi % 2 === 0) { c.fillStyle = PAL.parch3; c.fillRect(bx, sy - Math.round(bh * 0.6), bw, 2); }
     btop = Math.min(btop, sy - bh - 4);
+    bottles.push({ x: bx, y: sy - bh - 4, w: bw, h: bh + 4, col });
     bx += bw + 1 + Math.floor(rnd(bi, 33) * 3); bi++;
   }
   c.fillStyle = PAL.wood3; c.fillRect(sx0, sy, sx1 - sx0, 2);
@@ -366,6 +385,12 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
   c.fillStyle = PAL.ink; c.fillRect(sx0, sy + 2, sx1 - sx0, 1);
   c.fillStyle = PAL.wood1; c.fillRect(sx0 + 3, sy + 3, 2, 4); c.fillRect(sx1 - 5, sy + 3, 2, 4);
   geo.shelf = { x0: sx0, x1: sx1, y: sy };
+  if (bare) {
+    try {
+      geo.shelfStrip = { x: sx0, y: stripY, bare, full: c.getImageData(sx0, stripY, stripW, sy - stripY) };
+      geo.bottles = bottles.filter((b) => b.y >= stripY && b.x >= sx0 && b.x + b.w <= sx0 + stripW);
+    } catch { /* no knockable bottles */ }
+  }
   used.push(box(sx0, Math.min(btop, sy - 12), sx1 - sx0, sy + 7 - Math.min(btop, sy - 12))); // + headroom for the cat
 
   // ---- swinging doors' doorway (back wall) + piano corner
@@ -511,6 +536,8 @@ export interface SceneFX {
   tempo: () => number;
   /** the scene decided an ambient lightning bolt struck (play thunder a moment later) */
   onBolt?: (big: boolean) => void;
+  /** something the shelf cat did needs a sound (a knocked bottle hit the floor) */
+  onCat?: (e: 'shatter') => void;
 }
 export interface SceneData {
   players: ScenePlayer[];
@@ -609,7 +636,10 @@ const GL = {
   vein7: ['..#.#..', '..#.#..', '###.###', '.......', '###.###', '..#.#..', '..#.#..'],
   rayL: ['#..', '.#.', '..#'],
   rayR: ['..#', '.#.', '#..'],
+  heart: ['#.#', '###', '.#.'],
 };
+/** the shelf cat's colours */
+const CAT0 = '#161210', CAT1 = '#2e2722', CAT_EYE = '#d8c040';
 /** a glyph at scale k, centred on (x, y), with a 1-cell ink outline */
 function glyph(c: Ctx, rows: string[], x: number, y: number, col: string, k = 1, ink: string | null = PAL.ink) {
   const h = rows.length, w = rows[0].length;
@@ -669,7 +699,14 @@ export class SceneRenderer {
   /** when the current shooter's turn started (scene time): a little draw hop + hammer glint */
   turn = { id: '', v: -1e9 };
   nextIdle = new Map<string, number>();
-  cat = { x: 0, dir: 1, state: 'walk' as 'walk' | 'sit' | 'bolt' | 'gone', until: 4000, v: 0 };
+  cat = { x: 0, dir: 1, state: 'walk' as 'walk' | 'sit' | 'bolt' | 'gone' | 'act', until: 4000, v: 0 };
+  /** the cat's current tap reaction (scene time) */
+  catAct: { k: CatAct; v: number; x0: number; x1: number; bi: number; dropped: boolean } | null = null;
+  catTurn = 0;
+  falls: Fall[] = [];
+  shards: Shard[] = [];
+  /** knocked bottles: index -> scene time it's back on the shelf */
+  missing = new Map<number, number>();
 
   constructor(L: Layout, opts: { motes?: number; reduce?: boolean; low?: boolean } = {}) {
     this.L = L;
@@ -817,7 +854,7 @@ export class SceneRenderer {
       if (lag > 2500) this.shotV = -1e9;
       else {
         this.shotV = vt - Math.max(0, lag) * rate;
-        if (this.cat.state === 'walk' || this.cat.state === 'sit') { this.cat.state = 'bolt'; this.cat.dir = this.cat.x - this.geo.shelf.x0 < this.geo.shelf.x1 - this.cat.x ? -1 : 1; }
+        if (this.cat.state === 'walk' || this.cat.state === 'sit' || this.cat.state === 'act') { this.catAct = null; this.cat.state = 'bolt'; this.cat.dir = this.cat.x - this.geo.shelf.x0 < this.geo.shelf.x1 - this.cat.x ? -1 : 1; }
       }
     }
     const shotAge = D.shot ? vt - this.shotV : 1e9;
@@ -853,8 +890,8 @@ export class SceneRenderer {
     this.drawWeather(c, vt, dt, boltK, storm);
     // ---- back corner: the piano player
     this.drawPianist(c, vt, D, shotAge);
-    // ---- the cat on the bottle shelf
-    this.drawCat(c, vt, dt);
+    // ---- the cat on the bottle shelf (+ anything it knocked off)
+    this.drawCat(c, vt, dt, D);
 
     const seats = D.players.map((p) => p.seat);
     const geoms = D.players.map((p) => ({ p, g: seatGeom(L, p.seat, seats) })).sort((a, b) => b.g.depth - a.g.depth);
@@ -1084,6 +1121,8 @@ export class SceneRenderer {
 
     // ---- emote props that leave the bust: spit arc + spittoon, steam puffs
     for (const o of overlays) this.drawEmoteFx(c, o.g, o.a, o.age, o.ox, o.oy, o.ps);
+    // ---- the cat's MEOW! / hearts / HISS (unlit, so they read)
+    this.drawCatFx(c, vt);
   }
 
   private drawWeather(c: Ctx, vt: number, dt: number, boltK: number, storm: boolean) {
@@ -1194,14 +1233,98 @@ export class SceneRenderer {
     }
   }
 
-  private drawCat(c: Ctx, vt: number, dt: number) {
+  /** the cat's box on the shelf in scene pixels (null while it's away, bolting, or there's no shelf) */
+  catBox(): Rect | null {
     const sh = this.geo.shelf, cat = this.cat;
+    if (sh.x1 - sh.x0 < 24 || cat.state === 'gone' || cat.state === 'bolt') return null;
+    const x = Math.round(cat.x);
+    if (this.catAct?.k === 'leap') { const a = this.catAct; return { x: Math.min(a.x0, a.x1) - 2, y: sh.y - 22, w: Math.abs(a.x1 - a.x0) + 13, h: 23 }; }
+    return { x: x - 2, y: sh.y - 11, w: 13, h: 12 };
+  }
+
+  /** is (sx, sy) on the cat (within pad scene px), not on a bust in front of it, with enough of the cat in view? */
+  catHit(sx: number, sy: number, pad = 2): boolean {
+    const b = this.catBox();
+    if (!b) return false;
+    if (sx < b.x - pad || sx >= b.x + b.w + pad || sy < b.y - pad || sy >= b.y + b.h + pad) return false;
+    const { W, H } = this.L, fg = this.fg;
+    const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < W && y < H ? fg[Math.floor(y) * W + Math.floor(x)] : 1);
+    if (at(sx, sy)) return false; // that's the bust in front of it
+    let vis = 0, n = 0;
+    for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) { n++; if (!at(x, y)) vis++; }
+    return n > 0 && vis / n > 0.35;
+  }
+
+  /** a tap on the cat: starts the next reaction in the cycle; null if it didn't land / it's busy */
+  pokeCat(sx: number, sy: number, pad = 2): CatAct | null {
+    if (this.catAct || !this.catHit(sx, sy, pad)) return null;
+    const sh = this.geo.shelf, cat = this.cat;
+    const lo = sh.x0 + 2, hi = sh.x1 - 9;
+    for (let tries = 0; tries < CAT_ACTS.length; tries++) {
+      const k = CAT_ACTS[this.catTurn++ % CAT_ACTS.length];
+      const x0 = cat.x;
+      if (k === 'knock') {
+        // the nearest bottle still on the shelf that the cat can stand beside
+        let best = -1, bd = 1e9;
+        (this.geo.bottles ?? []).forEach((b, bi) => {
+          if (this.missing.has(bi) || this.falls.length > 2) return;
+          const d = Math.abs(b.x + b.w / 2 - (x0 + 4));
+          if (d < bd) { bd = d; best = bi; }
+        });
+        if (best < 0) continue;
+        const b = this.geo.bottles![best];
+        // stand on the side of the bottle the cat is on (or whichever side has room)
+        let left = x0 + 4 < b.x + b.w / 2;
+        if (left && b.x - 9 < lo) left = false;
+        if (!left && b.x + b.w + 1 > hi) left = true;
+        const x1 = Math.max(lo, Math.min(hi, left ? b.x - 9 : b.x + b.w + 1));
+        this.catAct = { k, v: this.vt, x0, x1, bi: best, dropped: false };
+        cat.dir = left ? 1 : -1;
+      } else if (k === 'leap') {
+        if (hi - lo < 20) continue;
+        // somewhere at least a third of the shelf away
+        const span = hi - lo, far = span / 3;
+        let x1 = lo + Math.random() * span;
+        if (Math.abs(x1 - x0) < far) x1 = x0 + (x0 - lo > hi - x0 ? -1 : 1) * (far + Math.random() * far);
+        x1 = Math.max(lo, Math.min(hi, x1));
+        this.catAct = { k, v: this.vt, x0, x1, bi: -1, dropped: false };
+        cat.dir = x1 >= x0 ? 1 : -1;
+      } else {
+        this.catAct = { k, v: this.vt, x0, x1: x0, bi: -1, dropped: false };
+        if (k === 'hiss') cat.dir = x0 - sh.x0 < sh.x1 - x0 ? 1 : -1;
+      }
+      cat.state = 'act';
+      return k;
+    }
+    return null;
+  }
+
+  private drawCat(c: Ctx, vt: number, dt: number, D: SceneData) {
+    const sh = this.geo.shelf, cat = this.cat;
+    // knocked bottles come back after a while (the barkeep restocks)
+    if (this.missing.size && this.geo.shelfStrip && this.geo.bottles) {
+      const st = this.geo.shelfStrip;
+      for (const [bi, back] of this.missing) {
+        if (vt < back) continue;
+        const b = this.geo.bottles[bi];
+        if (b) this.bgc.putImageData(st.full, st.x, st.y, b.x - st.x, b.y - st.y, b.w, b.h);
+        this.missing.delete(bi);
+      }
+    }
+    this.drawFalls(c, dt, D);
     if (sh.x1 - sh.x0 < 24) return;
     const lo = sh.x0 + 2, hi = sh.x1 - 9;
     if (cat.state === 'gone') {
       if (vt > cat.until) { cat.state = 'walk'; cat.dir = Math.random() < 0.5 ? 1 : -1; cat.x = cat.dir > 0 ? lo : hi; cat.until = vt + 3000 + Math.random() * 4000; }
       return;
     }
+    const y = sh.y; // shelf top; the cat stands on it
+    if (cat.state === 'act' && this.catAct) {
+      if (this.drawCatAct(c, vt, y, D)) return;
+      // done: sit a while where it ended up
+      this.catAct = null;
+      cat.state = 'sit'; cat.until = vt + 4000 + Math.random() * 5000;
+    } else if (cat.state === 'act') { cat.state = 'sit'; cat.until = vt + 4000; }
     if (!this.reduce) {
       if (cat.state === 'walk') {
         cat.x += cat.dir * dt * 0.006;
@@ -1214,33 +1337,202 @@ export class SceneRenderer {
         if (cat.x < lo - 10 || cat.x > hi + 10) { cat.state = 'gone'; cat.until = vt + 9000 + Math.random() * 12000; return; }
       }
     } else if (cat.state === 'bolt') { cat.state = 'sit'; }
-    const x = Math.round(cat.x), y = sh.y; // y = shelf top; the cat stands on it
+    const x = Math.round(cat.x);
+    if (cat.state === 'sit') { this.catSit(c, x, y, vt); return; }
+    this.catSide(c, x, y, cat.dir, vt, { run: cat.state === 'bolt' });
+  }
+
+  /** sitting, facing out, tail swishing */
+  private catSit(c: Ctx, x: number, y: number, vt: number, o: { mouth?: boolean; happy?: boolean; look?: number } = {}) {
+    const C0 = CAT0, C1 = CAT1;
+    c.fillStyle = C0; c.fillRect(x + 1, y - 6, 5, 6); c.fillRect(x + 1, y - 9, 5, 3);
+    px(c, x + 1, y - 10, C0); px(c, x + 5, y - 10, C0);
+    c.fillStyle = C1; c.fillRect(x + 2, y - 4, 3, 3);
+    if (o.happy) { px(c, x + 2, y - 8, C1); px(c, x + 4, y - 8, C1); }
+    else { const lk = o.look ?? 0; px(c, x + 2, y - 8 + lk, CAT_EYE); px(c, x + 4, y - 8 + lk, CAT_EYE); }
+    if (o.mouth) { px(c, x + 3, y - 7, '#c0506a'); px(c, x + 3, y - 6, '#5a1a24'); }
+    const sw = this.reduce ? 0 : Math.round(Math.sin(vt / 260) * 2);
+    c.fillStyle = C0; c.fillRect(x + 6, y - 1, 2, 1); c.fillRect(x + 7, y - 3, 1, 2); px(c, x + 7 + (sw > 0 ? 1 : 0), y - 4 + (sw < 0 ? 1 : 0), C0);
+  }
+
+  /** side view: walking / bolting / crouched / airborne / swiping a paw */
+  private catSide(c: Ctx, x: number, y: number, d: number, vt: number, o: { run?: boolean; crouch?: boolean; air?: boolean; paw?: boolean; still?: boolean } = {}) {
+    const C0 = CAT0;
     const f = Math.floor(vt / 160) % 2;
-    const C0 = '#161210', C1 = '#2e2722';
-    if (cat.state === 'sit') {
-      // sitting, facing out, tail swishing
-      c.fillStyle = C0; c.fillRect(x + 1, y - 6, 5, 6); c.fillRect(x + 1, y - 9, 5, 3);
-      px(c, x + 1, y - 10, C0); px(c, x + 5, y - 10, C0);
-      c.fillStyle = C1; c.fillRect(x + 2, y - 4, 3, 3);
-      px(c, x + 2, y - 8, '#d8c040'); px(c, x + 4, y - 8, '#d8c040');
-      const sw = this.reduce ? 0 : Math.round(Math.sin(vt / 260) * 2);
-      c.fillStyle = C0; c.fillRect(x + 6, y - 1, 2, 1); c.fillRect(x + 7, y - 3, 1, 2); px(c, x + 7 + (sw > 0 ? 1 : 0), y - 4 + (sw < 0 ? 1 : 0), C0);
-      return;
-    }
-    // walking / bolting (side view)
-    const d = cat.dir, run = cat.state === 'bolt';
     const bx = x, hx = d > 0 ? x + 7 : x - 1;
-    c.fillStyle = C0; c.fillRect(bx, y - 4 - (run ? 0 : 0), 8, 3);
-    c.fillRect(hx - (d > 0 ? 0 : 1), y - 6, 3, 3); px(c, hx + (d > 0 ? 0 : 1), y - 7, C0); px(c, hx + (d > 0 ? 2 : -1), y - 7, C0);
-    px(c, hx + (d > 0 ? 2 : -1), y - 5, '#d8c040');
-    // legs
-    const s = run ? Math.floor(vt / 60) % 2 : f;
+    const dy = o.crouch ? 1 : 0;
+    c.fillStyle = C0; c.fillRect(bx, y - 4 + dy, 8, 3);
+    c.fillRect(hx - (d > 0 ? 0 : 1), y - 6 + dy, 3, 3); px(c, hx + (d > 0 ? 0 : 1), y - 7 + dy, C0); px(c, hx + (d > 0 ? 2 : -1), y - 7 + dy, C0);
+    px(c, hx + (d > 0 ? 2 : -1), y - 5 + dy, CAT_EYE);
     c.fillStyle = C0;
-    c.fillRect(bx + (s ? 1 : 0), y - 1, 1, 1); c.fillRect(bx + (s ? 6 : 7), y - 1, 1, 1);
-    // tail: up when walking, straight back when bolting
+    if (o.air) {
+      // stretched out: front legs reaching, back legs trailing
+      c.fillRect(d > 0 ? bx + 8 : bx - 2, y - 2, 2, 1); c.fillRect(d > 0 ? bx - 2 : bx + 8, y - 3, 2, 1);
+    } else if (o.paw) {
+      // one front paw up and out at the bottle
+      c.fillRect(d > 0 ? bx + 8 : bx - 2, y - 4, 2, 1); c.fillRect(bx + (d > 0 ? 1 : 6), y - 1, 1, 1);
+    } else if (!o.crouch) {
+      const s = o.still ? 0 : o.run ? Math.floor(vt / 60) % 2 : f;
+      c.fillRect(bx + (s ? 1 : 0), y - 1, 1, 1); c.fillRect(bx + (s ? 6 : 7), y - 1, 1, 1);
+    }
+    // tail: up when walking, straight back when bolting / leaping
     const tx = d > 0 ? bx - 1 : bx + 8;
-    if (run) { c.fillRect(d > 0 ? bx - 3 : bx + 8, y - 4, 3, 1); }
-    else { c.fillRect(tx, y - 6, 1, 3); px(c, tx + (f ? -d : 0), y - 7, C0); }
+    if (o.run || o.air) c.fillRect(d > 0 ? bx - 3 : bx + 8, y - 4 + dy, 3, 1);
+    else { c.fillRect(tx, y - 6 + dy, 1, 3); px(c, tx + (f ? -d : 0), y - 7 + dy, C0); }
+  }
+
+  /** arched back, fur on end, tail puffed, mouth open */
+  private catArch(c: Ctx, x: number, y: number, d: number, vt: number) {
+    const C0 = CAT0;
+    const jit = this.reduce ? 0 : Math.floor(vt / 70) % 2;
+    const bx = x;
+    c.fillStyle = C0;
+    // legs straight (tiptoe), body high and bowed up in the middle
+    c.fillRect(bx, y - 3, 1, 3); c.fillRect(bx + 1, y - 3, 1, 3); c.fillRect(bx + 6, y - 3, 1, 3); c.fillRect(bx + 7, y - 3, 1, 3);
+    c.fillRect(bx, y - 6, 8, 3); c.fillRect(bx + 1, y - 7, 6, 1); c.fillRect(bx + 2, y - 8, 4, 1);
+    // fur on end along the arch (bristling)
+    for (let i = 0; i < 4; i++) if ((i + jit) % 2 === 0) px(c, bx + 2 + i, y - 9, C0);
+    px(c, bx + 1, y - 8, C0); px(c, bx + 6, y - 8, C0);
+    // head low at the front, ears flat back
+    const hx = d > 0 ? x + 7 : x - 2;
+    c.fillRect(hx, y - 5, 3, 3); px(c, d > 0 ? hx : hx + 2, y - 6, C0);
+    px(c, hx + (d > 0 ? 1 : 1), y - 5, CAT_EYE);
+    px(c, d > 0 ? hx + 2 : hx, y - 3, '#c0506a'); px(c, d > 0 ? hx + 3 : hx - 1, y - 3, '#fff3e0');
+    // tail puffed straight up
+    const tx = d > 0 ? x - 2 : x + 8;
+    c.fillRect(tx, y - 10 - jit, 2, 6 + jit); px(c, tx - 1 + jit * 3, y - 9, C0);
+  }
+
+  /** draws the current reaction; false once it's over */
+  private drawCatAct(c: Ctx, vt: number, y: number, D: SceneData): boolean {
+    const a = this.catAct!, cat = this.cat;
+    const age = vt - a.v;
+    if (age > CAT_MS[a.k]) { cat.x = a.x1; return false; }
+    switch (a.k) {
+      case 'meow': {
+        this.catSit(c, Math.round(cat.x), y, vt, { mouth: age > 120 && age < 700, happy: age > 900 });
+        return true;
+      }
+      case 'hiss': {
+        if (age < 120 || age > 1350) this.catSide(c, Math.round(cat.x), y, cat.dir, vt, { crouch: true });
+        else this.catArch(c, Math.round(cat.x), y, cat.dir, vt);
+        return true;
+      }
+      case 'leap': {
+        const k = Math.max(0, Math.min(1, (age - 180) / 560));
+        if (age < 180) { this.catSide(c, Math.round(a.x0), y, cat.dir, vt, { crouch: true }); return true; }
+        if (k >= 1) { cat.x = a.x1; this.catSide(c, Math.round(a.x1), y, cat.dir, vt, { crouch: true }); return true; }
+        const e = k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) * (1 - k);
+        cat.x = a.x0 + (a.x1 - a.x0) * e;
+        const hgt = Math.min(16, 8 + Math.abs(a.x1 - a.x0) * 0.15);
+        this.catSide(c, Math.round(cat.x), y - Math.round(hgt * 4 * k * (1 - k)), cat.dir, vt, { air: true });
+        return true;
+      }
+      case 'knock': {
+        const walkMs = Math.min(900, Math.abs(a.x1 - a.x0) / 0.03);
+        const b = this.geo.bottles?.[a.bi];
+        if (age < walkMs) {
+          cat.x = a.x0 + (a.x1 - a.x0) * (age / Math.max(1, walkMs));
+          this.catSide(c, Math.round(cat.x), y, cat.dir, vt, { run: false });
+          return true;
+        }
+        cat.x = a.x1;
+        const t = age - walkMs;
+        // two little test taps, then the swipe that sends it over
+        const paw = (t > 150 && t < 300) || (t > 450 && t < 600) || (t > 800 && t < 1050);
+        if (t > 850 && !a.dropped) { a.dropped = true; if (b) this.dropBottle(a.bi, b, cat.dir); }
+        if (t > 1250) this.catSit(c, Math.round(cat.x), y, vt, { look: 1 });
+        else this.catSide(c, Math.round(cat.x), y, cat.dir, vt, { paw, still: true });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** take a bottle off the wall layer and send it tumbling off the shelf */
+  private dropBottle(bi: number, b: Rect & { col: string }, dir: number) {
+    const st = this.geo.shelfStrip;
+    if (!st || this.missing.has(bi) || b.w < 1 || b.h < 1) return;
+    const [cv, cc] = makeCanvas(b.w, b.h);
+    cc.putImageData(st.full, st.x - b.x, st.y - b.y, b.x - st.x, b.y - st.y, b.w, b.h);
+    // only the bottle falls: clear the wall pixels beside its neck + cork
+    const id = cc.getImageData(0, 0, b.w, b.h), bw = st.bare.width, bd = st.bare.data;
+    for (let yy = 0; yy < b.h; yy++) for (let xx = 0; xx < b.w; xx++) {
+      const o = (yy * b.w + xx) * 4, q = ((b.y - st.y + yy) * bw + (b.x - st.x + xx)) * 4;
+      if (id.data[o] === bd[q] && id.data[o + 1] === bd[q + 1] && id.data[o + 2] === bd[q + 2]) id.data[o + 3] = 0;
+    }
+    cc.putImageData(id, 0, 0);
+    this.bgc.putImageData(st.bare, st.x, st.y, b.x - st.x, b.y - st.y, b.w, b.h);
+    this.missing.set(bi, this.vt + 22000 + Math.random() * 12000);
+    // it smashes on the chair rail under the shelf (the floor itself is hidden behind the busts)
+    const ground = Math.min(this.L.H - 2, Math.max(this.geo.shelf.y + 10, Math.round(this.L.tableTop * 0.8)));
+    this.falls.push({ cv, x: b.x + b.w / 2, y: b.y + b.h / 2, vx: dir * (0.012 + Math.random() * 0.006), vy: -0.03, rot: 0, spin: dir * 0.012, ground, col: b.col });
+  }
+
+  /** falling bottles (behind the busts) and the glass they leave */
+  private drawFalls(c: Ctx, dt: number, D: SceneData) {
+    if (this.falls.length) {
+      const keep: Fall[] = [];
+      for (const f of this.falls) {
+        f.vy += 0.00045 * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.rot += f.spin * dt;
+        if (f.y + f.cv.height / 2 >= f.ground) {
+          D.fx?.onCat?.('shatter');
+          const n = this.low ? 8 : 14;
+          for (let i = 0; i < n; i++) {
+            const a = -Math.PI * (0.1 + 0.8 * Math.random());
+            const sp = 0.02 + Math.random() * 0.05;
+            this.shards.push({ x: f.x, y: f.ground - 1, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 500 + Math.random() * 500, col: i % 3 === 0 ? '#e8f4ff' : i % 3 === 1 ? shade(f.col, 2.4) : shade(f.col, 1.6) });
+          }
+          continue;
+        }
+        keep.push(f);
+        // quarter-turn steps keep it pixel-crisp
+        const q = Math.round(f.rot / (Math.PI / 4)) * (Math.PI / 4);
+        c.save();
+        c.translate(Math.round(f.x), Math.round(f.y));
+        c.rotate(q);
+        c.drawImage(f.cv, -Math.floor(f.cv.width / 2), -Math.floor(f.cv.height / 2));
+        c.restore();
+      }
+      this.falls = keep;
+    }
+    if (this.shards.length) {
+      this.shards = this.shards.filter((s) => (s.life -= dt) > 0);
+      for (const s of this.shards) {
+        s.vy += 0.00025 * dt; s.x += s.vx * dt; s.y += s.vy * dt;
+        px(c, Math.round(s.x), Math.round(s.y), s.col);
+      }
+    }
+  }
+
+  /** MEOW! + hearts / HISS!, unlit so they read */
+  private drawCatFx(c: Ctx, vt: number) {
+    const a = this.catAct;
+    if (!a || (a.k !== 'meow' && a.k !== 'hiss')) return;
+    const age = vt - a.v;
+    const x = Math.round(this.cat.x), y = this.geo.shelf.y;
+    const W = this.L.W;
+    const word = a.k === 'meow' ? 'MEOW!' : 'HISS!';
+    const show = a.k === 'meow' ? age > 120 && age < 1300 : age > 150 && age < 1250;
+    if (show) {
+      const tw = word.length * 4 - 1;
+      const hop = this.reduce ? 0 : age < 260 ? 2 : age < 380 ? 1 : 0;
+      const tx = Math.max(2, Math.min(W - tw - 2, x + 4 - Math.floor(tw / 2)));
+      const ty = Math.max(2, y - 18 - hop);
+      // ink outline, then the letters
+      for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [1, -1], [-1, 1]]) text3(c, word, tx + ox, ty + oy, PAL.ink);
+      text3(c, word, tx, ty, a.k === 'meow' ? '#fff3c4' : '#ff8a5c');
+    }
+    if (a.k === 'meow' && age > 300) {
+      for (let i = 0; i < 3; i++) {
+        const t = age - 300 - i * 260;
+        if (t < 0 || t > 1100) continue;
+        const k = t / 1100;
+        const hx = x + 3 + (i - 1) * 5 + Math.round(Math.sin(t / 180 + i) * 1.5);
+        const hy = y - 11 - Math.round(k * 14);
+        if (k < 0.85 || Math.floor(t / 80) % 2) glyph(c, GL.heart, hx, hy, '#ff6b8a', 1);
+      }
+    }
   }
 
   /** emote props + effects, drawn after the lighting pass so they stay bright and readable */

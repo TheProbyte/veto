@@ -7,7 +7,7 @@ import ShotFX from './ShotFX';
 import SoundMenu from './SoundMenu';
 import { DockBoard, DockSlot, play } from './Dock';
 import { BUZZ, buzz, isPhone, reducedMotion } from './haptics';
-import { PixelScene } from '../pixel/PixelCanvas';
+import { PixelScene, type SceneApi } from '../pixel/PixelCanvas';
 import { computeLayout, seatGeom, type Layout, type SceneData, type SceneFX, type ScenePlayer } from '../pixel/scene';
 import { MiniBust } from '../pixel/BustPreview';
 import Narrator from './Narrator';
@@ -43,7 +43,6 @@ const EMOTE_TXT: Record<string, { cap: string; word?: string; at?: number }> = {
 /** how long the caption stays (the canvas animations run 1.6-2.1s) */
 const EMOTE_POP_MS = 2300;
 interface Toast { id: number; p: Player; text: string }
-interface Bubble { id: number; pid: string; text: string }
 
 const mq = (q: string) => { try { return !!window.matchMedia?.(q).matches; } catch { return false; } };
 /** landscape phone: lobby/nominate put the scene on the left half and the panel on the right */
@@ -124,6 +123,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
       return typeof bpm === 'number' && Number.isFinite(bpm) ? bpm : BPM[sfx.getMusicMode()] ?? 0;
     },
     onBolt: (big) => { window.setTimeout(() => sfx.thunder(big ? 0.85 : 0.3 + Math.random() * 0.35), big ? 500 : 900 + Math.random() * 1800); },
+    onCat: (e) => { if (e === 'shatter') sfx.shatter(); },
   };
   const push = (e: SceneFX['queue'][number]) => { const q = sceneFx.current.queue; q.push(e); if (q.length > 24) q.splice(0, q.length - 24); };
   const phaseRef = useRef(state.phase);
@@ -131,22 +131,15 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   // the storm keeps going through the result (the result sits in the same stormy saloon)
   const unlocked = useRef(false);
 
-  // ---- emotes + speech bubbles (transient room events)
+  // ---- emotes (transient room events). Typed 'say' lines are ignored: the saloon is emotes only.
   const [pops, setPops] = useState<Record<string, { emote: string; id: number }>>({});
-  const [bubbles, setBubbles] = useState<Record<string, Bubble>>({});
   useEffect(() => rp.on((e: RoomEvent) => {
-    if (e.t === 'emote') {
-      if (!(e.emote in EMOTES)) return;
-      push({ k: 'emote', pid: e.pid, emote: e.emote, at: performance.now() });
-      EMOTE_SFX[e.emote]?.();
-      const id = Date.now() + Math.random();
-      setPops((m) => ({ ...m, [e.pid]: { emote: e.emote, id } }));
-      window.setTimeout(() => setPops((m) => { if (m[e.pid]?.id !== id) return m; const n = { ...m }; delete n[e.pid]; return n; }), EMOTE_POP_MS);
-    } else if (e.t === 'say') {
-      const id = Date.now() + Math.random();
-      setBubbles((m) => ({ ...m, [e.pid]: { id, pid: e.pid, text: String(e.text).slice(0, 120) } }));
-      window.setTimeout(() => setBubbles((m) => { if (m[e.pid]?.id !== id) return m; const n = { ...m }; delete n[e.pid]; return n; }), 4200);
-    }
+    if (e.t !== 'emote' || !(e.emote in EMOTES)) return;
+    push({ k: 'emote', pid: e.pid, emote: e.emote, at: performance.now() });
+    EMOTE_SFX[e.emote]?.();
+    const id = Date.now() + Math.random();
+    setPops((m) => ({ ...m, [e.pid]: { emote: e.emote, id } }));
+    window.setTimeout(() => setPops((m) => { if (m[e.pid]?.id !== id) return m; const n = { ...m }; delete n[e.pid]; return n; }), EMOTE_POP_MS);
   }), [rp.on]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- doors + reconnect toasts
@@ -172,6 +165,51 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
     setToasts((ts) => [...ts, ...add].slice(-2));
     for (const tt of add) window.setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== tt.id)), 2500);
   }, [state.players]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- the shelf cat: tap / click it (only on bare background: never steals a press from the UI)
+  const sceneApi = useRef<SceneApi | null>(null);
+  useEffect(() => {
+    const BARE = '.px-scene, .scene, .seats, .saloon, .saloon-ui, .saloon-front, .saloon-stage, .front-top';
+    const bare = (t: EventTarget | null) => t instanceof Element && t.matches(BARE);
+    const busy = () => !!document.querySelector('.wipe, .fx, .duel');
+    let down: { id: number; x: number; y: number; at: number } | null = null;
+    const onDown = (e: PointerEvent) => {
+      down = e.isPrimary && e.button === 0 && bare(e.target) ? { id: e.pointerId, x: e.clientX, y: e.clientY, at: performance.now() } : null;
+    };
+    const onUp = (e: PointerEvent) => {
+      const d = down; down = null;
+      if (!d || d.id !== e.pointerId || performance.now() - d.at > 700 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 12) return;
+      if (busy()) return;
+      const k = sceneApi.current?.pokeCat(e.clientX, e.clientY, e.pointerType !== 'mouse');
+      if (!k) return;
+      sfx.unlock();
+      if (k === 'meow') sfx.meow();
+      else if (k === 'hiss') window.setTimeout(() => sfx.hiss(), 120);
+      else if (k === 'leap') window.setTimeout(() => sfx.swish(), 160);
+      else if (k === 'knock') sfx.meow(true);
+    };
+    const onCancel = () => { down = null; };
+    // hover cursor (mouse): on <html>, since React owns .saloon's className
+    let raf = 0, mx = 0, my = 0, tgt: EventTarget | null = null;
+    const root = document.documentElement;
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      mx = e.clientX; my = e.clientY; tgt = e.target;
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; root.classList.toggle('cat-hover', bare(tgt) && !busy() && !!sceneApi.current?.catAt(mx, my)); });
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onCancel, true);
+    window.addEventListener('pointermove', onMove, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
+      window.removeEventListener('pointermove', onMove, true);
+      cancelAnimationFrame(raf); root.classList.remove('cat-hover');
+    };
+  }, []);
 
   // ---- slow-mo vignette
   const [slow, setSlow] = useState(0);
@@ -266,7 +304,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   return (
     <div className={`saloon phase-${phase} ${shooter ? 'has-shooter' : ''} ${table ? 'has-dock' : ''} ${split ? 'is-split' : ''} ${chat.desk ? (chat.open ? 'has-chat' : 'has-chat-tab') : ''}`} style={{ '--P': `${layout.P}px`, '--stage-top': `${stageTop}px` } as CSSProperties}>
       <div className="scene">
-        <PixelScene layout={layout} data={data} />
+        <PixelScene layout={layout} data={data} api={sceneApi} />
         <div className={`seats ${layout.portrait && state.players.length > 4 ? 'has-back' : ''}`}>
           {state.players.map((p) => (
             <Seat key={p.id} p={p} me={me} L={layout} seats={seats} shooter={shooter} order={veto ? state.turnOrder.indexOf(p.id) : -1} turnIdx={state.turnIdx} n={state.turnOrder.length} fresh={fresh.has(p.id)} pop={pops[p.id]} />
@@ -294,12 +332,6 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
         <EmoteBar {...rp} />
       </div>
 
-      <div className="bubbles" aria-live="polite">
-        {Object.values(bubbles).map((b) => {
-          const p = state.players.find((x) => x.id === b.pid);
-          return p ? <SpeechBubble key={b.id} b={b} name={p.name} L={layout} seat={p.seat} seats={seats} /> : null;
-        })}
-      </div>
       {toasts.length > 0 && (
         <div className="px-toasts" role="status">
           {toasts.map((t) => (
@@ -406,36 +438,5 @@ function EmotePop({ emote, name, cx, high, flip, lift }: { emote: string; name: 
         </div>
       )}
     </>
-  );
-}
-
-/** pixel speech bubble over a player's head: typewriter reveal + blips, clamped to the viewport */
-function SpeechBubble({ b, name, L, seat, seats }: { b: Bubble; name: string; L: Layout; seat: number; seats: number[] }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [n, setN] = useState(() => (reducedMotion() ? b.text.length : 0));
-  const [pos, setPos] = useState<{ left: number; top: number; tail: number; below: boolean } | null>(null);
-  useEffect(() => {
-    if (n >= b.text.length) return;
-    const t = window.setTimeout(() => setN((k) => Math.min(b.text.length, k + 1)), 32);
-    if (n % 3 === 0) sfx.blip();
-    return () => clearTimeout(t);
-  }, [n, b.text]);
-  const g = seatGeom(L, seat, seats);
-  const hx = g.x * L.P, hy = (g.top + g.h * 0.06) * L.P;
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el) return;
-    const w = el.offsetWidth, h = el.offsetHeight;
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const left = Math.max(8, Math.min(vw - w - 8, hx - w / 2));
-    let top = hy - h - 12, below = false;
-    if (top < 8) { top = Math.min(vh - h - 8, (g.top + g.h * 0.55) * L.P); below = true; }
-    setPos({ left, top: Math.max(8, top), tail: Math.max(10, Math.min(w - 14, hx - left - 4)), below });
-  }, [hx, hy, b.text]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <div ref={ref} className={`bubble ${pos?.below ? 'below' : ''}`} role="note" aria-label={`${name} says: ${b.text}`}
-      style={{ left: pos?.left ?? -999, top: pos?.top ?? -999, '--tail': `${pos?.tail ?? 20}px` } as CSSProperties}>
-      <span className="bubble-full" aria-hidden>{b.text}</span>
-      <span className="bubble-text" aria-hidden>{b.text.slice(0, n)}</span>
-    </div>
   );
 }

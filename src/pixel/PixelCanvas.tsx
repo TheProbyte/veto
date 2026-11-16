@@ -1,7 +1,7 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react';
 import { PAL, hashStr, rnd } from './palette';
 import { bayer, makeCanvas, px } from './dither';
-import { computeLayout, SceneRenderer, type Layout, type SceneData } from './scene';
+import { computeLayout, SceneRenderer, type CatAct, type Layout, type SceneData } from './scene';
 import { drawCrack, holeAt, type DrawFn } from './sprites';
 import { peekPixelized, pixelize, type Pixelized } from './pixelize';
 import './pixel.css';
@@ -36,8 +36,16 @@ export function motionProfile() {
   return { reduce, low, fps: reduce ? 4 : low ? FPS_LOW : FPS, motes: reduce ? 6 : low ? 17 : 34 };
 }
 
+/** hit-testing the live scene from screen (client) coordinates: the shelf cat */
+export interface SceneApi {
+  /** is the shelf cat (visible, not behind a bust) under this point? */
+  catAt(clientX: number, clientY: number): boolean;
+  /** tap the cat: starts its next reaction (null = missed / it's busy) */
+  pokeCat(clientX: number, clientY: number, touch?: boolean): CatAct | null;
+}
+
 /** One canvas, its own rAF loop (~10-13fps). Scene data is read from a ref, so React never re-renders per frame. Pauses while the tab is hidden. */
-export function PixelScene({ layout, data }: { layout: Layout; data: SceneData }) {
+export function PixelScene({ layout, data, api }: { layout: Layout; data: SceneData; api?: MutableRefObject<SceneApi | null> }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -62,11 +70,21 @@ export function PixelScene({ layout, data }: { layout: Layout; data: SceneData }
       try { r!.frame(c, t, dataRef.current); } catch (e) { console.error(e); dead = true; }
     };
     const start = () => { if (!raf && !dead && !document.hidden) { last = 0; raf = requestAnimationFrame(tick); } };
+    // screen -> scene pixels; a finger gets a bigger target than a mouse
+    const toScene = (x: number, y: number) => {
+      const b = cv.getBoundingClientRect();
+      return { sx: ((x - b.left) * layout.W) / Math.max(1, b.width), sy: ((y - b.top) * layout.H) / Math.max(1, b.height) };
+    };
+    const pad = (touch: boolean) => Math.max(2, Math.ceil((touch ? 14 : 6) / layout.P));
+    if (api) api.current = {
+      catAt: (x, y) => { if (dead || !r) return false; const p = toScene(x, y); return r.catHit(p.sx, p.sy, pad(false)); },
+      pokeCat: (x, y, touch) => { if (dead || !r) return null; const p = toScene(x, y); return r.pokeCat(p.sx, p.sy, pad(!!touch)); },
+    };
     const onVis = () => { if (document.hidden) { cancelAnimationFrame(raf); raf = 0; } else start(); };
     document.addEventListener('visibilitychange', onVis);
     start();
-    return () => { dead = true; cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis); };
-  }, [layout]);
+    return () => { dead = true; cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis); if (api) api.current = null; };
+  }, [layout]); // eslint-disable-line react-hooks/exhaustive-deps
   const style: CSSProperties = { width: layout.W * layout.P, height: layout.H * layout.P };
   return <canvas ref={ref} className="px-scene" style={style} aria-hidden />;
 }

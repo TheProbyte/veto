@@ -760,26 +760,6 @@ canvas { image-rendering: pixelated; }
 @keyframes word-life { 0% { opacity: 0; } 1% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes word-hop { 0% { transform: translateY(0); } 33% { transform: translateY(-5px); } 66% { transform: translateY(-2px); } 100% { transform: translateY(0); } }
 
-/* speech bubbles: fixed layer over everything in the scene, clamped in JS */
-.bubbles { position: fixed; inset: 0; z-index: 45; pointer-events: none; overflow: hidden; }
-.bubble {
-  position: fixed; max-width: min(220px, 60vw); padding: 6px 8px 5px; color: #0b0705; background: #e8d5b5;
-  font-family: var(--px); font-size: calc(var(--pt) * 7); line-height: 1.2; overflow-wrap: anywhere; white-space: pre-wrap;
-  box-shadow: 0 calc(var(--pu) * -1) 0 0 #0b0705, 0 var(--pu) 0 0 #0b0705, calc(var(--pu) * -1) 0 0 0 #0b0705, var(--pu) 0 0 0 #0b0705, calc(var(--pu) * 2) calc(var(--pu) * 3) 0 0 rgba(0,0,0,.45);
-  animation: bubble-in .18s steps(3, end) both, bubble-out .3s steps(3, end) 3.9s forwards;
-}
-.bubble-full { visibility: hidden; }
-.bubble-text { position: absolute; left: 8px; right: 8px; top: 6px; }
-.bubble::after { /* stepped pixel tail pointing at the head */
-  content: ''; position: absolute; left: var(--tail, 20px); top: 100%; width: 9px; height: 9px;
-  background: linear-gradient(#0b0705, #0b0705) 0 0 / 9px 3px no-repeat, linear-gradient(#e8d5b5, #e8d5b5) 3px 0 / 3px 3px no-repeat,
-    linear-gradient(#0b0705, #0b0705) 3px 3px / 6px 3px no-repeat, linear-gradient(#0b0705, #0b0705) 6px 6px / 3px 3px no-repeat;
-  margin-top: 3px;
-}
-.bubble.below::after { top: auto; bottom: 100%; margin: 0 0 3px; transform: scaleY(-1); }
-@keyframes bubble-in { from { transform: scale(.4); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes bubble-out { to { opacity: 0; transform: translateY(-4px); } }
-
 /* reconnect toasts: top-centre, pixel box with a mini bust */
 .px-toasts { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 72; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: min(420px, calc(100vw - 80px)); }
 .px-toast {
@@ -804,7 +784,6 @@ canvas { image-rendering: pixelated; }
 @keyframes slow-vig { 0% { opacity: 0; } 15% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 
 @media (max-width: 640px), (max-height: 500px) and (orientation: landscape) {
-  .bubble { max-width: min(180px, calc(100vw - 16px)); font-size: calc(var(--pt) * 7); }
   .seat-pop-icon { width: 20px; height: 20px; font-size: calc(var(--pt) * 7); }
   .seat-pop-cap { font-size: calc(var(--pt) * 8); padding: 4px 5px 3px 6px; }
   .seat-word { font-size: calc(var(--pt) * 7); }
@@ -815,10 +794,9 @@ canvas { image-rendering: pixelated; }
   .px-toast { font-size: calc(var(--pt) * 8); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .seat-pop-in, .bubble, .px-toast, .slowmo-vig { animation-duration: .01s !important; animation-delay: 0s !important; }
+  .seat-pop-in, .px-toast, .slowmo-vig { animation-duration: .01s !important; animation-delay: 0s !important; }
   .seat-pop-in, .seat-word i { animation: none !important; }
   .seat-word { animation: word-life 1.4s steps(1, end) var(--at, 0ms) both !important; }
-  .bubble { animation: bubble-out .01s steps(1) 3.9s forwards !important; }
   .px-toast { animation: toast-out .01s steps(1) 2.4s forwards !important; }
   .slowmo-vig { animation: slow-vig 1.6s steps(2, end) both !important; }
 }
@@ -835,7 +813,6 @@ canvas { image-rendering: pixelated; }
   user-select: none; -webkit-user-select: none; animation: cm-pop .12s steps(3) both;
 }
 .cm-sub { min-width: 168px; }
-.cm-taunts { min-width: 230px; }
 @keyframes cm-pop { from { transform: scale(.94); opacity: 0 } to { transform: none; opacity: 1 } }
 .cm-item {
   display: flex; align-items: center; gap: 9px; width: 100%; min-height: 28px; padding: 5px 10px 5px 8px; border: 0; border-radius: 0;
@@ -848,12 +825,11 @@ canvas { image-rendering: pixelated; }
 .cm-quote { font-family: var(--px-sm); font-size: calc(var(--pt) * 8); color: var(--amber); }
 .cm-item:hover .cm-quote, .cm-item:focus .cm-quote { color: var(--red2); }
 .cm-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.cm-taunts .cm-label { font-family: var(--px); font-size: calc(var(--pt) * 7); letter-spacing: 0; }
 .cm-arrow { flex: none; margin-left: 10px; font-size: calc(var(--pt) * 8); }
 .cm-sep { height: 2px; margin: 4px 2px; background: var(--ink); box-shadow: 0 var(--pu) 0 0 var(--wood4); opacity: .8; }
 @media (prefers-reduced-motion: reduce) { .cm { animation: none; } }
 
-/* ---------- desktop chat panel (ChatPanel.tsx): docked bottom-left, layout space reserved ---------- */
+/* ---------- desktop emote panel (ChatPanel.tsx: emote buttons + a log of emotes and the barkeep): docked bottom-left, layout space reserved ---------- */
 :root { --chat-w: clamp(272px, 21vw, 340px); --chat-gap: 14px; }
 .chat {
   --face: #1c110a; --hi: #3b2416; --lo: #0b0705;
@@ -879,13 +855,7 @@ canvas { image-rendering: pixelated; }
 .chat-e-ico { font-size: 24px; line-height: 1; }
 .chat-e-lbl { font-family: var(--px-sm); font-size: calc(var(--pt) * 8); font-weight: 400; letter-spacing: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--parch2); }
 .chat-e:hover .chat-e-lbl { color: var(--parch); }
-.chat-taunts { flex: none; display: flex; flex-wrap: wrap; gap: 5px; max-height: clamp(54px, 100vh - 780px, 150px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--wood3) transparent; }
-.chat-t {
-  border: 0; border-radius: 0; padding: 4px 7px 3px; background: var(--wood2); color: var(--parch); font-family: var(--px); font-size: calc(var(--pt) * 7); line-height: 1.1;
-  box-shadow: inset 0 0 0 var(--pu) var(--wood3), 0 var(--pu) 0 0 var(--ink); text-align: left;
-}
-.chat-t:hover:not(:disabled) { background: var(--wood3); color: #fff2d6; }
-.chat-t:disabled, .chat-e:disabled { cursor: var(--cur-default); filter: grayscale(.6) brightness(.6); }
+.chat-e:disabled { cursor: var(--cur-default); filter: grayscale(.6) brightness(.6); }
 .chat-log {
   flex: 1 1 auto; min-height: 60px; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px;
   padding: 8px 6px; background: #0e0906; box-shadow: inset 0 0 0 var(--pu) var(--ink), inset 0 var(--pu) 0 var(--pu) rgba(0,0,0,.4);
@@ -905,14 +875,6 @@ canvas.chat-bust { image-rendering: pixelated; }
 .chat-line.is-narr { display: block; padding: 2px 4px 2px 6px; font-size: calc(var(--pt) * 7); color: rgba(232,213,181,.55); box-shadow: inset var(--pu) 0 0 0 var(--wood3); }
 .chat-line.is-narr .chat-who { color: rgba(255,179,92,.55); margin-right: 6px; }
 .chat-line.is-narr .chat-txt { color: inherit; }
-.chat-say { flex: none; display: flex; gap: 8px; }
-.chat-say input {
-  flex: 1 1 auto; min-width: 0; height: 38px; padding: 0 10px; border: 0; border-radius: 0; background: #0e0906; color: var(--parch);
-  font-family: var(--px); font-size: calc(var(--pt) * 7); box-shadow: inset 0 0 0 var(--pu) var(--wood3);
-}
-.chat-say input:focus { outline: none; box-shadow: inset 0 0 0 var(--pu) var(--amber); }
-.chat-say input::placeholder { color: rgba(232,213,181,.4); }
-.chat-say .px-btn { flex: none; width: 58px; height: 38px; font-size: calc(var(--pt) * 7); --depth: var(--pu); }
 /* collapsed: a slim tab on the left edge */
 .chat-tab {
   position: fixed; z-index: 64; left: 0; bottom: calc(var(--chat-gap) + 40px); display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -1008,3 +970,13 @@ canvas.chat-bust { image-rendering: pixelated; }
 /* result: the cards are see-through wood so the poker room stays in view behind them */
 .gp-result .px-box, .gp-result .sad { --face: rgba(22, 13, 8, .8); }
 .gp-result .gp-never { --face: rgba(42, 15, 11, .8); }
+
+/* the shelf cat is tappable (Saloon.tsx hit-tests it on bare background and sets html.cat-hover under a mouse) */
+html.cat-hover .saloon, html.cat-hover .scene, html.cat-hover .px-scene, html.cat-hover .saloon-ui,
+html.cat-hover .saloon-front, html.cat-hover .saloon-stage { cursor: var(--cur-pointer); }
+
+/* phone emote wheel (emotes only now): four columns that always fit; long labels wrap instead of pushing the grid wider */
+.emo .emo-wheel { width: min(372px, calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right))); padding-left: 7px; padding-right: 7px; }
+.emo-wheel .emo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 4px; }
+.emo-wheel .emo-e { min-width: 0; padding-left: 0; padding-right: 0; }
+.emo-wheel .emo-e span:last-child { font-size: calc(var(--pt) * 7); white-space: normal; text-align: center; line-height: 1.15; }

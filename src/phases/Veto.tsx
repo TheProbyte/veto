@@ -32,7 +32,7 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
   // how many games survive the shootout: 'last' = 1, 'duel' = 2, 'cylinder' / 'slide' = cylinderAt
   const finaleN = settings.finale === 'last' ? 1 : settings.finale === 'duel' ? 2 : (settings.cylinderAt ?? 3);
   const finaleTail = settings.finale === 'last' ? 'last one wins' : settings.finale === 'duel' ? 'then a duel'
-    : settings.finale === 'slide' ? 'then the whiskey slide' : 'then the cylinder';
+    : 'then the vote';
   /** the tin star is private: you only ever know about your own */
   const starred = (g?: { shieldedBy?: string[] }) => !!g?.shieldedBy?.includes(me);
   useShotExtras(state, skew);
@@ -118,6 +118,8 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
     }
   };
   const onEnd = (e: React.PointerEvent) => { if (drag.current?.id === e.pointerId) drag.current = null; };
+  /** a press that started on the protect badge never fires, even if it's released over the box */
+  const fromBadge = useRef(false);
 
   const [epi, setEpi] = useState<number | null>(null);
   const epiGame = dead.find((g) => g.appid === epi);
@@ -196,11 +198,14 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
           return (
             <div
               key={g.appid}
-              className={`cbox ${isC ? 'center' : ''}`}
+              className={`cbox ${isC ? 'center' : ''} ${isC && canFire ? 'vt-shootable' : ''}`}
               style={style}
+              onPointerDownCapture={(e) => { fromBadge.current = !!(e.target as HTMLElement).closest?.('.vt-badge'); }}
               onClick={() => {
                 if (swiped.current) { swiped.current = false; return; }
-                if (!isC && myTurn && !hush) { sfx.whoosh(); send({ t: 'aim', appid: g.appid }); }
+                if (fromBadge.current) { fromBadge.current = false; return; }
+                if (isC) { if (canFire) fire(); return; }
+                if (myTurn && !hush) { sfx.whoosh(); send({ t: 'aim', appid: g.appid }); }
               }}
             >
               <div className="cbox-bob">
@@ -246,11 +251,11 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
           revenge={!!revengeOn}
           bang={bang}
           onFire={fire}
-          label={canFire ? (revengeOn ? 'AVENGE' : 'FIRE') : hush ? '' : `Waiting on ${shooterName}`}
+          label={canFire || hush ? '' : `Waiting on ${shooterName}`}
           aimName={center?.name}
         />
         <button className="vt-arrow px-btn" disabled={!canFire || n < 2} onPointerEnter={() => sfx.hover()} onClick={() => aimAt(1)} aria-label="Aim right">▶</button>
-        {canFire && <div className="vt-hint">◀ ▶ aim · Space fires</div>}
+        {canFire && <div className="vt-hint">◀ ▶ aim · click or Space fires</div>}
       </div>
 
       {dead.length > 0 && (

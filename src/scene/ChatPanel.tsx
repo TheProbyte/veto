@@ -1,9 +1,9 @@
-// Desktop chat: an always-open side panel (emotes, taunts, a text box, and a log of what was said).
+// Desktop chat: an always-open side panel (the emote buttons and a log of emotes + the barkeep's lines). No typed text.
 // EmoteBar owns the cooldowns + the event subscription and renders this on wide, mouse-driven screens.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { RoomProps } from '../props';
-import { EMOTES, SAY_MAX, TAUNTS, type EmoteId, type Look, type RoomEvent } from '../../shared/types';
+import { EMOTES, type EmoteId, type Look, type RoomEvent } from '../../shared/types';
 import { MiniBust } from '../pixel/BustPreview';
 import { computeLayout } from '../pixel/scene';
 import { PixelSprite } from '../pixel/PixelCanvas';
@@ -63,14 +63,14 @@ export function useDeskChat(phase?: string) {
 
 /* ---------- the log ---------- */
 export interface LogEntry {
-  id: number; kind: 'say' | 'emote' | 'narrate'; at: number; text: string;
+  id: number; kind: 'emote' | 'narrate'; at: number; text: string;
   who?: { id: string; name: string; look: number; style?: Look; bot?: boolean; me: boolean };
 }
 const LOG_MAX = 80;
 // seeded from the clock so ids stay unique even if this module is re-evaluated (hot reload) under a live log
 let logSeq = Date.now();
 
-/** collects say / emote / narrate events (with a snapshot of who sent them) */
+/** collects emote / narrate events (with a snapshot of who sent them); typed 'say' lines are ignored */
 export function useChatLog({ on, state, me }: RoomProps) {
   const [log, setLog] = useState<LogEntry[]>([]);
   const players = useRef(state.players);
@@ -78,11 +78,10 @@ export function useChatLog({ on, state, me }: RoomProps) {
   useEffect(() => on((e: RoomEvent) => {
     let ent: LogEntry | null = null;
     if (e.t === 'narrate') ent = { id: ++logSeq, kind: 'narrate', at: e.at || Date.now(), text: String(e.text) };
-    else if (e.t === 'say' || e.t === 'emote') {
+    else if (e.t === 'emote' && e.emote in EMOTES) {
       const p = players.current.find((x) => x.id === e.pid);
       const who = p ? { id: p.id, name: p.name, look: p.look, style: p.style, bot: p.bot, me: p.id === me } : undefined;
-      if (e.t === 'say') ent = { id: ++logSeq, kind: 'say', at: e.at || Date.now(), text: String(e.text).slice(0, 120), who };
-      else if (e.emote in EMOTES) ent = { id: ++logSeq, kind: 'emote', at: e.at || Date.now(), text: e.emote, who };
+      ent = { id: ++logSeq, kind: 'emote', at: e.at || Date.now(), text: e.emote, who };
     }
     if (ent) { const x = ent; setLog((l) => [...l.slice(-(LOG_MAX - 1)), x]); }
   }), [on, me]);
@@ -105,23 +104,21 @@ function useStageTop() {
 const time = (t: number) => { try { return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
 
 /* ---------- the panel ---------- */
-export default function ChatPanel({ log, emote, say, emoteCool, sayCool, open: isOpen, focusKey }: {
-  log: LogEntry[]; emote: (id: EmoteId) => void; say: (t: string) => boolean;
-  emoteCool: boolean; sayCool: boolean; open: boolean; focusKey: number;
+export default function ChatPanel({ log, emote, emoteCool, open: isOpen, focusKey }: {
+  log: LogEntry[]; emote: (id: EmoteId) => void; emoteCool: boolean; open: boolean; focusKey: number;
 }) {
-  const [text, setText] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const seen = useRef(log.length ? log[log.length - 1].id : 0);
   const [unread, setUnread] = useState(0);
   const top = useStageTop();
 
-  // E (from EmoteBar) focuses the text box, opening the panel if needed
+  // E (from EmoteBar) opens the panel (or collapses it again); a remount with an already-handled key does nothing
+  const handledKey = useRef(focusKey);
   useEffect(() => {
-    if (!focusKey) return;
-    if (!isOpen) setChatOpen(true);
-    window.setTimeout(() => inputRef.current?.focus(), 0);
+    if (!focusKey || focusKey === handledKey.current) return;
+    handledKey.current = focusKey;
+    setChatOpen(!isOpen);
   }, [focusKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // keep the log pinned to the newest line (unless you scrolled up); count unread while collapsed
@@ -136,8 +133,7 @@ export default function ChatPanel({ log, emote, say, emoteCool, sayCool, open: i
     }
   }, [log, isOpen]);
 
-  const submit = () => { if (say(text)) setText(''); };
-  // Space on a focused emote / taunt button belongs to the game (FIRE, BANG, slide), not to the button
+  // Space on a focused emote button belongs to the game (FIRE, BANG, slide), not to the button
   const btnKeys = {
     onKeyDown: (e: RKeyboardEvent) => { if (e.key === ' ') e.preventDefault(); },
     onKeyUp: (e: RKeyboardEvent) => { if (e.key === ' ') e.preventDefault(); },
@@ -146,9 +142,9 @@ export default function ChatPanel({ log, emote, say, emoteCool, sayCool, open: i
 
   if (!isOpen) {
     return createPortal(
-      <button type="button" className="chat-tab" onClick={() => { sfx.click(); setChatOpen(true); }} aria-label={`Open chat${unread ? ` (${unread} new)` : ''}`} title="Chat (E)" {...btnKeys}>
+      <button type="button" className="chat-tab" onClick={() => { sfx.click(); setChatOpen(true); }} aria-label={`Open emotes${unread ? ` (${unread} new)` : ''}`} title="Emotes (E)" {...btnKeys}>
         <PixelSprite draw={drawBubble} w={13} h={11} className="chat-tab-ico" />
-        <span className="chat-tab-txt">Chat</span>
+        <span className="chat-tab-txt">Emotes</span>
         {unread > 0 && <span className="chat-tab-n">{unread > 9 ? '9+' : unread}</span>}
       </button>,
       document.body,
@@ -157,11 +153,11 @@ export default function ChatPanel({ log, emote, say, emoteCool, sayCool, open: i
 
   return createPortal(
     // pointer presses stay in the panel (a click here is never a duel BANG)
-    <aside className="chat px-box" aria-label="Chat and emotes" style={{ '--stage-top': `${top}px` } as CSSProperties} onPointerDown={(e) => e.stopPropagation()}>
+    <aside className="chat px-box" aria-label="Emotes" style={{ '--stage-top': `${top}px` } as CSSProperties} onPointerDown={(e) => e.stopPropagation()}>
       <div className="chat-head">
-        <span className="chat-title">Chat</span>
+        <span className="chat-title">Emotes</span>
         <span className="chat-key" aria-hidden>E</span>
-        <button type="button" className="chat-min" onClick={(e) => { blurAfter(e); setChatOpen(false); }} aria-label="Collapse chat" title="Collapse" {...btnKeys}>◂</button>
+        <button type="button" className="chat-min" onClick={(e) => { blurAfter(e); setChatOpen(false); }} aria-label="Collapse emotes" title="Collapse" {...btnKeys}>◂</button>
       </div>
       <div className="chat-emotes" role="group" aria-label="Emotes">
         {(Object.keys(EMOTES) as EmoteId[]).map((id) => (
@@ -171,33 +167,11 @@ export default function ChatPanel({ log, emote, say, emoteCool, sayCool, open: i
           </button>
         ))}
       </div>
-      <div className="chat-taunts" role="group" aria-label="Taunts">
-        {TAUNTS.map((t) => (
-          <button key={t} type="button" className="chat-t" disabled={sayCool} onClick={(e) => { blurAfter(e); say(t); }} {...btnKeys}>{t}</button>
-        ))}
-      </div>
       <div className="chat-log" ref={logRef} role="log" aria-live="polite"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }}>
         {!log.length && <div className="chat-empty">Quiet in here.</div>}
         {log.map((l) => <Line key={l.id} l={l} />)}
       </div>
-      <form className="chat-say" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value.slice(0, SAY_MAX))}
-          // typing never reaches the game's keys; Escape hands them back
-          onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') e.currentTarget.blur(); }}
-          onKeyUp={(e) => e.stopPropagation()}
-          maxLength={SAY_MAX}
-          enterKeyHint="send"
-          placeholder={sayCool ? 'Catch your breath…' : 'Say something…'}
-          aria-label="Say something"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <button type="submit" className="px-btn" disabled={sayCool || !text.trim()} {...btnKeys}>Say</button>
-      </form>
     </aside>,
     document.body,
   );
@@ -214,9 +188,7 @@ function Line({ l }: { l: LogEntry }) {
       {w ? <MiniBust p={{ id: w.id, look: w.look, style: w.style, bot: w.bot }} className="chat-bust" style={{ height: 30, width: 'auto' } as CSSProperties} /> : <span className="chat-bust" />}
       <div className="chat-body">
         <span className="chat-who">{name}</span>
-        {l.kind === 'say'
-          ? <span className="chat-txt">{l.text}</span>
-          : <span className="chat-txt chat-act"><i aria-hidden><PixelIcon name={l.text} /></i> {EMOTE_LOG[l.text] ?? l.text}</span>}
+        <span className="chat-txt chat-act"><i aria-hidden><PixelIcon name={l.text} /></i> {EMOTE_LOG[l.text] ?? l.text}</span>
       </div>
     </div>
   );

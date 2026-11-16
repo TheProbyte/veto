@@ -23,14 +23,15 @@ let noiseBuf: AudioBuffer | null = null;
 let impulse: AudioBuffer | null = null;
 let engine: MusicEngine | null = null;
 let wantMusic: MusicMode = 'off';
-// v2 keys: the old 'nah.volume' / 'nah.musicVolume' were linear and much louder; everyone starts at the new defaults
-const KEY_FX = 'nah.vol2.fx', KEY_MUSIC = 'nah.vol2.music', KEY_VOICE = 'nah.vol2.voice';
-const DEFAULT_FX = 0.35, DEFAULT_MUSIC = 0.25;
+// v3 keys: new defaults (music 30, effects 20, voice 30); levels saved under the older 'nah.vol2.*' / 'nah.volume'
+// keys are ignored so everyone starts at these. Mute ('nah.muted') carries over.
+const KEY_FX = 'nah.vol3.fx', KEY_MUSIC = 'nah.vol3.music', KEY_VOICE = 'nah.vol3.voice';
+const DEFAULT_FX = 0.2, DEFAULT_MUSIC = 0.3, DEFAULT_VOICE = 0.3;
 let muted = readMuted();
 let volume = readLevel(KEY_FX, DEFAULT_FX);
 let musicVolume = readLevel(KEY_MUSIC, DEFAULT_MUSIC);
-/** null = follows the Effects slider (until the Voice slider is moved) */
-let voiceVolume: number | null = readLevel(KEY_VOICE, null);
+/** the Voice slider's own level (null would mean "follows the Effects slider") */
+let voiceVolume: number | null = readLevel(KEY_VOICE, DEFAULT_VOICE);
 // overall mix trims on top of the slider curve (effects ~-1.4 dB, music a bit more)
 const FX_TRIM = 0.85;
 const MUSIC_TRIM = 0.7;    // music sits under the effects at equal slider positions
@@ -533,7 +534,7 @@ export const sfx = {
     duckRain();
   },
   getMusicMode(): MusicMode { return wantMusic; },
-  setMusicVolume(v: number) { // music slider position 0..1 (gain = v², persisted 'nah.vol2.music')
+  setMusicVolume(v: number) { // music slider position 0..1 (gain = v², persisted 'nah.vol3.music')
     musicVolume = Number.isFinite(v) ? clamp01(v) : musicVolume;
     saveLevel(KEY_MUSIC, musicVolume);
     applyLevel();
@@ -588,7 +589,7 @@ export const sfx = {
     try { localStorage.setItem('nah.muted', m ? '1' : '0'); } catch {}
     applyLevel();
   },
-  setVolume(v: number) {   // effects slider position 0..1 (gain = v², persisted 'nah.vol2.fx')
+  setVolume(v: number) {   // effects slider position 0..1 (gain = v², persisted 'nah.vol3.fx')
     volume = Number.isFinite(v) ? clamp01(v) : volume;
     saveLevel(KEY_FX, volume);
     applyLevel();
@@ -1119,6 +1120,63 @@ export const sfx = {
     if (!ready()) return;
     glassClink(now() + 0.01);
     noiseHit(now() + 0.01, 'lowpass', 900, 0.12, 0.03);
+  },
+  meow(chirp = false) {     // the shelf cat: a short nasal "mi-aow" (saw through a sweeping bandpass); chirp = a quick "mrrp?"
+    if (!ready()) return;
+    const t = now() + 0.01;
+    if (chirp) {
+      const o = ctx!.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(480, t);
+      o.frequency.exponentialRampToValueAtTime(760, t + 0.12);
+      const lfo = ctx!.createOscillator(), lg = ctx!.createGain();
+      lfo.frequency.value = 38; lg.gain.value = 60;
+      lfo.connect(lg).connect(o.frequency);
+      const g = ctx!.createGain();
+      env(g, t, 0.18, 0.02, 0.16);
+      o.connect(g);
+      out(g, 0.2);
+      o.start(t); lfo.start(t);
+      o.stop(t + 0.25); lfo.stop(t + 0.25);
+      return;
+    }
+    const o = ctx!.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(520, t);
+    o.frequency.linearRampToValueAtTime(820, t + 0.14);
+    o.frequency.linearRampToValueAtTime(760, t + 0.26);
+    o.frequency.exponentialRampToValueAtTime(430, t + 0.5);
+    const f = filt('bandpass', 900, 3);
+    f.frequency.setValueAtTime(700, t);
+    f.frequency.linearRampToValueAtTime(1900, t + 0.16);
+    f.frequency.exponentialRampToValueAtTime(800, t + 0.5);
+    const g = ctx!.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.3, t + 0.05);
+    g.gain.setValueAtTime(0.3, t + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+    o.connect(f).connect(g);
+    out(g, 0.25);
+    o.start(t);
+    o.stop(t + 0.6);
+  },
+  hiss() {                 // the shelf cat arches its back: a breathy hiss with a little spit at the front
+    if (!ready()) return;
+    const t = now() + 0.01;
+    noiseHit(t, 'bandpass', 2600, 0.09, 0.05, 0.05, 1.5);
+    noiseHit(t + 0.04, 'highpass', 3200, 0.2, 0.55, 0.12, 0.8);
+    noiseHit(t + 0.04, 'bandpass', 5200, 0.1, 0.45, 0.12, 2);
+  },
+  shatter() {              // a bottle hits the boards: a hard tick, a burst of bright glass noise, then tinkling bits
+    if (!ready()) return;
+    const t = now() + 0.01;
+    noiseHit(t, 'lowpass', 600, 0.25, 0.04);
+    noiseHit(t, 'highpass', 3500, 0.32, 0.22, 0.3, 0.9);
+    noiseHit(t + 0.01, 'bandpass', 6500, 0.18, 0.35, 0.3, 3);
+    for (let i = 0; i < 6; i++) {
+      const f = rnd(2600, 5200), at = t + 0.05 + i * rnd(0.03, 0.07);
+      tone(at, 'sine', f, f * 0.99, 0.045 / (1 + i * 0.3), 0.12, 0.5, 0.001);
+    }
   },
   steam() {                // angry kettle: two short hisses
     if (!ready()) return;

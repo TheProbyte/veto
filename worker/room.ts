@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { BadgeId, BoardGame, Intent, Launch, Phase, Player, PoolGame, PosseRecord, ProfileStats, RoomEvent, RoomState, ServerMsg, Settings, ShotEvent } from '../shared/types';
-import { DEFAULT_SETTINGS, DRAFT_BURNS, DRAFT_HAND, EMOTES, LOOK_COUNTS, SAY_MAX, lookUnlocked, randomLook, type EmoteId, type Look } from '../shared/types';
+import type { BadgeId, BoardGame, FinaleKind, Intent, Launch, Mini, MiniResult, Phase, Player, PoolGame, PosseRecord, ProfileStats, RoomEvent, RoomState, ServerMsg, Settings, ShotEvent } from '../shared/types';
+import { DEFAULT_SETTINGS, DRAFT_BURNS, DRAFT_HAND, EMOTES, FINALE_KINDS, LOOK_COUNTS, lookUnlocked, randomLook, type EmoteId, type Look } from '../shared/types';
 import { EXPLAIN_MS } from '../shared/voiced';
 import { SLIDE_ANIM_MS, SLIDE_INTRO_MS, SLIDE_RESULT_MS, SLIDE_TURN_MS, slideDist, slideMark, slideOutcome } from './slide';
 import { NARRATOR, pickLine, type NarrKey } from '../shared/narrator';
@@ -10,17 +10,24 @@ import { ownedGames, playerSummary, resolveSteamId, storeBits, type Env, type Ow
 const SHOT_PAUSE = 3200; // ms to let the shot FX + the game's last words land before the next fuse starts
 const SPIN_MS = 6500;
 const NARR_GAP = 2500;
+const VOTE_MS = 25_000;      // finale vote window (plus the how_vote explanation when it plays)
+const VOTE_PICK_MS = 2_500;  // the picked finale is shown this long before it starts
+const MINI_INTRO_MS = 2_500; // mini: play opens after the intro line (plus the how_* explanation when it plays)
+const MINI_MS: Record<Mini['kind'], number> = { slide: 25_000, golf: 90_000, horse: 30_000 };
+const MINI_RESULT_MS = 3_500; // mini winner shown this long before the result screen
+const STALE_MS = 2_500;       // cosmetic jobs this overdue are dropped (e.g. reloaded from storage after hibernation)
 const NARR_HIGH = 6;
 // higher wins when several fire at once; >= NARR_HIGH may cut into the 2.5s throttle window
 const NARR_PRI: Partial<Record<NarrKey, number>> = {
   kill: 1, crack: 2, misfire: 2, fuse_low: 2, first_blood: 3, spree: 4, slowmo: 5,
   draw: 6, cylinder: 6, rematch: 6, ricochet: 7, revenge: 8, duel: 7, duel_foul: 8, duel_win: 8, result: 9, repeat: 9,
-  slide: 7, slide_fall: 7, slide_close: 7, slide_win: 8, sheriff: 6, pardon: 7, jail: 6, ousted: 8,
+  slide: 7, slide_fall: 7, slide_close: 7, slide_win: 8, vote: 7, golf: 7, horse: 7, sheriff: 6, pardon: 7, jail: 6, ousted: 8,
   draft: 6, trade: 4, burn: 3, saddle: 9, straggler: 7,
   how_lobby: 6, how_nominate: 6, how_draft: 6, how_veto: 6, how_star: 6, how_slide: 6, how_cylinder: 6, how_duel: 7, how_result: 6,
+  how_vote: 6, how_golf: 6, how_horse: 6,
 };
 // phase-change cues always cut in (even over an equal/higher line still ringing)
-const CUES = new Set<NarrKey>(['how_lobby', 'how_nominate', 'how_draft', 'how_veto', 'how_star', 'how_slide', 'how_cylinder', 'how_duel', 'how_result', 'draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat', 'slide', 'slide_win', 'saddle', 'ousted', 'draft']);
+const CUES = new Set<NarrKey>(['how_lobby', 'how_nominate', 'how_draft', 'how_veto', 'how_star', 'how_slide', 'how_cylinder', 'how_duel', 'how_result', 'how_vote', 'how_golf', 'how_horse', 'vote', 'golf', 'horse', 'draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat', 'slide', 'slide_win', 'saddle', 'ousted', 'draft']);
 const BOT_NAMES = ['Dusty Pete', 'One-Eye Jack', 'Calamity Sue', 'Tumbleweed Tim', 'Sagebrush Sal', 'Two-Bit Earl', 'Whiskey Nell', 'Slim Pickens', 'Rattlesnake Ray', 'Biscuit Bill'];
 const FAKE_LIB: [number, string][] = [[730, 'Counter-Strike 2'], [252490, 'Rust'], [892970, 'Valheim'], [1966720, 'Lethal Company'],
   [548430, 'Deep Rock Galactic'], [105600, 'Terraria'], [413150, 'Stardew Valley'], [632360, 'Risk of Rain 2'], [739630, 'Phasmophobia'],
@@ -38,6 +45,8 @@ const shuffle = <T,>(a: T[]): T[] => {
 const rnd = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1));
 const pick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+/** untrusted number list: at most `max` finite numbers, clamped, 2 decimals */
+const nums = (a: unknown[], max: number) => a.slice(0, max).map(Number).filter(Number.isFinite).map((v) => Math.round(clamp(v, -1e6, 1e6) * 100) / 100);
 // control chars, zero-width and bidi overrides (no regex literals: keeps the source ASCII)
 const invisible = (c: number) => c < 0x20 || (c >= 0x7f && c <= 0x9f) || (c >= 0x200b && c <= 0x200f) || (c >= 0x2028 && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069) || c === 0xfeff;
 const isKill = (e: ShotEvent) => e.kind === 'hit' || e.kind === 'misfire';
@@ -45,12 +54,12 @@ const isKill = (e: ShotEvent) => e.kind === 'hit' || e.kind === 'misfire';
 class Bad extends Error {}
 /** game actions held while the Barkeep explains a step (chat, emotes, looks, settings are not) */
 const HELD = new Set<Intent['t']>(['nominate', 'draftPlay', 'draftBurn', 'draftOffer', 'draftAccept', 'pitch', 'react',
-  'beginVeto', 'fire', 'aim', 'shield', 'slide', 'bang', 'pardon', 'jail', 'oust', 'start']);
+  'beginVeto', 'fire', 'aim', 'shield', 'slide', 'bang', 'pardon', 'jail', 'oust', 'start', 'finaleVote', 'back', 'golfDone', 'horseDone']);
 
 /** Timed server work (bots, fuse warnings, delayed narration). All driven by the single DO alarm. */
 interface Job {
   at: number;
-  k: 'bnom' | 'baim' | 'bfire' | 'bstar' | 'bbang' | 'bemote' | 'fuse' | 'narr' | 'bslide' | 'boffer' | 'bpardon' | 'bjail' | 'bready';
+  k: 'bnom' | 'baim' | 'bfire' | 'bstar' | 'bbang' | 'bemote' | 'fuse' | 'narr' | 'bslide' | 'boffer' | 'bpardon' | 'bjail' | 'bready' | 'bvote' | 'bmini';
   ph: Phase; // dropped as soon as the room leaves this phase
   pid?: string;
   seq?: number; // turn sequence (veto turn jobs)
@@ -77,8 +86,10 @@ interface X {
   sheriffRot: number; // sheriff rotation counter
   explained: string[]; // how_* keys already explained at this table (each plays once; resetRecord replays them)
   recentLines: Record<string, number>; // narration line id -> when it last played (cooldown against repeats)
+  skips: string[]; // humans who tapped "skip" on the current explanation (reset when a new one starts)
+  miniAt: number; // mini: when to judge (everyone's in; slide waits for the last glass to stop)
 }
-const freshX = (): X => ({ jobs: [], seq: 0, turnStart: 0, fireMs: {}, misfires: [], finaleAt: 0, slideAt: 0, hands: {}, deck: [], offerSeq: 0, sheriffRot: 0, explained: [], recentLines: {} });
+const freshX = (): X => ({ jobs: [], seq: 0, turnStart: 0, fireMs: {}, misfires: [], finaleAt: 0, slideAt: 0, hands: {}, deck: [], offerSeq: 0, sheriffRot: 0, explained: [], recentLines: {}, skips: [], miniAt: 0 });
 const emptyRecord = (): PosseRecord => ({ rounds: 0, wins: [], vetoers: [], noms: [], streaks: [] });
 
 function fresh(code: string): RoomState {
@@ -96,7 +107,7 @@ export class Room extends DurableObject<Env> {
   poolGen = 0;
   alarmAt = 0; // last alarm we set, so we don't rewrite it on every broadcast (storage writes count on the free plan)
   // in-memory only (fine to lose on eviction)
-  narrPending?: { key: NarrKey; pri: number };
+  narrPending?: { key: NarrKey; pri: number; id?: string };
   narrAt = 0;
   narrPri = 0;
   narrId?: string;
@@ -108,6 +119,9 @@ export class Room extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       const raw: RoomState & { _x?: X } = (await ctx.storage.get<RoomState & { _x?: X }>('s')) ?? fresh('');
       this.x = { ...freshX(), ...(raw._x ?? {}) };
+      // cosmetic jobs that already ran aren't removed from storage (no write for them): never replay them after a reload
+      const now = Date.now();
+      this.x.jobs = this.x.jobs.filter((j) => !TRANSIENT.has(j.k) || j.at > now - STALE_MS);
       delete raw._x;
       const s = (this.s = raw);
       s.pitches ??= [];
@@ -152,8 +166,7 @@ export class Room extends DurableObject<Env> {
   alive() { return this.s.board.filter((g) => g.alive); }
   /** how many games remain when the shooting stops */
   threshold() {
-    const st = this.s.settings;
-    return st.finale === 'cylinder' || st.finale === 'slide' ? st.cylinderAt : st.finale === 'duel' ? 2 : 1;
+    return this.s.settings.cylinderAt === 2 ? 2 : 3; // the finale vote opens at this many games
   }
 
   /** persist=false for cosmetic/transient updates (aim moves, partial pool loads) to save storage writes */
@@ -203,9 +216,10 @@ export class Room extends DurableObject<Env> {
       try { ws.send(json); } catch {}
     }
   }
-  narr(key: NarrKey) {
+  /** `id` forces a specific line of that key */
+  narr(key: NarrKey, id?: string) {
     const pri = NARR_PRI[key] ?? 1;
-    if (!this.narrPending || pri > this.narrPending.pri) this.narrPending = { key, pri };
+    if (!this.narrPending || pri > this.narrPending.pri) this.narrPending = { key, pri, id };
   }
   flushNarr() {
     const n = this.narrPending;
@@ -213,7 +227,7 @@ export class Room extends DurableObject<Env> {
     this.narrPending = undefined;
     const now = Date.now();
     if (now - this.narrAt < NARR_GAP && !(n.pri >= NARR_HIGH && (n.pri > this.narrPri || CUES.has(n.key)))) return;
-    const line = pickLine(n.key, this.narrId);
+    const line = (n.id && NARRATOR[n.key].lines.find((l) => l.id === n.id)) || pickLine(n.key, this.narrId);
     // cooldown: don't repeat the same recorded line within 90 s (phase cues and explanations excepted)
     const last = this.x.recentLines[line.id] ?? 0;
     if (!CUES.has(n.key) && now - last < 90_000) return;
@@ -237,6 +251,7 @@ export class Room extends DurableObject<Env> {
   explain(key: NarrKey, delay: number, ph = this.s.phase): number {
     if (!this.s.settings.explain || this.x.explained.includes(key)) return 0;
     this.x.explained.push(key);
+    this.x.skips = []; // a new explanation: everyone has to skip again
     const ms = EXPLAIN_MS[key] ?? 5000;
     const s = this.s, now = Date.now();
     // queue behind an explanation that's still running (e.g. the star tip right after the shot rules)
@@ -262,6 +277,11 @@ export class Room extends DurableObject<Env> {
       const sl = s.slide;
       const t = sl.decidedAt ? sl.decidedAt + SLIDE_RESULT_MS : x.slideAt || sl.turnDeadline;
       if (t) ts.push(t);
+    } else if (s.phase === 'vote' && s.vote) {
+      ts.push(s.vote.picked ? (s.vote.pickedAt ?? 0) + VOTE_PICK_MS : s.vote.deadline);
+    } else if (s.phase === 'mini' && s.mini) {
+      const m = s.mini;
+      ts.push(m.decidedAt ? m.decidedAt + MINI_RESULT_MS : x.miniAt || m.deadline);
     }
     const at = ts.length ? Math.min(...ts) : 0;
     if (at === this.alarmAt) return;
@@ -303,6 +323,8 @@ export class Room extends DurableObject<Env> {
         sl.turnDeadline = Math.min(sl.turnDeadline, Math.max(Date.now(), sl.turnDeadline - SLIDE_TURN_MS) + 4000);
       }
       this.narr('leave');
+      this.checkVote();
+      this.checkMini();
       this.broadcast();
     }
   }
@@ -503,12 +525,59 @@ export class Room extends DurableObject<Env> {
         this.event({ t: 'emote', pid, emote: i.emote, at: Date.now() });
         return;
       }
-      case 'say': {
+      case 'say': return; // chat text was removed from the client: accepted, dropped silently
+      case 'skipExplain': return this.skipExplain(pid);
+      case 'finaleVote': {
+        const v = s.vote;
+        if (s.phase !== 'vote' || !v) throw new Bad('No vote right now.');
+        if (v.picked) throw new Bad('Too late, partner. It\u2019s decided.');
         this.me(pid);
-        if (this.limited('s:' + pid, 2000)) return;
-        const text = [...String(i.text ?? '').slice(0, 500)].filter((ch) => !invisible(ch.codePointAt(0)!)).join('').trim().slice(0, SAY_MAX).trim();
-        if (!text) return;
-        this.event({ t: 'say', pid, text, at: Date.now() });
+        const kind = i.kind as FinaleKind;
+        if (!FINALE_KINDS.includes(kind)) throw new Bad('Unknown finale.');
+        if (v.votes[pid] === kind) return;
+        v.votes[pid] = kind;
+        this.checkVote();
+        this.broadcast();
+        return;
+      }
+      case 'back': {
+        const appid = Number(i.appid);
+        this.me(pid);
+        if (s.phase === 'vote' && s.vote) {
+          if (s.vote.picked) throw new Bad('Too late to switch sides.');
+          if (!s.vote.games.includes(appid)) throw new Bad('Only a finalist can be backed.');
+          s.vote.backs[pid] = appid;
+        } else if (s.phase === 'mini' && s.mini) {
+          const m = s.mini;
+          if (!m.players.includes(pid)) throw new Bad("You're watching this one.");
+          if (m.decidedAt || m.results[pid]) throw new Bad('Too late to switch sides.');
+          if (!m.games.includes(appid)) throw new Bad('Only a finalist can be backed.');
+          m.backs[pid] = appid;
+        } else throw new Bad('Nothing to back right now.');
+        this.broadcast();
+        return;
+      }
+      case 'golfDone': {
+        const m = this.miniFor(pid, 'golf');
+        const strokes = Number(i.strokes), ms = Number(i.ms);
+        if (!Number.isFinite(strokes) || !Number.isFinite(ms)) throw new Bad('Bad scorecard.');
+        this.miniGolf(m, pid, strokes, ms);
+        this.broadcast();
+        return;
+      }
+      case 'horseDone': {
+        const m = this.miniFor(pid, 'horse');
+        const score = Number(i.score);
+        if (!Number.isFinite(score)) throw new Bad('Bad landing.');
+        this.miniHorse(m, pid, score, Array.isArray(i.inputs) ? i.inputs : []);
+        this.broadcast();
+        return;
+      }
+      case 'miniMove': {
+        const m = s.mini;
+        if (s.phase !== 'mini' || !m || m.decidedAt || !m.players.includes(pid)) return;
+        if (!Array.isArray(i.data) || this.limited('m:' + pid, 120)) return;
+        this.event({ t: 'mini', pid, data: nums(i.data, 16), at: Date.now() });
         return;
       }
       case 'start': {
@@ -621,6 +690,14 @@ export class Room extends DurableObject<Env> {
         return;
       }
       case 'slide': {
+        if (s.phase === 'mini') {
+          const m = this.miniFor(pid, 'slide');
+          const power = Number(i.power);
+          if (!Number.isFinite(power)) throw new Bad('Bad slide.');
+          this.miniSlide(m, pid, power);
+          this.broadcast();
+          return;
+        }
         const sl = s.slide;
         if (s.phase !== 'slide' || !sl || sl.decidedAt || this.x.slideAt || sl.turn >= sl.order.length) throw new Bad('No glass to slide right now.');
         if (sl.champs[sl.order[sl.turn]] !== pid) throw new Bad("Not your glass, partner.");
@@ -759,6 +836,7 @@ export class Room extends DurableObject<Env> {
         s.phase = 'nominate';
         s.board = []; s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.result = undefined; s.duel = undefined;
         s.slide = undefined; s.sheriff = undefined; s.launch = undefined; this.x.slideAt = 0;
+        s.vote = undefined; s.mini = undefined; this.x.miniAt = 0;
         s.turnOrder = []; s.turnIdx = 0; s.turnDeadline = 0; s.aim = undefined;
         for (const p of s.players) p.revengeOn = undefined;
         this.openNominations();
@@ -968,6 +1046,8 @@ export class Room extends DurableObject<Env> {
       else this.checkOust();
     }
     if (s.launch) delete s.launch.ready[id];
+    if (s.vote) { delete s.vote.votes[id]; delete s.vote.backs[id]; }
+    if (s.mini && !s.mini.decidedAt && !s.mini.results[id]) { s.mini.players = s.mini.players.filter((p) => p !== id); delete s.mini.backs[id]; }
     this.x.jobs = this.x.jobs.filter((j) => j.pid !== id);
     this.libs.delete(id);
     this.ctx.storage.delete(`lib:${id}`);
@@ -975,6 +1055,8 @@ export class Room extends DurableObject<Env> {
       const n = s.players.find((q) => !q.bot && q.connected) ?? s.players.find((q) => !q.bot);
       if (n) n.host = true;
     }
+    this.checkVote();
+    this.checkMini();
   }
 
   // ---------- bots ----------
@@ -1115,6 +1197,27 @@ export class Room extends DurableObject<Env> {
         s.launch.ready[b.id] = 'ready';
         return true;
       }
+      case 'bvote': {
+        const v = s.vote;
+        if (s.phase !== 'vote' || !v || v.picked || v.votes[b.id]) return false;
+        v.votes[b.id] = pick(FINALE_KINDS);
+        this.checkVote();
+        return true;
+      }
+      case 'bmini': {
+        const m = s.mini;
+        if (s.phase !== 'mini' || !m || m.decidedAt || !m.players.includes(b.id) || m.results[b.id] || Date.now() >= m.deadline) return false;
+        if (m.kind === 'slide') {
+          const noise = (Math.random() + Math.random() + Math.random() - 1.5) * 0.1;
+          this.miniSlide(m, b.id, clamp((m.mark ?? 0.8) / 1.18 + noise, 0, 1));
+        } else if (m.kind === 'golf') {
+          this.miniGolf(m, b.id, rnd(2, 6), Math.max(0, Date.now() - m.startedAt));
+        } else {
+          const jump = rnd(300, 1500), on = jump + rnd(200, 600), off = on + rnd(300, 1200);
+          this.miniHorse(m, b.id, rnd(20, 98), [jump, on, off]);
+        }
+        return true;
+      }
     }
     return false;
   }
@@ -1134,9 +1237,9 @@ export class Room extends DurableObject<Env> {
     for (const p of s.players) { p.shieldUsed = false; p.revengeOn = undefined; p.badges = undefined; }
     s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; g.cracks = 0; g.lastWords = undefined; });
     s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.duel = undefined; s.result = undefined;
-    s.slide = undefined; s.launch = undefined;
+    s.slide = undefined; s.launch = undefined; s.vote = undefined; s.mini = undefined;
     this.clearDraft();
-    x.fireMs = {}; x.misfires = []; x.finaleAt = 0; x.slideAt = 0;
+    x.fireMs = {}; x.misfires = []; x.finaleAt = 0; x.slideAt = 0; x.miniAt = 0;
     s.turnOrder = shuffle(s.players.filter((p) => p.connected).map((p) => p.id));
     if (!s.turnOrder.length) s.turnOrder = [pid];
     s.turnIdx = 0;
@@ -1243,9 +1346,207 @@ export class Room extends DurableObject<Env> {
     s.turnDeadline = 0;
     const alive = this.alive();
     if (alive.length <= 1) return this.finish((alive[0] ?? s.board[0]).appid);
-    if (s.settings.finale === 'duel' && alive.length === 2 && this.startDuel(alive[0], alive[1])) return;
-    if (s.settings.finale === 'slide' && alive.length <= 3 && this.startSlide(alive)) return;
-    this.startRoulette(alive);
+    // settings.finale (duel / legacy slide / last) no longer picks the finale: the table votes
+    this.startVote(alive);
+  }
+
+  // ---------- finale vote ----------
+  /** players without a valid back get one: their own (latest) nomination first, then the finalist with the fewest backers */
+  assignBacks(games: number[], backs: Record<string, number>, pids: string[]) {
+    const s = this.s;
+    for (const pid of pids) {
+      if (games.includes(backs[pid])) continue;
+      delete backs[pid];
+      const mine = s.board.filter((g) => games.includes(g.appid) && g.by.includes(pid));
+      if (mine.length) backs[pid] = mine[mine.length - 1].appid;
+    }
+    for (const pid of shuffle(pids)) {
+      if (backs[pid] !== undefined) continue;
+      const n = (a: number) => Object.values(backs).filter((b) => b === a).length;
+      const least = Math.min(...games.map(n));
+      backs[pid] = pick(games.filter((a) => n(a) === least));
+    }
+  }
+
+  startVote(alive: BoardGame[]) {
+    const s = this.s, now = Date.now();
+    s.explainUntil = undefined; // a leftover hold (e.g. a shootout that never started) doesn't carry over
+    s.phase = 'vote';
+    const games = alive.map((g) => g.appid);
+    const backs: Record<string, number> = {};
+    this.assignBacks(games, backs, s.players.map((p) => p.id));
+    const hold = this.explain('how_vote', 2600);
+    s.vote = { games, votes: {}, backs, deadline: now + VOTE_MS + (hold ? 2600 + hold : 0) };
+    this.narr('vote');
+    for (const b of s.players.filter((p) => p.bot)) this.job({ at: now + rnd(2000, 6000), k: 'bvote', ph: 'vote', pid: b.id });
+  }
+
+  /** every connected human has voted: decide now */
+  checkVote() {
+    const s = this.s, v = s.vote;
+    if (s.phase !== 'vote' || !v || v.picked) return;
+    const humans = s.players.filter((p) => !p.bot && p.connected);
+    if (humans.length && humans.every((p) => v.votes[p.id])) this.decideVote();
+  }
+
+  decideVote() {
+    const v = this.s.vote;
+    if (!v || v.picked) return;
+    const tally = new Map<FinaleKind, number>();
+    for (const k of Object.values(v.votes)) if (FINALE_KINDS.includes(k)) tally.set(k, (tally.get(k) ?? 0) + 1);
+    const best = Math.max(0, ...tally.values());
+    const tied = [...tally].filter(([, n]) => n === best).map(([k]) => k);
+    v.picked = tied.length ? pick(tied) : pick(FINALE_KINDS); // tie or nobody voted: random
+    v.pickedAt = Date.now();
+    this.x.jobs = this.x.jobs.filter((j) => j.k !== 'bvote');
+  }
+
+  /** the picked finale starts (VOTE_PICK_MS after the decision) */
+  startPicked() {
+    const s = this.s, v = s.vote;
+    if (!v?.picked) return;
+    const games = s.board.filter((g) => v.games.includes(g.appid));
+    if (!games.length) return this.finish(v.games[0]);
+    if (v.picked === 'revolver') return this.startRoulette(games);
+    this.startMini(v.picked, games.map((g) => g.appid));
+  }
+
+  // ---------- minigames (everyone plays at once) ----------
+  startMini(kind: Mini['kind'], games: number[]) {
+    const s = this.s, x = this.x, now = Date.now();
+    const humans = this.humansOnline();
+    const players = s.players.filter((p) => p.connected && (!p.bot || humans)).map((p) => p.id);
+    const backs: Record<string, number> = {};
+    for (const pid of players) if (s.vote?.backs[pid] !== undefined) backs[pid] = s.vote.backs[pid];
+    this.assignBacks(games, backs, players);
+    s.phase = 'mini';
+    s.explainUntil = undefined;
+    const how: NarrKey = kind === 'slide' ? 'how_slide' : kind === 'golf' ? 'how_golf' : 'how_horse';
+    const hold = this.explain(how, MINI_INTRO_MS);
+    const startedAt = now + MINI_INTRO_MS + (hold ? hold + 300 : 0);
+    const seed = Math.floor(Math.random() * 2 ** 32) >>> 0;
+    const m: Mini = { kind, games, backs, players, startedAt, deadline: startedAt + MINI_MS[kind], seed, results: {} };
+    if (kind === 'golf') m.map = seed % 5;
+    if (kind === 'slide') m.mark = Math.round(slideMark() * 1e4) / 1e4;
+    s.mini = m;
+    x.miniAt = 0;
+    this.narr(kind);
+    const win: [number, number] = kind === 'slide' ? [3000, 12000] : kind === 'golf' ? [15000, 60000] : [6000, 20000];
+    for (const b of s.players.filter((p) => p.bot && players.includes(p.id))) {
+      this.job({ at: startedAt + rnd(win[0], win[1]), k: 'bmini', ph: 'mini', pid: b.id });
+    }
+  }
+
+  /** the running minigame, if pid may post a result to it now */
+  miniFor(pid: string, kind: Mini['kind']): Mini {
+    const s = this.s, m = s.mini;
+    if (s.phase !== 'mini' || !m || m.kind !== kind) throw new Bad('Not that game, partner.');
+    if (!m.players.includes(pid)) throw new Bad("You're watching this one.");
+    if (m.decidedAt || Date.now() > m.deadline) throw new Bad('Time\u2019s up.');
+    if (m.results[pid]) throw new Bad('You already had your go.');
+    if (Date.now() < m.startedAt - 250) throw new Bad('Steady... wait for it.');
+    return m;
+  }
+
+  miniResult(m: Mini, pid: string, r: Omit<MiniResult, 'at'>) {
+    m.results[pid] = { ...r, at: Date.now() };
+    this.checkMini();
+  }
+
+  miniSlide(m: Mini, pid: string, power: number) {
+    const now = Date.now();
+    const dist = slideDist(clamp(power, 0, 1));
+    const fell = dist > 1.0;
+    const mark = m.mark ?? 0.8;
+    const off = Math.abs(dist - mark);
+    const inches = Math.round(off * 100);
+    const label = fell ? 'Off the end' : inches === 0 ? 'Dead on!' : `${inches}" ${dist < mark ? 'short' : 'past'}`;
+    // one Barkeep remark at a time, however many glasses are flying
+    if ((fell || off < 0.02) && !this.limited('mini:narr', 3000)) {
+      this.job({ at: now + SLIDE_ANIM_MS - (fell ? 400 : 300), k: 'narr', ph: 'mini', key: fell ? 'slide_fall' : 'slide_close' });
+    }
+    this.miniResult(m, pid, { score: fell ? 0 : Math.max(0, Math.round(1000 - off * 1000)), label, data: [Math.round(dist * 1e4) / 1e4, fell ? 1 : 0] });
+  }
+
+  miniGolf(m: Mini, pid: string, strokes: number, ms: number) {
+    strokes = clamp(Math.round(strokes), 1, 12);
+    ms = Math.max(0, Math.round(ms));
+    const score = 10000 - strokes * 1000 - Math.min(999, Math.round((ms / 1000) * 5));
+    this.miniResult(m, pid, { score, label: `${strokes} stroke${strokes === 1 ? '' : 's'}`, data: [strokes, ms] });
+  }
+
+  miniHorse(m: Mini, pid: string, score: number, inputs: unknown[]) {
+    score = clamp(Math.round(score), 0, 100);
+    const label = score >= 95 ? 'Perfect landing!' : score >= 75 ? 'Clean landing' : score >= 40 ? 'Wobbly' : 'Missed the horse';
+    this.miniResult(m, pid, { score: score * 10, label, data: nums(inputs, 64) });
+  }
+
+  /** everyone still at the table has played: judge (slide waits for the last glass to stop) */
+  checkMini() {
+    const s = this.s, m = s.mini, x = this.x;
+    if (s.phase !== 'mini' || !m || m.decidedAt || x.miniAt) return;
+    const live = (id: string) => !!s.players.find((p) => p.id === id)?.connected;
+    if (m.players.some((id) => !m.results[id] && live(id))) return;
+    const last = Math.max(0, ...Object.values(m.results).map((r) => r.at));
+    const at = m.kind === 'slide' ? last + SLIDE_ANIM_MS : 0;
+    if (at > Date.now() + 50) x.miniAt = at;
+    else this.decideMini();
+  }
+
+  decideMini() {
+    const s = this.s, m = s.mini;
+    this.x.miniAt = 0;
+    if (!m || m.decidedAt) return;
+    const now = Date.now();
+    for (const id of m.players) m.results[id] ??= { score: 0, label: 'No show', at: now };
+    // anyone who finished beats a no-show (golf scores can dip below 0)
+    const fin = m.players.filter((id) => m.results[id] && m.results[id].label !== 'No show');
+    const ids = fin.length ? fin : m.players;
+    const best = Math.max(...ids.map((id) => m.results[id].score));
+    const top = ids.filter((id) => m.results[id].score === best);
+    const wp = top.length ? pick(top) : undefined;
+    m.winnerPid = wp;
+    m.winner = wp !== undefined && m.games.includes(m.backs[wp]) ? m.backs[wp] : pick(m.games);
+    m.decidedAt = now;
+    this.x.jobs = this.x.jobs.filter((j) => j.k !== 'bmini');
+    if (m.kind === 'slide') this.narr('slide_win');
+    else this.narr('result', 'result_3'); // "The dust settles. We have a winner." (result_1 is saved for the result screen)
+  }
+
+  // ---------- explanation skip ----------
+  skipExplain(pid: string) {
+    const s = this.s, x = this.x, now = Date.now();
+    const p = this.me(pid);
+    if (p.bot || !s.explainUntil || s.explainUntil <= now) return;
+    if (!x.skips.includes(pid)) x.skips.push(pid);
+    const humans = s.players.filter((q) => !q.bot && q.connected);
+    if (!humans.length || !humans.every((q) => x.skips.includes(q.id))) return;
+    // everyone's heard enough: end the hold, drop explanations still queued, and pull forward whatever waited on it
+    const cut = s.explainUntil - now;
+    s.explainUntil = undefined;
+    x.skips = [];
+    x.jobs = x.jobs.filter((j) => !(j.k === 'narr' && j.key?.startsWith('how_')));
+    const pull = (t: number) => Math.max(now + 600, t - cut);
+    let shift = cut;
+    if (s.phase === 'veto' && s.turnDeadline && x.turnStart > now + 600 && this.alive().length > this.threshold()) {
+      this.armTurn(pull(x.turnStart) - now); // re-arms the bots' aim/fire for the new start
+    } else if (s.phase === 'vote' && s.vote && !s.vote.picked) {
+      s.vote.deadline = Math.max(now + 1000, s.vote.deadline - cut);
+    } else if (s.phase === 'mini' && s.mini && !s.mini.decidedAt && s.mini.startedAt > now + 600) {
+      const m = s.mini;
+      shift = m.startedAt - pull(m.startedAt);
+      m.startedAt -= shift; m.deadline -= shift;
+    } else if (s.phase === 'duel' && s.duel && !s.duel.decidedAt && s.duel.startedAt > now + 600) {
+      const d = s.duel;
+      shift = d.startedAt - pull(d.startedAt);
+      d.startedAt -= shift; d.drawAt -= shift;
+    }
+    // bot moves that were waiting on the Barkeep come forward too
+    for (const j of x.jobs) {
+      if (j.k[0] !== 'b' || j.k === 'bfire' || j.k === 'baim' || j.at <= now) continue;
+      j.at = Math.max(now + 400 + rnd(0, 800), j.at - shift);
+    }
+    this.broadcast();
   }
 
   startRoulette(alive: BoardGame[]) {
@@ -1413,6 +1714,7 @@ export class Room extends DurableObject<Env> {
     }
     const duelist = s.duel?.winner === appid ? s.duel.champs[s.duel.games.indexOf(appid)] : undefined;
     const slider = s.slide?.winner === appid ? s.slide.champs[s.slide.games.indexOf(appid)] : undefined; // counts as a duel won (no badge)
+    const miniWinner = s.phase === 'mini' && s.mini?.winner === appid ? s.mini.winnerPid : undefined; // minigame winner: badge + a duel won
     const badges: Record<string, BadgeId[]> = {};
     const give = (pid: string, b: BadgeId) => { if (s.players.some((p) => p.id === pid)) (badges[pid] ??= []).includes(b) || badges[pid].push(b); };
     const maxKills = Math.max(0, ...Object.values(kills));
@@ -1429,6 +1731,7 @@ export class Room extends DurableObject<Env> {
     for (const pid of avengers) give(pid, 'avenger');
     for (const pid of this.x.misfires) give(pid, 'snail');
     if (duelist) give(duelist, 'duelist');
+    if (miniWinner) give(miniWinner, 'duelist');
     for (const p of s.players) p.badges = badges[p.id];
 
     // posse record
@@ -1490,7 +1793,7 @@ export class Room extends DurableObject<Env> {
         kills: kills[p.id] ?? 0,
         wins: winner?.by.includes(p.id) ? 1 : 0,
         saves: saves[p.id] ?? 0,
-        duelsWon: duelist === p.id || slider === p.id ? 1 : 0,
+        duelsWon: duelist === p.id || slider === p.id || miniWinner === p.id ? 1 : 0,
         shotAt: s.board.filter((g) => g.by.includes(p.id) && !g.alive && g.killedBy).length,
       });
     }
@@ -1518,6 +1821,7 @@ export class Room extends DurableObject<Env> {
       x.jobs = x.jobs.filter((j) => !due.includes(j));
       for (const j of due) {
         if (j.ph !== s.phase) continue;
+        if (TRANSIENT.has(j.k) && j.at < now - STALE_MS) continue; // stale cosmetic job (e.g. reloaded after hibernation): never replay
         if (!TRANSIENT.has(j.k)) persist = true;
         try { if (this.runJob(j)) persist = true; } catch (e) { if (!(e instanceof Bad)) console.error('job failed', j.k, e); }
       }
@@ -1548,6 +1852,22 @@ export class Room extends DurableObject<Env> {
         if (now >= x.slideAt - 50) { this.decideSlide(); persist = true; }
       } else if (sl.turn < sl.order.length && sl.turnDeadline && now >= sl.turnDeadline - 50) {
         this.slideGlass(0.45 + Math.random() * 0.5); // fuse ran out: the glass slips at a random push
+        persist = true;
+      }
+    } else if (s.phase === 'vote' && s.vote) {
+      const v = s.vote;
+      if (v.picked) {
+        if (now >= (v.pickedAt ?? 0) + VOTE_PICK_MS - 50) { this.startPicked(); persist = true; }
+      } else if (now >= v.deadline - 50) { this.decideVote(); persist = true; }
+    } else if (s.phase === 'mini' && s.mini) {
+      const m = s.mini;
+      if (m.decidedAt) {
+        if (m.winner !== undefined && now >= m.decidedAt + MINI_RESULT_MS - 50) { this.finish(m.winner); persist = true; }
+      } else if ((x.miniAt && now >= x.miniAt - 50) || now >= m.deadline - 50) {
+        // a glass slid just before the whistle is still travelling: judge once it stops
+        const last = Math.max(0, ...Object.values(m.results).map((r) => r.at));
+        if (!x.miniAt && m.kind === 'slide' && last + SLIDE_ANIM_MS > now + 50) x.miniAt = last + SLIDE_ANIM_MS;
+        else this.decideMini();
         persist = true;
       }
     }

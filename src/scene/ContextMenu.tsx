@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { RoomProps } from '../props';
-import { EMOTES, TAUNTS, type EmoteId } from '../../shared/types';
+import { EMOTES, type EmoteId } from '../../shared/types';
 import { sfx } from '../sfx';
 import PixelIcon from '../ui/PixelIcon';
 
@@ -14,7 +14,6 @@ const ICONS: Record<string, string[]> = {
   sound: ['....#...', '...##.#.', '.####..#', '.####.#.', '.####..#', '...##.#.', '....#...', '........'],
   mute: ['....#...', '...##...', '.####.#.', '.####..#', '.####.#.', '...##..#', '....#...', '........'],
   emote: ['..####..', '.#....#.', '#.#..#.#', '#......#', '#.#..#.#', '#..##..#', '.#....#.', '..####..'],
-  say: ['.######.', '#......#', '#.#.#.##', '#......#', '.######.', '..#.....', '.#......', '........'],
   full: ['###..###', '#......#', '#......#', '........', '........', '#......#', '#......#', '###..###'],
   exit: ['..#..#..', '..#..#..', '###..###', '........', '........', '###..###', '..#..#..', '..#..#..'],
   reload: ['..####.#', '.#....##', '#....###', '#.......', '#.......', '#......#', '.#....#.', '..####..'],
@@ -113,10 +112,6 @@ export function ContextMenu({ room }: { room?: RoomProps }) {
     items.push({
       id: 'emote', label: 'Emote', icon: 'emote',
       sub: (Object.keys(EMOTES) as EmoteId[]).map((k) => ({ id: `e-${k}`, label: EMOTES[k].label, icon: `px:${k}`, run: () => roomRef.current?.send({ t: 'emote', emote: k }) })),
-    });
-    items.push({
-      id: 'say', label: 'Say a taunt', icon: 'say',
-      sub: TAUNTS.map((t, i) => ({ id: `t-${i}`, label: t, icon: '', run: () => roomRef.current?.send({ t: 'say', text: t }) })),
     });
   }
   if (fsOk) {
@@ -250,7 +245,7 @@ export function ContextMenu({ room }: { room?: RoomProps }) {
         ])}
       </div>
       {sub && (
-        <div ref={subRef} className={`cm cm-sub ${subOpen === 'say' ? 'cm-taunts' : ''}`} role="menu" aria-label={subOpen === 'say' ? 'Taunts' : 'Emotes'}
+        <div ref={subRef} className="cm cm-sub" role="menu" aria-label="Emotes"
           onContextMenu={(e) => e.preventDefault()}
           style={{ left: subPos?.x ?? -999, top: subPos?.y ?? -999, visibility: subPos ? 'visible' : 'hidden' } as CSSProperties}>
           {sub.map((it) => row(it, true))}
