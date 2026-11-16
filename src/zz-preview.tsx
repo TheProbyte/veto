@@ -20,4 +20,7 @@ const state: RoomState = {
 };
 const P = { veto: Veto, roulette: Roulette, result: Result, lobby: Veto, nominate: Veto }[ph];
 const p = { state, me: 'p2', send: () => {}, skew: 0 };
-createRoot(document.getElementById('root')!).render(<Saloon {...p}><P {...p} /></Saloon>);
+const root = createRoot(document.getElementById('root')!);
+root.render(<Saloon {...p}><P {...p} /></Saloon>);
+const fx = new URLSearchParams(location.search).get('fx') as 'hit' | 'ricochet' | null;
+if (fx) setTimeout(() => { const s2 = { ...state, lastShot: { id: 9, t: Date.now(), actor: 'p2', appid: 105600, kind: fx } }; root.render(<Saloon {...p} state={s2}><P {...p} state={s2} /></Saloon>); }, 300);

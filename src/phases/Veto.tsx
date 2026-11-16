@@ -147,9 +147,9 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
 function Crosshair({ hot }: { hot: boolean }) {
   return (
     <svg className={`crosshair ${hot ? 'hot' : ''}`} viewBox="0 0 100 100" aria-hidden>
-      <circle cx="50" cy="50" r="30" fill="none" strokeWidth="2.5" />
+      <circle cx="50" cy="50" r="30" fill="none" strokeWidth="1.8" />
       <circle cx="50" cy="50" r="3" />
-      <path d="M50 8 V30 M50 70 V92 M8 50 H30 M70 50 H92" strokeWidth="2.5" />
+      <path d="M50 8 V30 M50 70 V92 M8 50 H30 M70 50 H92" strokeWidth="1.8" />
     </svg>
   );
 }
