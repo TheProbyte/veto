@@ -19,7 +19,7 @@ class Bad extends Error {}
 
 function fresh(code: string): RoomState {
   return {
-    code, phase: 'lobby', players: [], pool: [], poolLoading: false, board: [],
+    code, phase: 'lobby', players: [], pool: [], poolLoading: false, pitches: [], board: [],
     turnOrder: [], turnIdx: 0, turnDeadline: 0, shots: [], history: [], now: 0,
   };
 }
@@ -33,6 +33,7 @@ export class Room extends DurableObject<Env> {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
       this.s = (await ctx.storage.get<RoomState>('s')) ?? fresh('');
+      this.s.pitches ??= [];
     });
   }
 
@@ -161,7 +162,9 @@ export class Room extends DurableObject<Env> {
       }
       case 'nominate': {
         if (s.phase !== 'nominate') throw new Bad('Not tossing games right now.');
-        const g = s.pool.find((x) => x.appid === i.appid);
+        const pg = s.pool.find((x) => x.appid === i.appid);
+        const pt = s.pitches.find((x) => x.appid === i.appid);
+        const g = pg ?? (pt && { appid: pt.appid, name: pt.name, tier: 'pitch' as const });
         if (!g) throw new Bad("That game isn't in the pool.");
         const b = s.board.find((x) => x.appid === i.appid);
         const mine = s.board.filter((x) => x.by.includes(pid)).length;
@@ -176,13 +179,52 @@ export class Room extends DurableObject<Env> {
         this.broadcast();
         return;
       }
+      case 'pitch': {
+        if (s.phase !== 'lobby' && s.phase !== 'nominate') throw new Bad('Too late to pitch.');
+        this.me(pid);
+        const appid = Number(i.appid);
+        if (!Number.isInteger(appid) || appid <= 0) throw new Bad('Bad game.');
+        if (s.pitches.some((x) => x.appid === appid)) throw new Bad('Already pitched.');
+        if (s.pool.some((x) => x.appid === appid && x.tier === 'all')) throw new Bad('Everybody already owns that one!');
+        if (s.pitches.length >= 12) throw new Bad('Too many pitches on the table.');
+        const pitch = {
+          appid, name: String(i.name ?? '').slice(0, 80) || `App ${appid}`, by: pid,
+          price: i.price ? String(i.price).slice(0, 20) : undefined, votes: { [pid]: 'buy' as const } as Record<string, 'buy' | 'nope'>,
+        };
+        s.pitches.push(pitch);
+        this.broadcast();
+        const bits = await storeBits(this.env, appid);
+        const live = s.pitches.find((x) => x.appid === appid);
+        if (bits && live) { live.price = bits.price ?? live.price; live.discount = bits.discount; this.broadcast(); }
+        return;
+      }
+      case 'unpitch': {
+        const pt = s.pitches.find((x) => x.appid === i.appid);
+        if (!pt) return;
+        if (pt.by !== pid && !this.isHost(pid)) throw new Bad('Only whoever pitched it can pull it.');
+        if (s.phase !== 'lobby' && s.phase !== 'nominate') throw new Bad('Too late.');
+        s.pitches = s.pitches.filter((x) => x !== pt);
+        s.board = s.board.filter((b) => !(b.appid === pt.appid && b.tier === 'pitch'));
+        this.broadcast();
+        return;
+      }
+      case 'react': {
+        const pt = s.pitches.find((x) => x.appid === i.appid);
+        if (!pt) throw new Bad('No such pitch.');
+        this.me(pid);
+        if (i.vote !== 'buy' && i.vote !== 'nope') return;
+        if (pt.votes[pid] === i.vote) delete pt.votes[pid];
+        else pt.votes[pid] = i.vote;
+        this.broadcast();
+        return;
+      }
       case 'beginVeto': {
         if (s.phase !== 'nominate') throw new Bad('Not now.');
         if (!this.isHost(pid)) throw new Bad('Only the host calls the draw.');
         this.autofill();
         if (!s.board.length) throw new Bad('Nothing on the table to shoot at.');
         for (const p of s.players) p.shieldUsed = false;
-        s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; });
+        s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; g.cracks = 0; });
         s.shots = []; s.lastShot = undefined;
         s.turnOrder = shuffle(s.players.filter((p) => p.connected).map((p) => p.id));
         if (!s.turnOrder.length) s.turnOrder = [pid];
@@ -258,6 +300,9 @@ export class Room extends DurableObject<Env> {
     if (g.shieldedBy) {
       g.shieldedBy = undefined;
       kind = 'ricochet';
+    } else if (g.tier === 'pitch' && !g.cracks) {
+      g.cracks = 1; // pitched buys need two shots
+      kind = 'crack';
     } else {
       g.alive = false;
       g.killedBy = actor;

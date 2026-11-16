@@ -38,8 +38,9 @@ export interface PoolGame {
 export interface BoardGame {
   appid: number;
   name: string;
-  tier: 'all' | 'almost' | 'house';
+  tier: 'all' | 'almost' | 'house' | 'pitch';
   by: string[]; // nominating player ids (empty = house dealt)
+  cracks?: number; // pitched buys take 2 shots: first shot cracks (cracks=1), second kills
   alive: boolean;
   shieldedBy?: string; // player id whose tin star protects it
   killedBy?: string;
@@ -50,7 +51,7 @@ export interface ShotEvent {
   t: number;
   actor: string; // player id
   appid: number;
-  kind: 'hit' | 'ricochet' | 'misfire'; // misfire = fuse ran out, gun went off on its own
+  kind: 'hit' | 'ricochet' | 'misfire' | 'crack'; // misfire = fuse ran out, gun went off on its own; crack = pitched buy survived its first shot (cracks=1)
 }
 
 export interface Roulette {
@@ -60,6 +61,17 @@ export interface Roulette {
   duration: number; // ms the spin animation should take
 }
 
+export interface Pitch {
+  appid: number;
+  name: string;
+  by: string; // player id who pitched it
+  price?: string;
+  discount?: number;
+  votes: Record<string, 'buy' | 'nope'>; // player id -> vote
+}
+
+export interface StoreHit { appid: number; name: string; price?: string; img: string }
+
 export interface HistoryEntry { appid: number; name: string; t: number }
 
 export interface RoomState {
@@ -68,6 +80,7 @@ export interface RoomState {
   players: Player[];
   pool: PoolGame[];
   poolLoading: boolean;
+  pitches: Pitch[];
   board: BoardGame[];
   turnOrder: string[];
   turnIdx: number;
@@ -87,7 +100,10 @@ export type Intent =
   | { t: 'link'; profile: string }
   | { t: 'unlink' }
   | { t: 'start' } // host: lobby -> nominate
-  | { t: 'nominate'; appid: number } // toggle, max 3 per player
+  | { t: 'nominate'; appid: number } // toggle, max 3 per player (pool games or pitched buys)
+  | { t: 'pitch'; appid: number; name: string; price?: string } // pitch a store game (from GET /api/search?q=)
+  | { t: 'unpitch'; appid: number }
+  | { t: 'react'; appid: number; vote: 'buy' | 'nope' } // toggle vote on a pitch
   | { t: 'beginVeto' } // host: nominate -> veto (auto-fills)
   | { t: 'aim'; appid: number } // shooter moves carousel
   | { t: 'fire'; appid: number }

@@ -14,6 +14,7 @@ export default {
       fwd.headers.set('x-room', code);
       return stub.fetch(fwd);
     }
+    if (url.pathname === '/api/search') return search(url.searchParams.get('q') ?? '', env);
     if (url.pathname === '/api/health') return Response.json({ ok: true, steamKey: !!env.STEAM_API_KEY });
     const f = STATIC[url.pathname] ?? STATIC['/index.html'];
     if (!f) return new Response('Not built', { status: 500 });
@@ -23,3 +24,28 @@ export default {
     });
   },
 } satisfies ExportedHandler<Env>;
+
+async function search(q: string, env: Env): Promise<Response> {
+  q = q.trim().slice(0, 60);
+  if (q.length < 2) return Response.json([]);
+  const key = `search:${q.toLowerCase()}`;
+  const cached = await env.CACHE.get(key);
+  if (cached) return new Response(cached, { headers: { 'content-type': 'application/json' } });
+  try {
+    const r = await fetch(`https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(q)}&cc=us&l=en`, {
+      headers: { 'User-Agent': 'nah-game-picker/1.0' },
+    });
+    const j: any = await r.json();
+    const hits = (j?.items ?? []).filter((x: any) => x.type === 'app').slice(0, 10).map((x: any) => ({
+      appid: x.id,
+      name: x.name,
+      price: x.price ? `$${(x.price.final / 100).toFixed(2)}` : 'Free',
+      img: x.tiny_image,
+    }));
+    const body = JSON.stringify(hits);
+    await env.CACHE.put(key, body, { expirationTtl: 3600 });
+    return new Response(body, { headers: { 'content-type': 'application/json' } });
+  } catch {
+    return Response.json([]);
+  }
+}
