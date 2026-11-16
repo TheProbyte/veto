@@ -11,13 +11,18 @@ import { PixelScene } from '../pixel/PixelCanvas';
 import { computeLayout, seatGeom, type Layout, type SceneData, type SceneFX, type ScenePlayer } from '../pixel/scene';
 import { MiniBust } from '../pixel/BustPreview';
 import Narrator from './Narrator';
+import { playVoice } from '../voice';
 import EmoteBar from './EmoteBar';
 
 /** piano player's tempo per music mode (matches src/music.ts grooves) */
 const BPM: Record<string, number> = { lobby: 76, veto: 92, roulette: 92, result: 76, off: 0 };
 const EMOTE_SFX: Record<string, () => void> = {
-  tip: () => sfx.swish(), spit: () => sfx.spit(), yeehaw: () => sfx.yeehaw(), clap: () => sfx.clap(),
-  shrug: () => sfx.swish(), angry: () => sfx.steam(), drink: () => sfx.glass(), laugh: () => {},
+  // recorded barks (public/voice/emote_*.mp3) win over the synth versions when they exist
+  tip: () => sfx.swish(), spit: () => sfx.spit(), clap: () => sfx.clap(), shrug: () => sfx.swish(),
+  yeehaw: () => { if (!playVoice('emote_yeehaw', 'emote')) sfx.yeehaw(); },
+  laugh: () => { playVoice('emote_laugh', 'emote'); },
+  drink: () => { if (!playVoice('emote_drink', 'emote')) sfx.glass(); },
+  angry: () => { sfx.steam(); playVoice('emote_angry', 'emote'); },
 };
 interface Toast { id: number; p: Player; text: string }
 interface Bubble { id: number; pid: string; text: string }

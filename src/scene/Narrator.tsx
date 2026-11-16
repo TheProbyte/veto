@@ -2,22 +2,9 @@
 // and plays /voice/<id>.mp3 when that recording exists (see src/voiceManifest.ts).
 import { useEffect, useRef, useState } from 'react';
 import type { RoomProps } from '../props';
-import { sfx } from '../sfx';
-import { VOICE_IDS } from '../voiceManifest';
+import { playVoice } from '../voice';
 
 interface Cap { id: string; text: string; key: number }
-
-let current: HTMLAudioElement | null = null;
-function playVoice(id: string) {
-  if (!VOICE_IDS.has(id) || sfx.isMuted()) return;
-  try {
-    current?.pause();
-    const a = new Audio(`/voice/${id}.mp3`);
-    a.volume = Math.max(0, Math.min(1, sfx.getVolume()));
-    current = a;
-    a.play().catch(() => {});
-  } catch {}
-}
 
 export default function Narrator({ on, state }: RoomProps) {
   const [cap, setCap] = useState<Cap | null>(null);
@@ -30,7 +17,7 @@ export default function Narrator({ on, state }: RoomProps) {
     seq.current += 1;
     setCap({ id: e.id, text: e.text, key: seq.current });
     setShown(0);
-    playVoice(e.id);
+    playVoice(e.id, 'narr');
   }), [on]);
 
   useEffect(() => {

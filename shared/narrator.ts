@@ -2,6 +2,8 @@
 // Each line id maps to an optional voice file at /voice/<id>.mp3 (recorded in ElevenLabs from NARRATOR_SCRIPT.md).
 // Lines are name-free on purpose so one recording works for every table.
 
+import { VOICED } from './voiced';
+
 export type NarrKey =
   | 'open' | 'join' | 'leave' | 'back' | 'bots' | 'dress' | 'deal' | 'house' | 'pitch'
   | 'draw' | 'first_blood' | 'kill' | 'spree' | 'revenge' | 'ricochet' | 'crack' | 'misfire'
@@ -134,7 +136,9 @@ export const NARRATOR: Record<NarrKey, { when: string; lines: NarrLine[] }> = {
 
 /** Pick a random line for an event (avoid repeating `lastId` when possible). */
 export function pickLine(key: NarrKey, lastId?: string): NarrLine {
-  const ls = NARRATOR[key].lines;
+  // prefer lines that have a recorded voice; fall back to caption-only lines
+  const voiced = NARRATOR[key].lines.filter((l) => VOICED.has(l.id));
+  const ls = voiced.length ? voiced : NARRATOR[key].lines;
   const pool = ls.length > 1 ? ls.filter((l) => l.id !== lastId) : ls;
   return pool[Math.floor(Math.random() * pool.length)];
 }
