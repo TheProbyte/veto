@@ -808,7 +808,7 @@
   .fv-title { font-size: 16px; }
   .fv-clock { font-size: 14px; min-width: 34px; padding: 1px 4px 0; }
   .fv-games { gap: 6px; }
-  .fv-games-lbl { font-size: 9px; }
+  .fv-games-lbl { display: none; }
   .fv-game { padding: 3px; gap: 4px; }
   .fv-game-art { width: 18px; }
   .fv-game-name { font-size: 11px; -webkit-line-clamp: 1; }

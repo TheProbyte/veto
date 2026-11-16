@@ -58,7 +58,7 @@ export function useDeskChat(phase?: string) {
   const wide = useSyncExternalStore(subWide, wideForSlide, () => true);
   const pk = useSyncExternalStore(subOpen, () => peek, () => false);
   useEffect(() => { if (peek) { peek = false; emit(); } }, [phase]);
-  return { desk, open: o && (phase !== 'slide' || wide || pk) };
+  return { desk, open: o && ((phase !== 'slide' && phase !== 'mini') || wide || pk) };
 }
 
 /* ---------- the log ---------- */
