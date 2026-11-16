@@ -110,14 +110,23 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
 }
 
 function ChamberArt({ appid, k, name }: { appid: number; k: number; name: string }) {
-  const [fb, setFb] = useState(false);
+  const [fb, setFb] = useState(0); // 0 box art, 1 header art, 2 name only
+  const short = name.length > 14 ? name.slice(0, 13) + '…' : name;
+  if (fb >= 2) {
+    return (
+      <g clipPath={`url(#ch-${k})`}>
+        <rect x="-44" y="-66" width="88" height="132" fill="#2a1a10" />
+        <text textAnchor="middle" y="4" fontFamily="Rye, serif" fontSize="11" fill="#e8d5b5">{short}</text>
+      </g>
+    );
+  }
   return (
     <image
       href={fb ? headerArt(appid) : boxArt(appid)}
       x="-44" y="-66" width="88" height="132"
       preserveAspectRatio="xMidYMid slice"
       clipPath={`url(#ch-${k})`}
-      onError={() => setFb(true)}
+      onError={() => setFb((f) => f + 1)}
     >
       <title>{name}</title>
     </image>
