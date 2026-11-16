@@ -16,7 +16,7 @@ export default function EmoteBar(rp: RoomProps) {
   const { state, send, skew } = rp;
   useShotExtras(state, skew); // always mounted: catches the finale shot even if the phase flips with it
   const log = useChatLog(rp); // kept here so the log survives collapsing the panel
-  const { desk, open: deskOpen } = useDeskChat();
+  const { desk, open: deskOpen } = useDeskChat(state.phase);
   const [focusKey, setFocusKey] = useState(0);
   const deskRef = useRef(desk);
   deskRef.current = desk;

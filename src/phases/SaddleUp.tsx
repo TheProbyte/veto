@@ -7,6 +7,7 @@ import { useNow } from '../net';
 import { MiniBust } from '../pixel/BustPreview';
 import { sfx } from '../sfx';
 import { BUZZ, buzz } from '../scene/haptics';
+import { playVoice } from '../voice';
 import './gameplay.css';
 
 type Status = Launch['ready'][string];
@@ -20,6 +21,14 @@ const CHIP: Record<Status | 'wait', { icon: string; label: string }> = {
 /** module-level: a remount or re-render never opens Steam twice for the same launch */
 let launchedFor = 0;
 let drummedFor = '';
+let barkedAt = 0;
+/** the recorded "launch" bark: LAUNCH press or RIDE!, never twice for the same player within a few seconds */
+export function barkLaunch() {
+  const now = Date.now();
+  if (now - barkedAt < 5000) return;
+  barkedAt = now;
+  playVoice('launch', 'emote');
+}
 
 /** children: the host's other result buttons (Rematch / Another round), laid out in one row with Saddle up! */
 export default function SaddleUp({ state, me, send, skew, children }: RoomProps & { children?: ReactNode }) {
@@ -49,7 +58,7 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
     if (drummedFor === k) return;
     drummedFor = k;
     if (n >= 1 && n <= 3) { sfx.stamp(); buzz(BUZZ.myTurn); }
-    else if (n === 0) { sfx.shot(); sfx.yeehaw(); buzz(BUZZ.win); }
+    else if (n === 0) { sfx.shot(); sfx.yeehaw(); buzz(BUZZ.win); barkLaunch(); }
   }, [n, show, stale, launchAt]);
   useEffect(() => {
     if (!counting || left > 0 || stale || launchedFor === launchAt) return;

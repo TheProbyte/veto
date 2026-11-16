@@ -27,7 +27,10 @@ const KEY = 'nah.chat';
 let open = (() => { try { return localStorage.getItem(KEY) !== '0'; } catch { return true; } })();
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
+/** opened by hand while the slide had it tucked away (lasts until collapsed or the next phase) */
+let peek = false;
 export function setChatOpen(v: boolean) {
+  if (peek !== v) { peek = v; emit(); }
   if (v === open) return;
   open = v;
   try { localStorage.setItem(KEY, v ? '1' : '0'); } catch {}
@@ -42,11 +45,19 @@ const subDesk = (f: () => void) => {
 };
 const isDesk = () => { try { return window.matchMedia(DESK_Q).matches; } catch { return false; } };
 
-/** { desk: wide screen with a mouse, open: the panel is expanded } */
-export function useDeskChat() {
+const subWide = (f: () => void) => { window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); };
+/** the whiskey slide's bar spans most of the screen: below this width the panel tucks itself away for it */
+const SLIDE_MIN_W = 1600;
+const wideForSlide = () => window.innerWidth >= SLIDE_MIN_W;
+
+/** { desk: wide screen with a mouse, open: the panel is expanded (tucked, not closed, while the slide needs the room) } */
+export function useDeskChat(phase?: string) {
   const desk = useSyncExternalStore(subDesk, isDesk, () => false);
   const o = useSyncExternalStore(subOpen, () => open, () => true);
-  return { desk, open: o };
+  const wide = useSyncExternalStore(subWide, wideForSlide, () => true);
+  const pk = useSyncExternalStore(subOpen, () => peek, () => false);
+  useEffect(() => { if (peek) { peek = false; emit(); } }, [phase]);
+  return { desk, open: o && (phase !== 'slide' || wide || pk) };
 }
 
 /* ---------- the log ---------- */
@@ -55,7 +66,8 @@ export interface LogEntry {
   who?: { id: string; name: string; look: number; style?: Look; bot?: boolean; me: boolean };
 }
 const LOG_MAX = 80;
-let logSeq = 0;
+// seeded from the clock so ids stay unique even if this module is re-evaluated (hot reload) under a live log
+let logSeq = Date.now();
 
 /** collects say / emote / narrate events (with a snapshot of who sent them) */
 export function useChatLog({ on, state, me }: RoomProps) {

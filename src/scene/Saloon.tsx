@@ -207,7 +207,8 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
     // phones get a shorter FX (CSS uses --fxd too) and no shake of the scrolling overlay:
     // a transform there would re-anchor the fixed action bar mid-animation.
     const phone = isPhone();
-    const dur = phone ? 1600 : 2700;
+    const dur = phone ? 1600 : 2700; // the CSS animation (--fxd)
+    const life = Math.max(dur, 3000); // the overlay stays up through the server's pause between shots (last words)
     // big lightning + thunder on the finale shot and on revenge; the scene slows down for the finale
     if (s.slowmo || s.revenge) {
       push({ k: 'bolt', big: true, at: performance.now() });
@@ -231,7 +232,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
       if (shake) frontRef.current?.animate(stepKf([[0, 0], [-3, 2], [3, -2], [-2, 1], [2, -1], [-1, 0], [0, 0]]), { duration: 440 });
       if (s.kind !== 'crack') timers.push(window.setTimeout(() => sfx.stamp(), Math.round(dur * 0.252)));
     }
-    timers.push(window.setTimeout(() => setFx((f) => (f && f.id === s.id ? null : f)), dur));
+    timers.push(window.setTimeout(() => setFx((f) => (f && f.id === s.id ? null : f)), life));
     return () => timers.forEach(clearTimeout);
   }, [state.lastShot?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -254,7 +255,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   const stageTop = layout.tableTop * layout.P + (layout.portrait ? 30 : 44);
   const seats = useMemo(() => state.players.map((p) => p.seat), [state.players]);
   const table = phase === 'lobby' || phase === 'nominate';
-  const chat = useDeskChat();
+  const chat = useDeskChat(state.phase);
 
   return (
     <div className={`saloon phase-${phase} ${shooter ? 'has-shooter' : ''} ${table ? 'has-dock' : ''} ${split ? 'is-split' : ''} ${chat.desk ? (chat.open ? 'has-chat' : 'has-chat-tab') : ''}`} style={{ '--P': `${layout.P}px`, '--stage-top': `${stageTop}px` } as CSSProperties}>

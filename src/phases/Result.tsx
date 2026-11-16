@@ -17,7 +17,7 @@ const drawNail: DrawFn = (c) => {
 const NAILS: [string, string][] = [['8px', '8px'], ['calc(100% - 22px)', '8px'], ['calc(50% - 7px)', '4px']];
 import { BUZZ, buzz } from '../scene/haptics';
 import { useShotExtras } from './ShotExtras';
-import SaddleUp from './SaddleUp';
+import SaddleUp, { barkLaunch } from './SaddleUp';
 import { settingsOf } from './Lobby';
 import './gameplay.css';
 import './panels.css';
@@ -97,7 +97,8 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
   const how = duel?.winner === res.appid ? (duelMs !== undefined && duelMs >= 0 ? `Quick-draw · ${duelMs} ms` : 'Quick-draw')
     : slide ? 'Whiskey slide'
     : fin === 'cylinder' && state.roulette ? 'Revolver roulette'
-    : 'Last one standing';
+    : fin === 'last' ? 'Last one standing'
+    : ({ slide: 'Whiskey slide', cylinder: 'Revolver roulette', duel: 'Quick-draw' } as const)[fin];
   const slider = slide ? slide.champs[slide.games.indexOf(res.appid)] : undefined;
   const winBy = state.board.find((b) => b.appid === res.appid)?.by ?? [];
   const dodged = state.shots.filter((s) => s.appid === res.appid && (s.kind === 'ricochet' || s.kind === 'crack')).length;
@@ -138,7 +139,7 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
       </div>
 
       <div className="result-actions">
-        <a className="btn-launch px-btn" href={`steam://run/${res.appid}`}>LAUNCH</a>
+        <a className="btn-launch px-btn" href={`steam://run/${res.appid}`} onClick={() => { sfx.unlock(); barkLaunch(); }}>LAUNCH</a>
         <a className="store-link" href={`https://store.steampowered.com/app/${res.appid}`} target="_blank" rel="noreferrer">
           Store page
         </a>
