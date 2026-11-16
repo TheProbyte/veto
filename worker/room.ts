@@ -816,7 +816,7 @@ export class Room extends DurableObject<Env> {
     const sh = cands[this.x.sheriffRot++ % cands.length];
     s.sheriff = { pid: sh.id, pardonUsed: false, jailUsed: false, votes: [], ousted: false };
     const now = Date.now();
-    this.job({ at: now + 5200, k: 'narr', ph: 'veto', key: 'sheriff' });
+    this.job({ at: now + 6000, k: 'narr', ph: 'veto', key: 'sheriff' });
     if (sh.bot && Math.random() < 0.3) this.job({ at: now + rnd(6000, 20000), k: 'bjail', ph: 'veto', pid: sh.id });
   }
 
