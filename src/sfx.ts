@@ -352,6 +352,10 @@ function startAmbience() {
 }
 
 export const sfx = {
+  // --- music (stub API; implemented by the audio agent) ---
+  music(_mode: 'off' | 'lobby' | 'veto' | 'roulette' | 'result') {},
+  setMusicVolume(_v: number) {},
+  getMusicVolume(): number { return 0.5; },
   unlock() {               // call on first user click/keydown; resumes AudioContext
     if (!init()) return;
     if (wantAmbience) startAmbience();

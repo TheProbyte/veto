@@ -9,11 +9,40 @@ export interface SteamInfo {
   gameCount: number;
 }
 
+/** Character creator choices. Each field is an index into the option lists below. */
+export interface Look {
+  hat: number;      // 0..LOOK_COUNTS.hat-1   (wide brim, bowler, top hat, sombrero, flat cap, bandana-only)
+  hatColor: number;
+  skin: number;
+  face: number;     // clean, stubble, moustache, full beard, goatee, scar
+  hair: number;     // hair colour (shows under the hat / in the beard)
+  bandana: number;  // includes a "none" option at index 0
+  coat: number;
+}
+export const LOOK_COUNTS: Record<keyof Look, number> = {
+  hat: 6, hatColor: 6, skin: 5, face: 6, hair: 5, bandana: 6, coat: 6,
+};
+export const LOOK_LABELS: Record<keyof Look, string[]> = {
+  hat: ['Wide brim', 'Bowler', 'Top hat', 'Sombrero', 'Flat cap', 'No hat'],
+  hatColor: ['Dust', 'Coal', 'Rust', 'Cream', 'Oxblood', 'Slate'],
+  skin: ['Pale', 'Fair', 'Tan', 'Brown', 'Deep'],
+  face: ['Clean', 'Stubble', 'Moustache', 'Full beard', 'Goatee', 'Scarred'],
+  hair: ['Black', 'Brown', 'Ginger', 'Blond', 'Grey'],
+  bandana: ['None', 'Blood red', 'Navy', 'Black', 'Mustard', 'Green'],
+  coat: ['Duster', 'Black', 'Leather', 'Blue', 'Grey', 'Hide'],
+};
+export const randomLook = (): Look => {
+  const o = {} as Look;
+  for (const k of Object.keys(LOOK_COUNTS) as (keyof Look)[]) o[k] = Math.floor(Math.random() * LOOK_COUNTS[k]);
+  return o;
+};
+
 export interface Player {
   id: string;
   name: string;
   seat: number; // 0..7 seat around the table
-  look: number; // 0..7 outfit/palette index
+  look: number; // 0..7 legacy outfit index (used when style is unset)
+  style?: Look; // chosen in the character creator
   steam?: SteamInfo;
   linkError?: string;
   linking?: boolean;
@@ -98,6 +127,7 @@ export interface RoomState {
 export type Intent =
   | { t: 'hello'; pid: string; name: string }
   | { t: 'link'; profile: string }
+  | { t: 'style'; style: Look } // character creator
   | { t: 'unlink' }
   | { t: 'start' } // host: lobby -> nominate
   | { t: 'nominate'; appid: number } // toggle, max 3 per player (pool games or pitched buys)
@@ -124,3 +154,7 @@ export const headerArt = (appid: number) =>
   `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appid}/header.jpg`;
 export const heroArt = (appid: number) =>
   `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appid}/library_hero.jpg`;
+
+/** Same-origin, CORS-enabled proxy of Steam art (so canvases can read pixels for pixel-art processing). */
+export type ArtKind = 'box' | 'header' | 'hero' | 'capsule';
+export const pxArt = (appid: number, kind: ArtKind) => `/api/img/${appid}/${kind}`;

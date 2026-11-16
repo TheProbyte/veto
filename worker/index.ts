@@ -14,6 +14,8 @@ export default {
       fwd.headers.set('x-room', code);
       return stub.fetch(fwd);
     }
+    const img = url.pathname.match(/^\/api\/img\/(\d{1,10})\/(box|header|hero|capsule)$/);
+    if (img) return art(Number(img[1]), img[2]);
     if (url.pathname === '/api/search') return search(url.searchParams.get('q') ?? '', env);
     if (url.pathname === '/api/health') return Response.json({ ok: true, steamKey: !!env.STEAM_API_KEY });
     const f = STATIC[url.pathname] ?? STATIC['/index.html'];
@@ -52,4 +54,23 @@ async function search(q: string, _env: Env): Promise<Response> {
   } catch {
     return Response.json([]);
   }
+}
+
+const ART_FILES: Record<string, string> = {
+  box: 'library_600x900.jpg',
+  header: 'header.jpg',
+  hero: 'library_hero.jpg',
+  capsule: 'capsule_231x87.jpg',
+};
+
+/** Proxies Steam art with CORS so the client can pixel-process it. Cached at the edge + 7 days in browsers. */
+async function art(appid: number, kind: string): Promise<Response> {
+  const src = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appid}/${ART_FILES[kind]}`;
+  const r = await fetch(src, { cf: { cacheTtl: 60 * 60 * 24 * 7, cacheEverything: true } } as RequestInit);
+  const headers = new Headers({
+    'access-control-allow-origin': '*',
+    'cache-control': r.ok ? 'public, max-age=604800, immutable' : 'public, max-age=3600',
+    'content-type': r.headers.get('content-type') ?? 'image/jpeg',
+  });
+  return new Response(r.ok ? r.body : null, { status: r.ok ? 200 : 404, headers });
 }

@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { BoardGame, Intent, Player, PoolGame, RoomState, ServerMsg, ShotEvent } from '../shared/types';
-import { MAX_NOMS, TURN_MS } from '../shared/types';
+import { LOOK_COUNTS, MAX_NOMS, TURN_MS, type Look } from '../shared/types';
 import { ownedGames, playerSummary, resolveSteamId, storeBits, type Env, type OwnedGame } from './steam';
 
 const SHOT_PAUSE = 1600; // ms to let the stamp animation land before the next fuse starts
@@ -155,6 +155,18 @@ export class Room extends DurableObject<Env> {
     const s = this.s;
     switch (i.t) {
       case 'link': return this.link(pid, String(i.profile ?? ''));
+      case 'style': {
+        const p = this.me(pid);
+        const st = {} as Look;
+        for (const k of Object.keys(LOOK_COUNTS) as (keyof Look)[]) {
+          const v = Number((i.style as Partial<Look> | undefined)?.[k]);
+          if (!Number.isInteger(v) || v < 0 || v >= LOOK_COUNTS[k]) throw new Bad('That outfit is not in the store.');
+          st[k] = v;
+        }
+        p.style = st;
+        this.broadcast();
+        return;
+      }
       case 'unlink': {
         const p = this.me(pid);
         p.steam = undefined; p.linkError = undefined;
