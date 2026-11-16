@@ -8,7 +8,7 @@ import './panels.css';
 function PixImg({ src, className }: { src: string; className: string }) {
   const [bad, setBad] = useState(false);
   if (bad || !src) return <span className={`${className} nh-art-miss`} />;
-  return <img className={className} src={src} alt="" loading="lazy" onError={() => setBad(true)} />;
+  return <img className={className} src={src} alt="" loading="lazy" decoding="async" onError={() => setBad(true)} />;
 }
 
 export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | 'me' | 'send'>) {
@@ -79,8 +79,10 @@ export default function Pitches({ state, me, send }: Pick<RoomProps, 'state' | '
       <div className="nh-sub nh-pitch-note">Nobody owns it yet? Pitch a store game. Pitched buys need two shots to kill.</div>
 
       <div className="nh-psearch">
-        <input className="nh-input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the Steam store…"
-          spellCheck={false} autoComplete="off" aria-label="Search the Steam store" />
+        <input className="nh-input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the Steam store…"
+          spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="none" inputMode="search" enterKeyHint="search"
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+          aria-label="Search the Steam store" />
         {busy && <i className="nh-spin" />}
       </div>
       {err && <div className="nh-err">{err}</div>}

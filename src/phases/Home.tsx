@@ -43,14 +43,15 @@ export default function Home() {
           <li><b>III</b><span>Shoot 'em down</span><small>Take turns. Last box standing wins.</small></li>
         </ol>
 
-        <button className="nh-btn nh-btn-big" onClick={go} onMouseEnter={() => sfx.hover()}>Open a table</button>
+        <button type="button" className="nh-btn nh-btn-big nh-open" onClick={go} onMouseEnter={() => sfx.hover()}>Open a table</button>
 
         <form className="nh-join" onSubmit={join}>
           <label htmlFor="nh-code">Got a code?</label>
           <div className="nh-join-row">
             <input id="nh-code" className="nh-input nh-input-code" value={code} maxLength={12}
-              onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="ABCDE" autoComplete="off" spellCheck={false} />
-            <button className="nh-btn nh-btn-sm" disabled={code.trim().length < 3} onMouseEnter={() => sfx.hover()}>Join</button>
+              onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="ABCDE" autoComplete="off" spellCheck={false}
+              autoCapitalize="characters" autoCorrect="off" inputMode="text" enterKeyHint="go" aria-label="Table code" />
+            <button type="submit" className="nh-btn nh-btn-sm" disabled={code.trim().length < 3} onMouseEnter={() => sfx.hover()}>Join</button>
           </div>
         </form>
       </main>

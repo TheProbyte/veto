@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+
+const CAP = 12; // cards per tier before "Show more" (keeps the DOM light on phones)
 import { boxArt, headerArt, MAX_NOMS, type PoolGame, type Player } from '../../shared/types';
 import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
@@ -9,7 +11,7 @@ import './panels.css';
 function Art({ appid, kind }: { appid: number; kind: 'box' | 'header' }) {
   const [stage, setStage] = useState(kind === 'box' ? 0 : 1); // 0 box, 1 header, 2 hidden
   if (stage === 2) return <span className="nh-art-miss" />;
-  return <img className="nh-art" loading="lazy" alt="" src={stage === 0 ? boxArt(appid) : headerArt(appid)}
+  return <img className="nh-art" loading="lazy" decoding="async" alt="" src={stage === 0 ? boxArt(appid) : headerArt(appid)}
     onError={() => setStage((s) => s + 1)} />;
 }
 
@@ -22,6 +24,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
   const [coopOnly, setCoopOnly] = useState(true);
   const [fresh, setFresh] = useState(false);
   const [minHours, setMinHours] = useState(0);
+  const [more, setMore] = useState<Record<string, boolean>>({});
   const byId = useMemo(() => new Map(state.players.map((p) => [p.id, p])), [state.players]);
   const isHost = !!byId.get(me)?.host;
 
@@ -35,6 +38,19 @@ export default function Nominate({ state, me, send }: RoomProps) {
   const visible = state.pool.filter((g) => !(coopOnly && g.coop === false) && !(fresh && g.recent) && g.hours >= minHours);
   const all = visible.filter((g) => g.tier === 'all');
   const almost = visible.filter((g) => g.tier === 'almost');
+
+  // first CAP cards, plus anything already on the table so it can always be taken back
+  const capped = (list: PoolGame[], key: string) =>
+    more[key] ? list : list.filter((g, i) => i < CAP || nomBy.has(g.appid));
+  const moreBtn = (list: PoolGame[], key: string) => {
+    const hidden = list.length - capped(list, key).length;
+    if (hidden <= 0) return null;
+    return (
+      <button type="button" className="nh-btn nh-btn-sm nh-more" onClick={() => { sfx.click(); setMore((m) => ({ ...m, [key]: true })); }}>
+        Show {hidden} more
+      </button>
+    );
+  };
 
   const toggle = (g: PoolGame) => {
     const mineNow = (nomBy.get(g.appid) || []).includes(me);
@@ -103,7 +119,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
         <label className="nh-toggle"><input type="checkbox" checked={coopOnly} onChange={(e) => { sfx.click(); setCoopOnly(e.target.checked); }} /><span />Multiplayer/co-op only</label>
         <label className="nh-toggle"><input type="checkbox" checked={fresh} onChange={(e) => { sfx.click(); setFresh(e.target.checked); }} /><span />Not played in last 2 weeks</label>
         <label className="nh-select">Group hours ≥
-          <select value={minHours} onChange={(e) => { sfx.click(); setMinHours(Number(e.target.value)); }}>
+          <select value={minHours} aria-label="Minimum group hours" onChange={(e) => { sfx.click(); setMinHours(Number(e.target.value)); }}>
             <option value={0}>Any</option>
             <option value={10}>10h</option>
             <option value={50}>50h</option>
@@ -121,14 +137,14 @@ export default function Nominate({ state, me, send }: RoomProps) {
           {(all.length > 0 || !state.poolLoading) && (
             <section>
               <h3 className="nh-tier"><span>Everyone owns it</span> ready to ride <em>{all.length}</em></h3>
-              {all.length ? <div className="nh-grid">{all.map(card)}</div>
+              {all.length ? <><div className="nh-grid">{capped(all, 'all').map(card)}</div>{moreBtn(all, 'all')}</>
                 : <div className="nh-empty sm">{state.pool.some((g) => g.tier === 'all') ? 'Filters hid them all. Loosen up, partner.' : 'Nothing everybody owns.'}</div>}
             </section>
           )}
           {almost.length > 0 && (
             <section>
               <h3 className="nh-tier alt"><span>Almost</span> short a horse or two <em>{almost.length}</em></h3>
-              <div className="nh-grid">{almost.map(card)}</div>
+              <div className="nh-grid">{capped(almost, 'almost').map(card)}</div>{moreBtn(almost, 'almost')}
             </section>
           )}
         </div>
@@ -153,14 +169,17 @@ export default function Nominate({ state, me, send }: RoomProps) {
         )}
       </section>
 
-      <footer className="nh-foot">
-        {isHost ? (
-          <>
-            <button className="nh-btn nh-btn-big nh-btn-red" disabled={state.poolLoading && state.board.length === 0}
+      <footer className="nh-foot nh-foot-sticky nh-nom-foot">
+        <div className="nh-foot-row">
+          <span className={`nh-mycount ${myCount >= MAX_NOMS ? 'is-full' : ''}`} aria-label={`Your picks: ${myCount} of ${MAX_NOMS}`}>
+            Your picks <b>{myCount}/{MAX_NOMS}</b>
+          </span>
+          {isHost ? (
+            <button type="button" className="nh-btn nh-btn-big nh-btn-red" disabled={state.poolLoading && state.board.length === 0}
               onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'beginVeto' }); }}>To the guns →</button>
-            <div className="nh-hint">Empty spots get dealt by the house (top shared games).</div>
-          </>
-        ) : <div className="nh-waiting"><i className="nh-spin" /> Waiting on the host…</div>}
+          ) : <div className="nh-waiting"><i className="nh-spin" /> Waiting on the host…</div>}
+        </div>
+        {isHost && <div className="nh-hint">Empty spots get dealt by the house (top shared games).</div>}
       </footer>
     </div>
   );

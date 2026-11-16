@@ -8,7 +8,7 @@ export function Avatar({ p, size = 32 }: { p?: Player; size?: number }) {
   const [bad, setBad] = useState(false);
   const initial = (p?.name || '?').trim().charAt(0).toUpperCase();
   if (p?.steam?.avatar && !bad) {
-    return <img className="nh-av" src={p.steam.avatar} alt="" width={size} height={size} style={{ width: size, height: size }} loading="lazy" onError={() => setBad(true)} />;
+    return <img className="nh-av" src={p.steam.avatar} alt="" width={size} height={size} style={{ width: size, height: size }} loading="lazy" decoding="async" onError={() => setBad(true)} />;
   }
   return <span className="nh-av nh-av-blank" style={{ width: size, height: size, fontSize: size * 0.48 }}>{initial}</span>;
 }
@@ -45,6 +45,13 @@ export default function Lobby({ state, me, send }: RoomProps) {
     copyT.current = window.setTimeout(() => setCopied(false), 1800);
   };
 
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  const share = async () => {
+    sfx.unlock(); sfx.click();
+    try { await navigator.share({ title: 'Nah.', text: 'Pull up a chair', url: location.href }); }
+    catch { /* cancelled or unsupported */ }
+  };
+
   const link = (e: FormEvent) => {
     e.preventDefault();
     const v = profile.trim();
@@ -67,9 +74,11 @@ export default function Lobby({ state, me, send }: RoomProps) {
 
       <section className="nh-sec">
         <div className="nh-label">Invite your crew</div>
-        <div className="nh-invite">
-          <input className="nh-input nh-input-mono" readOnly value={location.href} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link" />
-          <button className={`nh-btn nh-btn-sm ${copied ? 'is-done' : ''}`} onClick={copy}>{copied ? 'Copied!' : 'Copy invite'}</button>
+        <div className={`nh-invite ${canShare ? 'can-share' : ''}`}>
+          <span className="nh-invite-code" aria-label={`Table code ${state.code}`}>{state.code}</span>
+          <input className="nh-input nh-input-mono nh-invite-url" readOnly value={location.href} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link" />
+          <button type="button" className={`nh-btn nh-btn-sm nh-copy ${copied ? 'is-done' : ''}`} onClick={copy}>{copied ? 'Copied!' : 'Copy invite'}</button>
+          {canShare && <button type="button" className="nh-btn nh-btn-sm nh-share" onClick={share}>Share</button>}
         </div>
       </section>
 
@@ -78,8 +87,9 @@ export default function Lobby({ state, me, send }: RoomProps) {
         {!steam ? (
           <form className="nh-link" onSubmit={link}>
             <input className="nh-input" value={profile} onChange={(e) => setProfile(e.target.value)}
-              placeholder="Steam profile URL or custom name" disabled={!!mine?.linking} spellCheck={false} autoComplete="off" />
-            <button className="nh-btn nh-btn-sm" disabled={!profile.trim() || !!mine?.linking}>
+              placeholder="Steam profile URL or custom name" disabled={!!mine?.linking} spellCheck={false} autoComplete="off"
+              inputMode="url" autoCapitalize="none" autoCorrect="off" enterKeyHint="go" aria-label="Steam profile URL or custom name" />
+            <button type="submit" className="nh-btn nh-btn-sm" disabled={!profile.trim() || !!mine?.linking}>
               {mine?.linking ? <><i className="nh-spin" /> Linking</> : 'Link'}
             </button>
           </form>
@@ -90,7 +100,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
               <b>{steam.name}</b>
               <span>{steam.private ? 'Library hidden' : `${steam.gameCount} games in the saddlebag`}</span>
             </div>
-            <button className="nh-linkbtn" onClick={() => { sfx.click(); send({ t: 'unlink' }); }}>unlink</button>
+            <button type="button" className="nh-linkbtn" onClick={() => { sfx.click(); send({ t: 'unlink' }); }}>unlink</button>
           </div>
         )}
         {mine?.linkError && <div className="nh-err">{mine.linkError}</div>}
@@ -98,7 +108,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
           <div className="nh-help">
             <b>Your game library is hidden.</b>
             <p>On Steam: <em>Profile → Edit Profile → Privacy Settings</em> → set <em>'Game details'</em> to <strong>Public</strong> (and untick <em>'Always keep my total playtime private'</em>). Then hit Re-check.</p>
-            <button className="nh-btn nh-btn-sm" disabled={!!mine?.linking}
+            <button type="button" className="nh-btn nh-btn-sm" disabled={!!mine?.linking}
               onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'link', profile: steam.steamid }); }}>
               {mine?.linking ? <><i className="nh-spin" /> Checking</> : 'Re-check'}
             </button>
@@ -111,7 +121,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
         <ul className="nh-posse">
           {state.players.map((p) => (
             <li key={p.id} className={`${p.connected ? '' : 'is-off'} ${p.id === me ? 'is-me' : ''}`}>
-              <Avatar p={p} size={34} />
+              <Avatar p={p} size={32} />
               <span className="nh-pname">
                 {p.name}{p.id === me && <small> (you)</small>}
                 {p.host && <span className="nh-tag">HOST</span>}
@@ -122,10 +132,10 @@ export default function Lobby({ state, me, send }: RoomProps) {
         </ul>
       </section>
 
-      <footer className="nh-foot">
+      <footer className={`nh-foot ${isHost ? 'nh-foot-sticky' : ''}`}>
         {isHost ? (
           <>
-            <button className="nh-btn nh-btn-big" disabled={!canStart} onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'start' }); }}>
+            <button type="button" className="nh-btn nh-btn-big" disabled={!canStart} onClick={() => { sfx.unlock(); sfx.cock(); send({ t: 'start' }); }}>
               Deal 'em in →
             </button>
             <div className="nh-hint">
