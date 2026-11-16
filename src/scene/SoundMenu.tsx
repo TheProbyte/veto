@@ -79,6 +79,10 @@ export default function SoundMenu({ phase }: { phase?: string } = {}) {
     return () => { window.removeEventListener('pointerdown', off); window.removeEventListener('keydown', esc); };
   }, [open]);
   useEffect(() => () => window.clearTimeout(testT.current), []);
+  // mute/levels changed elsewhere (right-click menu, another control): follow along
+  useEffect(() => sfx.onLevels(() => {
+    setMusic(sfx.getMusicVolume()); setFx(sfx.getVolume()); setVoice(sfx.getVoiceVolume()); setMuted(sfx.isMuted());
+  }), []);
   // reopening: pick up anything changed elsewhere
   useEffect(() => {
     if (!open) return;

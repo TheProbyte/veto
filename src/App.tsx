@@ -3,6 +3,7 @@ import { useRoom } from './net';
 import Home from './phases/Home';
 import NameGate from './phases/NameGate';
 import Saloon from './scene/Saloon';
+import ContextMenu from './scene/ContextMenu';
 import Lobby from './phases/Lobby';
 import Nominate from './phases/Nominate';
 import Veto from './phases/Veto';
@@ -18,7 +19,7 @@ function getName(): string | null {
 
 export default function App() {
   const m = location.pathname.match(/^\/r\/([A-Za-z0-9]{3,12})/);
-  if (!m) return <Home />;
+  if (!m) return <><Home /><ContextMenu /></>;
   return <Room code={m[1].toUpperCase()} />;
 }
 
@@ -27,7 +28,7 @@ function Room({ code }: { code: string }) {
   const { state, me, send, connected, error, skew, on } = useRoom(code, name);
   useWakeLock(state?.phase === 'veto' || state?.phase === 'roulette' || state?.phase === 'duel' || state?.phase === 'slide');
   if (!name) {
-    return <NameGate code={code} onJoin={(n) => { try { localStorage.setItem('nah.name', n); } catch {} setName(n); }} />;
+    return <><ContextMenu /><NameGate code={code} onJoin={(n) => { try { localStorage.setItem('nah.name', n); } catch {} setName(n); }} /></>;
   }
   if (!state) return <div className="loading">Pushing open the saloon doors…</div>;
   const p: RoomProps = { state, me, send, skew, on };
