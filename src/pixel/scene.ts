@@ -106,9 +106,11 @@ interface WallGeo {
   door: Rect | null; // doorway opening (batwing doors swing in it)
   piano: { x: number; floor: number } | null;
   shelf: { x0: number; x1: number; y: number };
+  /** every wall fixture's footprint (frames, sills, shelf, piano, pictures): nothing may overlap */
+  decor?: Rect[];
 }
 
-const DOOR_OUT = (c: Ctx, d: Rect, dawn: boolean) => {
+const DOOR_OUT = (c: Ctx, d: Rect, dawn: boolean, sun = false) => {
   // the street outside: sky, a far false-front building, mud
   ditherBands(c, d.x, d.y, d.w, d.h, dawn ? ['#3a2c5a', '#c4587a', '#ff8a3d', '#ffd39a'] : [PAL.blue0, PAL.blue1, PAL.blue1, PAL.blue2]);
   const bh = Math.round(d.h * 0.42);
@@ -116,7 +118,10 @@ const DOOR_OUT = (c: Ctx, d: Rect, dawn: boolean) => {
   c.fillRect(d.x + 2, d.y + d.h - bh - 3, Math.max(2, d.w - 6), 3);
   px(c, d.x + Math.round(d.w * 0.7), d.y + d.h - bh + 3, dawn ? '#ffd39a' : PAL.lamp1);
   px(c, d.x + Math.round(d.w * 0.3), d.y + d.h - bh + 4, dawn ? '#c4587a' : PAL.lamp3);
+  if (sun) { circle(c, d.x + Math.round(d.w * 0.62), d.y + d.h - bh - 4, Math.max(2, Math.round(d.w * 0.16)), '#fff3c4'); c.fillStyle = '#4a2438'; c.fillRect(d.x, d.y + d.h - bh, d.w, bh); }
   c.fillStyle = dawn ? '#5a3a22' : '#140c08'; c.fillRect(d.x, d.y + d.h - 3, d.w, 3);
+  // jambs + lintel in shadow: the opening reads as a recess in the wall
+  c.fillStyle = PAL.ink; c.fillRect(d.x, d.y, d.w, 1); c.fillRect(d.x, d.y, 1, d.h); c.fillRect(d.x + d.w - 1, d.y, 1, d.h);
 };
 
 function drawPiano(c: Ctx, x: number, floor: number) {
@@ -180,13 +185,51 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
   c.fillStyle = PAL.wood4; c.fillRect(0, rail, W, 1);
   c.fillStyle = PAL.ink; c.fillRect(0, rail + 2, W, 1);
 
-  // windows
+  // ---- back-wall layout, decided up front so nothing overlaps:
+  //   [left window] [picture] [shelf + bottles] [poster] [door] [right window]
+  // The batwing doorway gets its own column between the shelf and the right window when there is
+  // room (desktop / landscape); otherwise (portrait phones) it takes the right window's column and
+  // that window goes. Its lintel sits just under the window heads and it runs down to the table edge.
   const ww = Math.round(Math.max(16, Math.min(36, W * 0.11)));
   const wy = Math.max(6, Math.round(tableTop * 0.14));
-  const wh = Math.max(14, Math.min(Math.round(ww * 1.45), rail - wy - 8));
+  const wh = Math.max(14, Math.min(Math.round(ww * (L.portrait ? 1.8 : 1.45)), rail - wy - 8));
   const wl = Math.round(W * 0.1);
-  const wins = [wl, W - wl - ww];
-  const winTop = wy, winBot = wy + wh;
+  const sy = Math.round(tableTop * 0.6);
+  const sx0 = Math.round(L.cx - W * 0.17), sx1 = Math.round(L.cx + W * 0.17);
+  const winR = W - wl - ww;
+  const used: Rect[] = [];
+  const box = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h });
+  const hits = (r: Rect, m = 1) => r.x - m < 0 || r.x + r.w + m > W || used.some((u) => r.x - m < u.x + u.w && r.x + r.w + m > u.x && r.y - m < u.y + u.h && r.y + r.h + m > u.y);
+  // the table edge dips toward the sides: the doorway runs down to wherever it is lowest under it
+  const floorUnder = (x0: number, x1: number) => { let m = 0; for (let xx = x0; xx <= x1; xx++) m = Math.max(m, Math.round(edgeY(L, xx))); return m + 1; };
+  const doorTop = wy + Math.round(wh * 0.15);
+  let door: Rect | null = null;
+  let dropRight = false;
+  {
+    // mid: between the shelf (bottle tops included) and the right window, frames clear by 2px
+    const gapL = sx1 + 5, gapR = winR - 8;
+    const bottom = floorUnder(gapL, gapR);
+    const dh = bottom - doorTop;
+    const dw = Math.min(28, Math.max(16, Math.round(dh * 0.52)), gapR - gapL);
+    if (!L.portrait && dw >= 16 && dh >= 20) door = { x: Math.round((gapL + gapR) / 2 - dw / 2), y: doorTop, w: dw, h: dh };
+    else {
+      // the right window's column
+      const cxR = winR + ww / 2;
+      let dw2 = Math.max(16, Math.min(26, Math.round(ww * 1.15)));
+      let x = Math.round(cxR - dw2 / 2);
+      x = Math.min(x, W - 4 - dw2);
+      x = Math.max(x, sx1 + 5);
+      dw2 = Math.min(dw2, W - 4 - x);
+      const b2 = floorUnder(x, x + dw2);
+      const top2 = Math.max(doorTop, b2 - Math.round(wh * 2.2));
+      if (dw2 >= 14 && b2 - top2 >= 20) { door = { x, y: top2, w: dw2, h: b2 - top2 }; dropRight = true; }
+    }
+  }
+  geo.door = door;
+  if (door) used.push(box(door.x - 3, door.y - 3, door.w + 6, door.h + 3));
+
+  // windows
+  const wins = dropRight ? [wl] : [wl, winR];
   wins.forEach((wx, wi) => {
     const mesa: number[] = [];
     // blue spill on wall below/around (cool light map)
@@ -238,12 +281,12 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
     // sill
     c.fillStyle = PAL.wood3; c.fillRect(wx - 4, wy + wh + 2, ww + 8, 2);
     c.fillStyle = PAL.blue3; c.fillRect(wx - 4, wy + wh + 2, ww + 8, 1);
+    used.push(box(wx - 4, wy - 3, ww + 8, wh + 7));
   });
+  const winBot = wy + wh;
 
   // bottle shelf
-  const sy = Math.round(tableTop * 0.6);
-  const sx0 = Math.round(L.cx - W * 0.17), sx1 = Math.round(L.cx + W * 0.17);
-  let bx = sx0 + 2, bi = 0;
+  let bx = sx0 + 2, bi = 0, btop = sy;
   const BOT = ['#1f3318', '#5a2a10', '#2a1a10', '#1e2c3d', '#6b3a12', '#3a0f0f'];
   while (bx < sx1 - 3) {
     if (Math.abs(bx - L.cx) < 6) { bx += 7; continue; }
@@ -254,6 +297,7 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
     px(c, bx + (bw >> 1), sy - bh - 4, PAL.wood1);
     c.fillStyle = shade(col, 1.9); c.fillRect(bx, sy - bh + 1, 1, bh - 2);
     if (bi % 2 === 0) { c.fillStyle = PAL.parch3; c.fillRect(bx, sy - Math.round(bh * 0.6), bw, 2); }
+    btop = Math.min(btop, sy - bh - 4);
     bx += bw + 1 + Math.floor(rnd(bi, 33) * 3); bi++;
   }
   c.fillStyle = PAL.wood3; c.fillRect(sx0, sy, sx1 - sx0, 2);
@@ -261,27 +305,19 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
   c.fillStyle = PAL.ink; c.fillRect(sx0, sy + 2, sx1 - sx0, 1);
   c.fillStyle = PAL.wood1; c.fillRect(sx0 + 3, sy + 3, 2, 4); c.fillRect(sx1 - 5, sy + 3, 2, 4);
   geo.shelf = { x0: sx0, x1: sx1, y: sy };
+  used.push(box(sx0, Math.min(btop, sy - 12), sx1 - sx0, sy + 7 - Math.min(btop, sy - 12))); // + headroom for the cat
 
-  // ---- swinging doors (back wall) + piano corner
+  // ---- swinging doors' doorway (back wall) + piano corner
   const floor = L.tableTop + (L.portrait ? 2 : 4);
-  const dw = Math.max(16, Math.min(26, Math.round(W * 0.085)));
-  let door: Rect | null = null;
-  const tallD = Math.min(36, floor - 4 - (L.portrait ? winBot + 6 : 8));
-  const gapL = sx1 + 2, gapR = W - wl - ww - 5; // wall between the shelf and the right window
-  const dwm = Math.min(dw, gapR - gapL - 2);
-  if (!L.portrait && dwm >= 16 && tallD >= 18) door = { x: Math.round((gapL + gapR) / 2 - dwm / 2), y: floor - tallD, w: dwm, h: tallD };
-  else {
-    const dh = Math.min(34, floor - winBot - 6);
-    if (dh >= 16) door = { x: W - dw - 3, y: floor - dh, w: dw, h: dh };
-  }
-  geo.door = door;
   if (door) {
     const d = door;
     c.fillStyle = PAL.ink; c.fillRect(d.x - 3, d.y - 3, d.w + 6, d.h + 3);
     c.fillStyle = PAL.wood3; c.fillRect(d.x - 2, d.y - 2, d.w + 4, d.h + 2);
     c.fillStyle = PAL.wood4; c.fillRect(d.x - 2, d.y - 2, d.w + 4, 1);
+    // lintel shadow + jamb highlights so the opening reads as a recess in the wall
+    c.fillStyle = PAL.wood1; c.fillRect(d.x - 2, d.y - 1, d.w + 4, 1);
     DOOR_OUT(c, d, false);
-    for (let y = d.y; y < d.y + d.h; y++) for (let xx = d.x; xx < d.x + d.w; xx++) emis[y * W + xx] = 1;
+    for (let y = d.y + 1; y < d.y + d.h; y++) for (let xx = d.x + 1; xx < d.x + d.w - 1; xx++) emis[y * W + xx] = 1;
     // cool spill on the floor boards in front
     for (let y = d.y + d.h - 4; y < Math.min(H, d.y + d.h + 18); y++) for (let xx = d.x - 10; xx < d.x + d.w + 10; xx++) {
       if (xx < 0 || xx >= W || (y < d.y + d.h && xx >= d.x && xx < d.x + d.w)) continue;
@@ -290,24 +326,16 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
     }
   }
   const pianoX = L.portrait ? 1 : 3;
-  if (W >= 150 && floor - 24 > winBot + 2 - (L.portrait ? 0 : 12)) { drawPiano(c, pianoX, floor); geo.piano = { x: pianoX, floor }; }
+  const pianoR = box(pianoX - 1, floor - 25, 26, 25);
+  if (W >= 150 && floor - 24 > winBot + 2 - (L.portrait ? 0 : 12) && !hits(pianoR, 0)) { drawPiano(c, pianoX, floor); geo.piano = { x: pianoX, floor }; used.push(pianoR); }
   else geo.piano = null;
-  const doorMid = !!door && !L.portrait && door.x < W * 0.8;
 
-  // framed picture (left)
-  const fx = Math.round(W * 0.25), fy = Math.max(8, Math.round(tableTop * 0.2)), fw = 14, fh = 11;
-  if (fx + fw < sx0 - 1 && !doorMid) {
-    c.fillStyle = PAL.ink; c.fillRect(fx - 1, fy - 1, fw + 2, fh + 2);
-    c.fillStyle = PAL.lamp3; c.fillRect(fx, fy, fw, fh);
-    c.fillStyle = PAL.wood4; c.fillRect(fx, fy, fw, 1);
-    ditherBands(c, fx + 2, fy + 2, fw - 4, fh - 4, [PAL.blue1, PAL.lamp3, PAL.wood2]);
-    for (let i = 0; i < fw - 4; i++) { const hh = 2 + ((i * 7) % 3); c.fillStyle = PAL.wood0; c.fillRect(fx + 2 + i, fy + fh - 2 - hh, 1, hh); }
-    line(c, fx + 2, fy - 1, fx + fw / 2, fy - 5, PAL.wood0); line(c, fx + fw - 3, fy - 1, fx + fw / 2, fy - 5, PAL.wood0);
-    px(c, fx + fw / 2, fy - 5, PAL.metal3);
-  }
-  // wanted poster (right)
-  const px0 = doorMid ? Math.round(W * 0.25) : Math.round(W * 0.7), py0 = Math.max(8, Math.round(tableTop * 0.16)), pw2 = 13, ph = 17;
-  if (doorMid ? px0 + pw2 < sx0 - 1 : px0 > sx1 + 1 && px0 + pw2 < W - wl - ww - 4) {
+  // wanted poster: right of the shelf if there's wall there, else left of it
+  const py0 = Math.max(8, Math.round(tableTop * 0.16)), pw2 = 13, ph = 17;
+  const px0 = [Math.round(W * 0.7), Math.round((sx1 + (door && !dropRight ? door.x - 3 : winR - 4)) / 2 - pw2 / 2), Math.round(W * 0.25), Math.round((wl + ww + 4 + sx0) / 2 - pw2 / 2)]
+    .find((x) => !hits(box(x, py0, pw2, ph)));
+  if (px0 !== undefined) {
+    used.push(box(px0, py0, pw2, ph));
     c.fillStyle = PAL.parch2; c.fillRect(px0, py0, pw2, ph);
     for (let y = py0; y < py0 + ph; y++) for (let xx = px0; xx < px0 + pw2; xx++) {
       const e = Math.min(xx - px0, px0 + pw2 - 1 - xx, y - py0, py0 + ph - 1 - y);
@@ -320,6 +348,20 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
     px(c, px0 + (pw2 >> 1), py0, PAL.metal3);
     c.fillStyle = PAL.red1; c.fillRect(px0 + pw2 - 4, py0 + ph - 4, 2, 2);
   }
+  // framed picture (left)
+  const fx = Math.round(W * 0.25), fy = Math.max(8, Math.round(tableTop * 0.2)), fw = 14, fh = 11;
+  const picR = box(fx - 1, fy - 5, fw + 2, fh + 6);
+  if (!hits(picR)) {
+    used.push(picR);
+    c.fillStyle = PAL.ink; c.fillRect(fx - 1, fy - 1, fw + 2, fh + 2);
+    c.fillStyle = PAL.lamp3; c.fillRect(fx, fy, fw, fh);
+    c.fillStyle = PAL.wood4; c.fillRect(fx, fy, fw, 1);
+    ditherBands(c, fx + 2, fy + 2, fw - 4, fh - 4, [PAL.blue1, PAL.lamp3, PAL.wood2]);
+    for (let i = 0; i < fw - 4; i++) { const hh = 2 + ((i * 7) % 3); c.fillStyle = PAL.wood0; c.fillRect(fx + 2 + i, fy + fh - 2 - hh, 1, hh); }
+    line(c, fx + 2, fy - 1, fx + fw / 2, fy - 5, PAL.wood0); line(c, fx + fw - 3, fy - 1, fx + fw / 2, fy - 5, PAL.wood0);
+    px(c, fx + fw / 2, fy - 5, PAL.metal3);
+  }
+  geo.decor = used;
 }
 
 function drawTable(c: Ctx, L: Layout) {
@@ -503,7 +545,8 @@ export class SceneRenderer {
       w.mesa.forEach((hgt, xx) => { dc.fillStyle = '#4a2438'; dc.fillRect(w.x + xx, w.y + w.h - hgt, 1, hgt); });
       dc.fillStyle = PAL.wood1; for (const m of w.mull) dc.fillRect(m.x, m.y, m.w, m.h);
     });
-    if (this.geo.door) DOOR_OUT(dc, this.geo.door, true);
+    // with only one window (portrait: the doorway took the right one) the sun rises in the doorway
+    if (this.geo.door) DOOR_OUT(dc, this.geo.door, true, this.geo.wins.length < 2);
     this.dawnWin = dw;
     this.vig = new Float32Array(W * H);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -847,7 +890,7 @@ export class SceneRenderer {
       wins.forEach((w, wi) => {
         c.fillStyle = boltK > 0.6 ? PAL.white : PAL.moon; c.fillRect(w.x, w.y, w.w, w.h);
         w.mesa.forEach((hgt, xx) => { c.fillStyle = PAL.blue0; c.fillRect(w.x + xx, w.y + w.h - hgt, 1, hgt); });
-        if (boltK > 0.5 && (this.bolt.big || wi === Math.floor(this.bolt.v / 1000) % 2)) {
+        if (boltK > 0.5 && (this.bolt.big || wi === Math.floor(this.bolt.v / 1000) % wins.length)) {
           let x = w.x + Math.round(w.w * (0.3 + rnd(Math.floor(this.bolt.v), wi, 3) * 0.4)), y = w.y;
           while (y < w.y + w.h - (w.mesa[0] ?? 3)) {
             const nx = Math.max(w.x, Math.min(w.x + w.w - 1, x + Math.round((rnd(x, y, 5) - 0.5) * 5))), ny = y + 2 + Math.floor(rnd(y, x, 6) * 3);

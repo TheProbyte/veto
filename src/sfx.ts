@@ -1,9 +1,10 @@
-// Sound effects + music API (Web Audio synthesis, no asset files).
+// Sound effects + music API (Web Audio synthesis; optional recorded rain/thunder from public/sfx, see sfxManifest).
 // All functions are safe to call before user gesture (they no-op until unlock()).
 // Graph: effects -> master (effects volume) ┐
 //        music  -> musicGain (music volume) ┴> mainOut (mute) -> compressor -> out
 import { useEffect } from 'react';
 import { createMusic, whistle as whistleVoice, type MusicEngine, type MusicMode } from './music';
+import { SFX_FILES } from './sfxManifest';
 
 export type { MusicMode } from './music';
 
@@ -403,6 +404,7 @@ export const sfx = {
   music(mode: MusicMode) { // background music mode; same mode = no-op; ~1s crossfade; starts only after unlock()
     wantMusic = mode;
     startMusic();
+    rainNodes?.duck(rainDuck());
   },
   getMusicMode(): MusicMode { return wantMusic; },
   setMusicVolume(v: number) { // music volume 0..1 (persisted 'nah.musicVolume')
@@ -413,6 +415,7 @@ export const sfx = {
   getMusicVolume(): number { return musicVolume; },
   unlock() {               // call on first user click/keydown; resumes AudioContext (idempotent)
     if (!init()) return;
+    preloadFiles();
     if (wantAmbience) startAmbience();
     if (wantFuse) startFuse();
     startMusic();
@@ -864,6 +867,7 @@ export const sfx = {
   thunder(intensity = 0.6) { // distant-to-close thunder: crackle (close only) + long low rumble; intensity 0..1
     if (!ready()) return;
     const k = Math.max(0.1, Math.min(1, intensity));
+    if (recordedThunder(k)) return;
     const t = now() + 0.02;
     if (k > 0.6) { noiseHit(t, 'highpass', 1800, 0.25 * k, 0.12, 0.6); noiseHit(t + 0.05, 'bandpass', 900, 0.3 * k, 0.25, 0.8, 0.8); }
     const dur = 1.8 + k * 2.2;
@@ -887,7 +891,7 @@ export const sfx = {
   rain(on: boolean) {      // quiet rain on the roof + windows (loop); call after unlock()
     wantRain = on;
     if (!ready()) return;
-    if (on) startRain(); else { rainNodes?.stop(); rainNodes = null; }
+    if (on) startRain(); else stopRain();
   },
   doors() {                // batwing doors flung open: wind gust + double wooden creak + flap-flap
     if (!ready()) return;
@@ -975,10 +979,153 @@ export const sfx = {
   },
 };
 
-let rainNodes: { stop: () => void } | null = null;
+/* ---- recorded ambience (public/sfx/*, listed in sfxManifest) with the synth as the fallback ---- */
+
+const fileName = (n: string) => n.replace(/^\/?sfx\//, '');
+const hasFile = (n: string) => SFX_FILES.has(n) || SFX_FILES.has('/sfx/' + n) || SFX_FILES.has('sfx/' + n);
+const THUNDERS = [1, 2, 3, 4, 5].map((i) => `thunder_${i}.mp3`);
+const loading = new Map<string, Promise<AudioBuffer | null>>();
+const decoded = new Map<string, { buf: AudioBuffer; peak: number }>();
+
+/** fetch + decode once (cached); resolves null when unlisted or on any failure */
+function loadFile(n: string): Promise<AudioBuffer | null> {
+  n = fileName(n);
+  if (!ctx || !hasFile(n)) return Promise.resolve(null);
+  let p = loading.get(n);
+  if (!p) {
+    const c = ctx;
+    p = fetch(`/sfx/${n}`)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      // callback form: older Safari has no promise-returning decodeAudioData
+      .then((ab) => new Promise<AudioBuffer>((res, rej) => { const q = c.decodeAudioData(ab, res, rej); if (q && typeof q.catch === 'function') q.catch(rej); }))
+      .then((buf) => {
+        let peak = 0;
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i += 7) { const v = Math.abs(d[i]); if (v > peak) peak = v; }
+        decoded.set(n, { buf, peak });
+        return buf;
+      })
+      .catch(() => null);
+    loading.set(n, p);
+  }
+  return p;
+}
+/** after unlock(): decode whatever recordings exist, off the gesture's critical path */
+function preloadFiles() {
+  if (loading.size) return;
+  window.setTimeout(() => { for (const n of ['rain.mp3', ...THUNDERS, 'thunder_big.mp3', 'thunder_far.mp3']) if (hasFile(n)) loadFile(n); }, 50);
+}
+
+let lastThunder = '';
+let rolling: { g: GainNode; s: AudioBufferSourceNode } | null = null;
+/** plays a recorded strike if one is decoded; false = use the synth (and keep decoding for next time).
+ * >= 0.8: thunder_big (else the loudest regular); < 0.35: thunder_far; otherwise a random regular roll
+ * (thunder_far mixed in now and then), never the same file twice in a row. */
+function recordedThunder(k: number): boolean {
+  const regs = THUNDERS.filter(hasFile);
+  const far = hasFile('thunder_far.mp3') ? 'thunder_far.mp3' : '';
+  if (!regs.length && !far && !hasFile('thunder_big.mp3')) return false;
+  const ready = (ns: string[]) => ns.filter((n) => decoded.has(n));
+  let pick: string | undefined;
+  if (k >= 0.8) {
+    if (decoded.has('thunder_big.mp3')) pick = 'thunder_big.mp3';
+    else if (!hasFile('thunder_big.mp3')) {
+      let best = -1;
+      for (const n of ready(regs)) { const e = decoded.get(n)!; if (e.peak > best) { best = e.peak; pick = n; } }
+    }
+  } else {
+    const pool = ready(k < 0.35 && far ? [far] : [...regs, ...(far && Math.random() < 0.3 ? [far] : [])]);
+    const fresh = pool.filter((n) => n !== lastThunder);
+    const from = fresh.length ? fresh : pool;
+    pick = from[Math.floor(Math.random() * from.length)];
+  }
+  const e = pick ? decoded.get(pick) : undefined;
+  if (!e || !pick) { preloadFiles(); return false; }
+  lastThunder = pick;
+  const t = now();
+  // the long rolls overlap: let the previous one die away instead of piling up
+  if (rolling) {
+    const o = rolling;
+    o.g.gain.cancelScheduledValues(t);
+    o.g.gain.setValueAtTime(Math.max(0.0001, o.g.gain.value), t);
+    o.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    try { o.s.stop(t + 0.65); } catch { /* already stopped */ }
+  }
+  const s = ctx!.createBufferSource();
+  s.buffer = e.buf;
+  // files are peak-normalized (-0.4 dBFS): scale by intensity, a touch duller when distant
+  const lp = filt('lowpass', 2500 + k * k * 12000, 0.5);
+  const g = ctx!.createGain();
+  g.gain.value = 0.3 + 0.55 * k;
+  s.connect(lp).connect(g);
+  out(g, 0.2);
+  s.start(t);
+  const me = { g, s };
+  rolling = me;
+  s.onended = () => { if (rolling === me) rolling = null; };
+  return true;
+}
+
+interface RainNodes { stop: () => void; duck: (k: number) => void }
+let rainNodes: RainNodes | null = null;
 let wantRain = false;
+let rainGen = 0;
+const RAIN_FILE_GAIN = 0.3; // the file is normalized to ~-1 dBFS: a bed that never masks the narrator / music
+/** rain sits lower under the veto music */
+const rainDuck = () => (wantMusic === 'veto' ? 0.6 : 1);
+
+function stopRain() {
+  rainGen++;
+  rainNodes?.stop();
+  rainNodes = null;
+}
 function startRain() {
   if (!ready() || rainNodes) return;
+  const rec = decoded.get('rain.mp3');
+  if (rec) { rainNodes = recordedRain(rec.buf); return; }
+  if (hasFile('rain.mp3')) {
+    // not decoded yet: synth now, crossfade to the recording once it lands (if rain is still wanted)
+    const gen = ++rainGen;
+    loadFile('rain.mp3').then((buf) => {
+      if (!buf || gen !== rainGen || !wantRain || !ready()) return;
+      rainNodes?.stop();
+      rainNodes = recordedRain(buf);
+    });
+  }
+  rainNodes = synthRain();
+}
+
+/** gapless loop of the recording: effects volume, own level (x duck), 1.5s fades */
+function recordedRain(buf: AudioBuffer): RainNodes {
+  const t = now();
+  const s = ctx!.createBufferSource();
+  s.buffer = buf;
+  s.loop = true;
+  // rain.mp3 is a seamless loop with 0.25s of matching padding at both ends (covers MP3 encoder padding)
+  const inset = buf.duration > 2 ? 0.25 : 0;
+  s.loopStart = inset;
+  s.loopEnd = buf.duration - inset;
+  const fade = ctx!.createGain();
+  fade.gain.setValueAtTime(0.0001, t);
+  fade.gain.exponentialRampToValueAtTime(1, t + 1.5);
+  const lvl = ctx!.createGain();
+  lvl.gain.value = RAIN_FILE_GAIN * rainDuck();
+  s.connect(fade).connect(lvl);
+  out(lvl);
+  s.start(t, inset);
+  return {
+    duck(k) { lvl.gain.setTargetAtTime(RAIN_FILE_GAIN * k, now(), 0.5); },
+    stop() {
+      const tt = now();
+      fade.gain.cancelScheduledValues(tt);
+      fade.gain.setValueAtTime(Math.max(0.0001, fade.gain.value), tt);
+      fade.gain.exponentialRampToValueAtTime(0.0001, tt + 1.5);
+      s.stop(tt + 1.6);
+    },
+  };
+}
+
+function synthRain(): RainNodes {
   const t = now();
   const s = noise(true);
   const hp = filt('highpass', 900);
@@ -989,18 +1136,21 @@ function startRain() {
   const lfo = ctx!.createOscillator(); lfo.frequency.value = 0.09;
   const lg = ctx!.createGain(); lg.gain.value = 0.007;
   lfo.connect(lg).connect(g.gain);
-  s.connect(hp).connect(lp).connect(g);
-  out(g, 0.2);
+  const lvl = ctx!.createGain();
+  lvl.gain.value = rainDuck();
+  s.connect(hp).connect(lp).connect(g).connect(lvl);
+  out(lvl, 0.2);
   s.start(t, Math.random()); lfo.start(t);
   let alive = true;
   const drip = () => {
     if (!alive || !ready()) return;
     const tt = now() + 0.01;
-    noiseHit(tt, 'bandpass', 2500 + Math.random() * 2500, 0.012 + Math.random() * 0.02, 0.012, 0.3, 3);
+    noiseHit(tt, 'bandpass', 2500 + Math.random() * 2500, (0.012 + Math.random() * 0.02) * rainDuck(), 0.012, 0.3, 3);
     timer = window.setTimeout(drip, 60 + Math.random() * 260);
   };
   let timer = window.setTimeout(drip, 300);
-  rainNodes = {
+  return {
+    duck(k) { lvl.gain.setTargetAtTime(k, now(), 0.5); },
     stop() {
       alive = false; clearTimeout(timer);
       const tt = now();
@@ -1011,7 +1161,6 @@ function startRain() {
     },
   };
 }
-void wantRain;
 
 /** Phase -> music mode. Home (undefined) and lobby/nominate -> 'lobby'. */
 export function musicForPhase(phase: string | undefined): MusicMode {
