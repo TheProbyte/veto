@@ -476,3 +476,4 @@ img { -webkit-user-drag: none; }
 @media (prefers-reduced-motion: reduce) {
   .grain, .lamp, .lamp-glow, .lamp-cone, .motes i, .center .cbox-bob, .crosshair { animation: none !important; }
 }
+.fx::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, rgba(11,7,5,.75), rgba(11,7,5,.35) 45%, transparent 75%); animation: caption 2.7s ease forwards; }
