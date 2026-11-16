@@ -31,11 +31,11 @@ let volume = readLevel(KEY_FX, DEFAULT_FX);
 let musicVolume = readLevel(KEY_MUSIC, DEFAULT_MUSIC);
 /** null = follows the Effects slider (until the Voice slider is moved) */
 let voiceVolume: number | null = readLevel(KEY_VOICE, null);
-// overall mix trims on top of the slider curve (all buses ~-2.5 dB lower than before, music a bit more)
-const FX_TRIM = 0.75;
-const MUSIC_TRIM = 0.62;   // music sits under the effects at equal slider positions
-const VOICE_TRIM = 0.45;   // the recordings are hot (-1.5 dBFS peaks) and pick up the compressor's makeup gain
-const MEDIA_TRIM = 0.32;   // recorded music is mastered loud; this puts it near the procedural music's level
+// overall mix trims on top of the slider curve (effects ~-1.4 dB, music a bit more)
+const FX_TRIM = 0.85;
+const MUSIC_TRIM = 0.7;    // music sits under the effects at equal slider positions
+const VOICE_TRIM = 0.5;    // the recordings are hot (-1.5 dBFS peaks) and pick up the compressor's makeup gain
+const MEDIA_TRIM = 0.55;   // recorded music (-13..-16 LUFS, about as loud as the voice files): ~7 dB under the narrator
 const STING_TRIM = 0.4;    // recorded win sting, on the effects bus
 /** perceptual taper: slider position -> linear gain (0.5 -> -12 dB, 0.35 -> -18 dB, 0.25 -> -24 dB) */
 export const sliderGain = (v: number) => v * v;
@@ -214,7 +214,10 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined') {
   window.addEventListener('pageshow', shown);
   document.addEventListener('resume', shown);
   // an 'interrupted' / stray-suspended context comes back on the next tap or key
-  const kick = () => { if (ctx && !bgHidden && (ctx.state as string) !== 'running') reconcileCtx(); };
+  const kick = () => {
+    if (ctx && !bgHidden && (ctx.state as string) !== 'running') reconcileCtx();
+    retryBlockedMedia();
+  };
   for (const ev of ['pointerdown', 'touchend', 'keydown']) window.addEventListener(ev, kick, { capture: true, passive: true });
 }
 
@@ -1395,23 +1398,32 @@ function synthWin() {
 }
 
 /* ---- recorded music + win sting (/media/*, listed in mediaManifest), streamed, never decoded whole ----
- * Each listed file gets one <audio> element -> MediaElementAudioSourceNode -> own gain. Tracks loop on the
- * music bus and crossfade (1.5 s) between 'lobby' (lobby / nominate / result, quieter in result) and
- * 'showdown' (veto / slide / duel / roulette). The sting plays on the effects bus and dips the music under it.
- * Hidden page: elements pause (and resume where they were). A load / play error falls back to the procedural
- * music for that track (and to the synth ding for the sting). */
+ * Each listed file gets one <audio> element -> MediaElementAudioSourceNode -> own gain -> music bus.
+ *  'lobby' (lobby / nominate / result, quieter in result): music_lobby.mp3, a seamless loop.
+ *  'showdown' (veto / slide / duel / roulette): music_showdown_intro.mp3 once (from the top every time the mode
+ *    is entered), handed off ~0.12 s before its end (polled, with a 150 ms crossfade) to music_showdown.mp3, a
+ *    seamless loop. Lobby <-> showdown crossfade over 1.5 s.
+ * The lobby file is fetched at unlock(); the showdown files when first needed or ~5 s after unlock.
+ * The sting plays on the effects bus and dips the music under it.
+ * Hidden page: elements pause (and resume where they were). A load / decode error ('error' event) falls back to
+ * the procedural music for that mode (and to the synth ding for the sting); a play() refused by the autoplay
+ * policy falls back too, until the next tap / key, which retries the recording. */
 type Track = 'lobby' | 'showdown';
-const TRACK_FILE: Record<Track, string> = { lobby: 'music_lobby.mp3', showdown: 'music_showdown.mp3' };
+const F_LOBBY = 'music_lobby.mp3', F_INTRO = 'music_showdown_intro.mp3', F_LOOP = 'music_showdown.mp3';
 const STING_FILE = 'sting_win.mp3';
+const MUSIC_FILES = [F_LOBBY, F_INTRO, F_LOOP];
 const MEDIA_FADE = 1.5;
+const HANDOFF_LEAD = 0.12, HANDOFF_FADE = 0.15;
 const RESULT_MEDIA_LEVEL = 0.6;
 const hasMedia = (n: string) => MEDIA_FILES.has(n) || MEDIA_FILES.has('/media/' + n) || MEDIA_FILES.has('media/' + n);
 const trackFor = (m: MusicMode): Track | null =>
   m === 'off' ? null : m === 'lobby' || m === 'result' ? 'lobby' : 'showdown';
-interface MediaEl { el: HTMLAudioElement; g: GainNode; failed: boolean; stopTimer: number; target: number }
+interface MediaEl { el: HTMLAudioElement; g: GainNode; failed: boolean; blocked: boolean; stopTimer: number; target: number }
 const mediaEls = new Map<string, MediaEl>();
 let mediaBus: GainNode | null = null;
 let mediaCur: Track | null = null;
+let sdStage: 'intro' | 'loop' = 'intro';
+let sdPoll = 0;
 
 function mediaEl(file: string, dest: AudioNode, loop: boolean): MediaEl | null {
   let m = mediaEls.get(file);
@@ -1426,94 +1438,147 @@ function mediaEl(file: string, dest: AudioNode, loop: boolean): MediaEl | null {
     const g = ctx!.createGain();
     g.gain.value = 0;
     src.connect(g).connect(dest);
-    m = { el, g, failed: false, stopTimer: 0, target: 0 };
-    const me = m;
-    el.addEventListener('error', () => { me.failed = true; if (loop) startMusic(); });
-    mediaEls.set(file, m);
-    return m;
+    const me: MediaEl = { el, g, failed: false, blocked: false, stopTimer: 0, target: 0 };
+    el.addEventListener('error', () => { me.failed = true; if (dest !== master) startMusic(); });
+    if (file === F_INTRO) el.addEventListener('ended', () => { if (mediaCur === 'showdown' && sdStage === 'intro') handoff(); });
+    mediaEls.set(file, me);
+    return me;
   } catch { return null; }
 }
-function trackEl(tr: Track): MediaEl | null {
-  if (!live()) return null;
+/** the element for a music file (created, and so fetched, on first call) */
+function musicEl(file: string): MediaEl | null {
+  if (!live() || !hasMedia(file)) return null;
   if (!mediaBus) {
     mediaBus = ctx!.createGain();
     mediaBus.gain.value = MEDIA_TRIM;
     mediaBus.connect(musicGain!);
   }
-  return mediaEl(TRACK_FILE[tr], mediaBus, true);
+  return mediaEl(file, mediaBus, file !== F_INTRO);
 }
-/** the recording for this track is listed and hasn't failed */
+const ok = (file: string) => { const m = musicEl(file); return !!m && !m.failed && !m.blocked; };
+/** the recording(s) for this track are listed and playable */
 function mediaUsable(tr: Track): boolean {
-  if (!hasMedia(TRACK_FILE[tr])) return false;
-  const m = trackEl(tr);
-  return !!m && !m.failed;
+  if (tr === 'lobby') return ok(F_LOBBY);
+  if (mediaCur === 'showdown' && sdStage === 'loop') return ok(F_LOOP);
+  return ok(F_INTRO) || ok(F_LOOP);
+}
+/** the element(s) that should be audible for a track right now */
+function activeFiles(tr: Track | null): string[] {
+  if (tr === 'lobby') return [F_LOBBY];
+  if (tr === 'showdown') return [sdStage === 'intro' ? F_INTRO : F_LOOP];
+  return [];
 }
 function mediaPlaying(): boolean {
-  if (!mediaCur) return false;
-  const m = mediaEls.get(TRACK_FILE[mediaCur]);
-  return !!m && !m.failed && !m.el.paused;
+  return activeFiles(mediaCur).some((f) => { const m = mediaEls.get(f); return !!m && !m.failed && !m.el.paused; });
 }
-function fadeTo(m: MediaEl, v: number) {
+function fadeTo(m: MediaEl, v: number, secs = MEDIA_FADE) {
   const t = now(), g = m.g.gain;
   m.target = v;
   g.cancelScheduledValues(t);
   g.setValueAtTime(g.value, t);
-  g.linearRampToValueAtTime(v, t + MEDIA_FADE);
+  g.linearRampToValueAtTime(v, t + secs);
+}
+function stopAfter(m: MediaEl, ms: number) {
+  clearTimeout(m.stopTimer);
+  m.stopTimer = window.setTimeout(() => {
+    m.stopTimer = 0;
+    if (m.target === 0) { m.el.pause(); try { m.el.currentTime = 0; } catch { /* not seekable yet */ } }
+  }, ms);
 }
 function playEl(m: MediaEl, onFail: () => void) {
   const p = m.el.play();
   if (p && typeof p.catch === 'function') p.catch((e: unknown) => {
-    // a pause() racing the play() isn't a failure; anything else (not allowed / not supported) is
-    if ((e as { name?: string })?.name === 'AbortError') return;
-    m.failed = true;
+    const name = (e as { name?: string })?.name;
+    if (name === 'AbortError') return; // a pause() racing the play() isn't a failure
+    if (name === 'NotAllowedError') m.blocked = true; // autoplay policy: retried on the next gesture
+    else m.failed = true;
     onFail();
   });
 }
 /** crossfade to `tr` (null = no recorded music) at `level` */
 function setMediaTrack(tr: Track | null, level: number) {
   if (!live()) return;
+  const prev = mediaCur;
   mediaCur = tr;
-  for (const k of Object.keys(TRACK_FILE) as Track[]) {
-    if (!hasMedia(TRACK_FILE[k])) continue;
-    const m = k === tr ? trackEl(k) : mediaEls.get(TRACK_FILE[k]);
+  if (tr === 'showdown') {
+    if (prev !== 'showdown') {
+      // (re)entering: the build-up from the top, the loop parked at its start
+      sdStage = ok(F_INTRO) ? 'intro' : 'loop';
+      for (const f of [F_INTRO, F_LOOP]) {
+        const m = mediaEls.get(f);
+        if (m && !m.failed) {
+          clearTimeout(m.stopTimer); m.stopTimer = 0;
+          m.el.pause(); m.target = 0;
+          m.g.gain.cancelScheduledValues(now()); m.g.gain.setValueAtTime(0, now());
+          try { m.el.currentTime = 0; } catch { /* not loaded yet */ }
+        }
+      }
+    } else if (sdStage === 'intro' && !ok(F_INTRO)) sdStage = 'loop'; // the intro broke: straight to the loop
+  }
+  const want = activeFiles(tr);
+  for (const f of MUSIC_FILES) {
+    const m = want.includes(f) ? musicEl(f) : mediaEls.get(f);
     if (!m) continue;
-    if (k === tr && !m.failed) {
+    if (want.includes(f) && !m.failed && !m.blocked) {
       clearTimeout(m.stopTimer); m.stopTimer = 0;
       if (m.target !== level) fadeTo(m, level);
-      if (m.el.paused && !bgHidden) playEl(m, () => { if (mediaCur === k) startMusic(); });
+      if (m.el.paused && !bgHidden) playEl(m, () => { if (mediaCur === tr) startMusic(); });
     } else if (m.target > 0 || (!m.el.paused && !m.stopTimer)) {
       fadeTo(m, 0);
-      clearTimeout(m.stopTimer);
-      m.stopTimer = window.setTimeout(() => {
-        m.stopTimer = 0;
-        if (m.target === 0) { m.el.pause(); try { m.el.currentTime = 0; } catch { /* not seekable yet */ } }
-      }, MEDIA_FADE * 1000 + 150);
+      stopAfter(m, MEDIA_FADE * 1000 + 150);
     }
   }
+  if (tr === 'showdown' && sdStage === 'intro' && !sdPoll) sdPoll = window.setInterval(pollIntro, 40);
 }
-/** page hidden: pause every element where it is (startMusic() resumes the current track on return) */
+/** while the intro plays: start the loop just before the intro's end ('ended' fires too late for gapless) */
+function pollIntro() {
+  if (mediaCur !== 'showdown' || sdStage !== 'intro') { clearInterval(sdPoll); sdPoll = 0; return; }
+  const m = mediaEls.get(F_INTRO);
+  if (!m || m.el.paused || bgHidden) return;
+  const d = m.el.duration;
+  if (Number.isFinite(d) && d > 0 && m.el.currentTime >= d - HANDOFF_LEAD) handoff();
+}
+function handoff() {
+  clearInterval(sdPoll); sdPoll = 0;
+  sdStage = 'loop';
+  const intro = mediaEls.get(F_INTRO);
+  const level = wantMusic === 'result' ? RESULT_MEDIA_LEVEL : 1;
+  if (!ok(F_LOOP)) { if (intro) { fadeTo(intro, 0, HANDOFF_FADE); stopAfter(intro, 300); } startMusic(); return; }
+  const loop = musicEl(F_LOOP)!;
+  clearTimeout(loop.stopTimer); loop.stopTimer = 0;
+  try { loop.el.currentTime = 0; } catch { /* not loaded yet */ }
+  loop.g.gain.cancelScheduledValues(now()); loop.g.gain.setValueAtTime(0, now());
+  fadeTo(loop, level, HANDOFF_FADE);
+  if (!bgHidden) playEl(loop, () => { if (mediaCur === 'showdown') startMusic(); });
+  if (intro) { fadeTo(intro, 0, HANDOFF_FADE); stopAfter(intro, HANDOFF_FADE * 1000 + 150); }
+}
+/** page hidden: pause every element where it is (startMusic() resumes the current one on return) */
 function pauseMedia() {
   for (const m of mediaEls.values()) if (!m.el.paused) m.el.pause();
 }
-/** in the unlock gesture: create the listed elements and start / prime them, so iOS lets them play later */
+/** a tap / key after the autoplay policy refused a recording: try it again inside the gesture */
+function retryBlockedMedia() {
+  let any = false;
+  for (const m of mediaEls.values()) if (m.blocked) { m.blocked = false; any = true; }
+  if (any && ready()) startMusic();
+}
+/** in the unlock gesture: the lobby track starts (startMusic), the sting is primed (muted play + pause, so iOS
+ * lets it play later); the showdown files are fetched ~5 s later unless needed sooner */
 let primed = false;
 function primeMedia() {
   if (!live() || primed) return;
   primed = true;
-  for (const tr of Object.keys(TRACK_FILE) as Track[]) if (hasMedia(TRACK_FILE[tr])) trackEl(tr);
   const sting = stingEl();
-  for (const m of [...mediaEls.values()]) {
-    if (m.failed || !m.el.paused || m.target > 0 || m === sting && stingBusy) continue;
-    // muted (gain 0) play + immediate pause: marks the element as user-activated
-    const p = m.el.play();
-    if (p && typeof p.then === 'function') p.then(() => { if (m.target === 0 && !(m === sting && stingBusy)) m.el.pause(); }).catch(() => {});
+  if (sting && sting.el.paused && !stingBusy) {
+    const p = sting.el.play();
+    if (p && typeof p.then === 'function') p.then(() => { if (!stingBusy) sting.el.pause(); }).catch(() => {});
   }
-  startMusic();
+  window.setTimeout(() => { for (const f of [F_INTRO, F_LOOP]) musicEl(f); }, 5000);
 }
 let stingBusy = false;
 let stingTimer = 0;
 function stingEl(): MediaEl | null {
-  return hasMedia(STING_FILE) ? mediaEl(STING_FILE, master!, false) : null;
+  return live() && hasMedia(STING_FILE) ? mediaEl(STING_FILE, master!, false) : null;
 }
 /** plays the recorded win sting; false = not listed / failed (use the synth) */
 function playSting(): boolean {
