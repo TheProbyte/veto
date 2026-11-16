@@ -109,7 +109,7 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
     if (!el) return;
     let acc = 0, last = 0, lastEv = 0;
     const onWheel = (e: WheelEvent) => {
-      if (!wheelRef.current.ok) return;
+      if (!wheelRef.current.ok || e.ctrlKey) return; // ctrl+wheel / pinch = page zoom
       const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
       if (!d) return;
       e.preventDefault();

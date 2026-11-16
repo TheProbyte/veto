@@ -16,6 +16,8 @@ const VOTE_PICK_MS = 2_500;  // the picked finale is shown this long before it s
 const MINI_INTRO_MS = 2_500; // mini: play opens after the intro line (plus the how_* explanation when it plays)
 const MINI_MS: Record<Mini['kind'], number> = { slide: 25_000, golf: 90_000, horse: 30_000 };
 const MINI_RESULT_MS = 3_500; // mini winner shown this long before the result screen
+const HORSE_RESULT_MS = 5_500; // horse drop: long enough for everyone to see the winner rear and ride off
+const miniHold = (k?: string) => (k === 'horse' ? HORSE_RESULT_MS : MINI_RESULT_MS);
 const STALE_MS = 2_500;       // cosmetic jobs this overdue are dropped (e.g. reloaded from storage after hibernation)
 const NARR_HIGH = 6;
 // higher wins when several fire at once; >= NARR_HIGH may cut into the 2.5s throttle window
@@ -285,7 +287,7 @@ export class Room extends DurableObject<Env> {
       ts.push(s.vote.picked ? (s.vote.pickedAt ?? 0) + VOTE_PICK_MS : s.vote.deadline);
     } else if (s.phase === 'mini' && s.mini) {
       const m = s.mini;
-      ts.push(m.decidedAt ? m.decidedAt + MINI_RESULT_MS : x.miniAt || m.deadline);
+      ts.push(m.decidedAt ? m.decidedAt + miniHold(m.kind) : x.miniAt || m.deadline);
     }
     const at = ts.length ? Math.min(...ts) : 0;
     if (at === this.alarmAt) return;
@@ -1918,7 +1920,7 @@ export class Room extends DurableObject<Env> {
     } else if (s.phase === 'mini' && s.mini) {
       const m = s.mini;
       if (m.decidedAt) {
-        if (m.winner !== undefined && now >= m.decidedAt + MINI_RESULT_MS - 50) { this.finish(m.winner); persist = true; }
+        if (m.winner !== undefined && now >= m.decidedAt + miniHold(m.kind) - 50) { this.finish(m.winner); persist = true; }
       } else if ((x.miniAt && now >= x.miniAt - 50) || now >= m.deadline - 50) {
         // a glass slid just before the whistle is still travelling: judge once it stops
         const last = Math.max(0, ...Object.values(m.results).map((r) => r.at));

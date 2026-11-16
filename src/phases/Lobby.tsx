@@ -418,7 +418,7 @@ export default function Lobby(props: RoomProps) {
       <div className="nh-lb-fun"><TargetPractice {...props} /></div>
       <PosseRecordCard state={state} />
         </div>
-        {!desk && <TableRules state={state} isHost={isHost} send={send} />}
+        {!desk && <TableRules state={state} isHost={isHost} send={send} collapsible />}
       </div>
         </>
       )}

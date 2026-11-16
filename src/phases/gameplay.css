@@ -654,7 +654,7 @@
 @media (max-width: 640px) and (max-height: 600px) {
   .vt-gun { --gw: 70px; }
 }
-/* phones (landscape): no bar background, the gun sits bottom-right under the thumb, arrows bottom-left */
+/* phones (landscape): no bar background, the gun sits bottom-right under the thumb (clear of the centred box) */
 @media (max-height: 500px) and (orientation: landscape) {
   .saloon.phase-veto .saloon-front { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .vt-gunbar {
