@@ -27,6 +27,7 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
   const [muted, setMuted] = useState(() => sfx.isMuted());
   const [fx, setFx] = useState<ShotEvent | null>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
+  const frontRef = useRef<HTMLDivElement>(null);
 
   // first gesture: unlock audio + start ambience
   useEffect(() => {
@@ -62,17 +63,16 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
       );
     } else {
       sfx.shot();
-      sceneRef.current?.animate(
-        [
+      const kf: Keyframe[] = [
           { transform: 'translate(0,0) rotate(0)' },
           { transform: 'translate(-14px,8px) rotate(-.6deg)' },
           { transform: 'translate(12px,-10px) rotate(.5deg)' },
           { transform: 'translate(-8px,6px)' },
           { transform: 'translate(5px,-3px)' },
           { transform: 'translate(0,0)' },
-        ],
-        { duration: 520, easing: 'ease-out' },
-      );
+        ];
+      sceneRef.current?.animate(kf, { duration: 520, easing: 'ease-out' });
+      frontRef.current?.animate(kf, { duration: 420, easing: 'ease-out' });
       timers.push(window.setTimeout(() => sfx.stamp(), 680));
     }
     timers.push(window.setTimeout(() => setFx((f) => (f && f.id === s.id ? null : f)), 2700));
@@ -133,7 +133,7 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
         <div className="vignette" />
       </div>
 
-      <div className="saloon-front">
+      <div className="saloon-front" ref={frontRef}>
         <div className="saloon-stage">{children}</div>
       </div>
 
@@ -167,7 +167,7 @@ function Seat({ p, me, shooter, order, turnIdx, n }: { p: Player; me: string; sh
     left: `${pos.x}%`,
     top: `${pos.top}vh`,
     '--sc': pos.scale,
-    '--blur': `${(pos.depth - 0.3) * 1.6}px`,
+    '--blur': `${Math.max(0, (pos.depth - 0.35) * 1.8).toFixed(2)}px`,
     '--dim': 0.55 + 0.45 * (1 - pos.depth),
     zIndex: Math.round((1 - pos.depth) * 10) + (lit ? 20 : 0),
   } as CSSProperties;

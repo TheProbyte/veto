@@ -26,7 +26,7 @@ export default function Character({ look, rimRight, lit }: { look: number; rimRi
   const smoker = l === 0 || l === 5;
   const rim = lit ? '#ffb35c' : '#c97a3a';
   return (
-    <svg className="char-svg" viewBox="0 0 120 190" aria-hidden>
+    <svg className="char-svg" viewBox="0 0 120 150" aria-hidden>
       <defs>
         <linearGradient id={`r${uid}`} x1={rimRight ? 1 : 0} x2={rimRight ? 0 : 1} y1="0" y2="0">
           <stop offset="0" stopColor={rim} stopOpacity={lit ? 0.85 : 0.5} />
