@@ -68,3 +68,7 @@
 .fun-photo-frame img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
 .fun-photo-dev { font-size: calc(var(--pt) * 7); color: var(--parch2); animation: fun-blink 1s steps(2, end) infinite; }
 .fun-photo-note { font-size: calc(var(--pt) * 6); color: var(--parch2); }
+
+/* lobby board heading: don't clip the caps */
+.fun-board-wrap { overflow: visible; }
+.fun-board-h { line-height: 1.5; padding-top: 2px; }
