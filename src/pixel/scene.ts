@@ -267,7 +267,9 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
   const dw = Math.max(16, Math.min(26, Math.round(W * 0.085)));
   let door: Rect | null = null;
   const tallD = Math.min(36, floor - 4 - (L.portrait ? winBot + 6 : 8));
-  if (!L.portrait && Math.round(W * 0.7) + dw < W - wl - ww - 4 && tallD >= 18) door = { x: Math.round(W * 0.7), y: floor - tallD, w: dw, h: tallD };
+  const gapL = sx1 + 2, gapR = W - wl - ww - 5; // wall between the shelf and the right window
+  const dwm = Math.min(dw, gapR - gapL - 2);
+  if (!L.portrait && dwm >= 16 && tallD >= 18) door = { x: Math.round((gapL + gapR) / 2 - dwm / 2), y: floor - tallD, w: dwm, h: tallD };
   else {
     const dh = Math.min(34, floor - winBot - 6);
     if (dh >= 16) door = { x: W - dw - 3, y: floor - dh, w: dw, h: dh };
@@ -577,12 +579,18 @@ export class SceneRenderer {
     // shot age in scene time, stamped when first seen
     if (D.shot && D.shot.at !== this.shotSeen) {
       this.shotSeen = D.shot.at;
-      this.shotV = vt - Math.max(0, Math.min(400, t - D.shot.at)) * rate;
-      if (this.cat.state === 'walk' || this.cat.state === 'sit') { this.cat.state = 'bolt'; this.cat.dir = this.cat.x - this.geo.shelf.x0 < this.geo.shelf.x1 - this.cat.x ? -1 : 1; }
+      const lag = t - D.shot.at;
+      // a renderer rebuilt after a resize sees an old shot: don't replay it
+      if (lag > 2500) this.shotV = -1e9;
+      else {
+        this.shotV = vt - Math.max(0, lag) * rate;
+        if (this.cat.state === 'walk' || this.cat.state === 'sit') { this.cat.state = 'bolt'; this.cat.dir = this.cat.x - this.geo.shelf.x0 < this.geo.shelf.x1 - this.cat.x ? -1 : 1; }
+      }
     }
     const shotAge = D.shot ? vt - this.shotV : 1e9;
     // ---- weather: storm until the result, then dawn
     const result = D.phase === 'result';
+    if (dtReal === 0 && result) this.dawn = 1; // first frame of a rebuilt renderer: already morning
     this.dawn = Math.max(0, Math.min(1, this.dawn + (result ? dt / 3500 : -dtReal / 600)));
     const storm = this.dawn < 1;
     if (storm && !result && vt > this.nextBolt) {
@@ -700,6 +708,10 @@ export class SceneRenderer {
     // window spill: cold blue at night, warm pink-orange at dawn, white-blue in a lightning flash
     const coolK = (0.35 + dawn * 0.25) * Math.max(D.dimAll, dawn) + boltK * 1.4;
     const cR = 0.2 + dawn * 1.2 + boltK * 0.9, cG = 0.6 + dawn * 0.15 + boltK * 0.9, cB = 1.5 - dawn * 0.9 + boltK * 0.6;
+    // the piano's candle: a small warm pool in the corner
+    const pn = this.geo.piano;
+    const cdx = pn ? pn.x + 8 : -999, cdy = pn ? pn.floor - 20 : -999, cdr = 30;
+    const cflick = 0.85 + 0.15 * Math.sin(sec * 7.1 + 2);
     for (let y = 0; y < H; y++) {
       const dy = y - ly;
       for (let x = 0; x < W; x++) {
@@ -724,6 +736,10 @@ export class SceneRenderer {
         if (flash > 0) {
           const v = 1 - Math.hypot(x - fX, y - fY) / (W * 0.5);
           if (v > 0) lamp += v * flash;
+        }
+        if (x < cdx + cdr && x > cdx - cdr && y > cdy - cdr && y < cdy + cdr) {
+          const v = 1 - Math.hypot(x - cdx, (y - cdy) * 0.8) / cdr;
+          if (v > 0) lamp += v * 1.1 * cflick;
         }
         const b = bayer(x, y);
         const lq = Math.floor(lamp * 5 + b) / 5;
@@ -887,7 +903,7 @@ export class SceneRenderer {
     // head + bowler; looks over his shoulder when a shot rings out
     const hx = bx + 1, hy = ky - 9;
     c.fillStyle = PAL.ink; c.fillRect(hx - 1, hy - 1, 8, 8);
-    c.fillStyle = '#4a2c18'; c.fillRect(hx, hy, 6, 6); // hair, back of head
+    c.fillStyle = '#1c120c'; c.fillRect(hx, hy, 6, 6); // hair, back of head
     c.fillStyle = PAL.skin1; c.fillRect(hx + 1, hy + 5, 4, 2); // neck
     if (startled) {
       // turned: a profile peeking right, wide eye
