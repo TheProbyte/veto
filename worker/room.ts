@@ -6,7 +6,7 @@ import { pickLine, type NarrKey } from '../shared/narrator';
 import { lastWords } from './lastwords';
 import { ownedGames, playerSummary, resolveSteamId, storeBits, type Env, type OwnedGame } from './steam';
 
-const SHOT_PAUSE = 1600; // ms to let the stamp animation land before the next fuse starts
+const SHOT_PAUSE = 3200; // ms to let the shot FX + the game's last words land before the next fuse starts
 const SPIN_MS = 6500;
 const NARR_GAP = 2500;
 const NARR_HIGH = 6;
@@ -16,9 +16,10 @@ const NARR_PRI: Partial<Record<NarrKey, number>> = {
   draw: 6, cylinder: 6, rematch: 6, ricochet: 7, revenge: 8, duel: 7, duel_foul: 8, duel_win: 8, result: 9, repeat: 9,
   slide: 7, slide_fall: 7, slide_close: 7, slide_win: 8, sheriff: 6, pardon: 7, jail: 6, ousted: 8,
   draft: 6, trade: 4, burn: 3, saddle: 9, straggler: 7,
+  how_lobby: 6, how_nominate: 6, how_draft: 6, how_veto: 6, how_star: 6, how_slide: 6, how_cylinder: 6, how_duel: 7, how_result: 6,
 };
 // phase-change cues always cut in (even over an equal/higher line still ringing)
-const CUES = new Set<NarrKey>(['draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat', 'slide', 'slide_win', 'saddle', 'ousted', 'draft']);
+const CUES = new Set<NarrKey>(['how_lobby', 'how_nominate', 'how_draft', 'how_veto', 'how_star', 'how_slide', 'how_cylinder', 'how_duel', 'how_result', 'draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat', 'slide', 'slide_win', 'saddle', 'ousted', 'draft']);
 const BOT_NAMES = ['Dusty Pete', 'One-Eye Jack', 'Calamity Sue', 'Tumbleweed Tim', 'Sagebrush Sal', 'Two-Bit Earl', 'Whiskey Nell', 'Slim Pickens', 'Rattlesnake Ray', 'Biscuit Bill'];
 const FAKE_LIB: [number, string][] = [[730, 'Counter-Strike 2'], [252490, 'Rust'], [892970, 'Valheim'], [1966720, 'Lethal Company'],
   [548430, 'Deep Rock Galactic'], [105600, 'Terraria'], [413150, 'Stardew Valley'], [632360, 'Risk of Rain 2'], [739630, 'Phasmophobia'],
@@ -211,6 +212,15 @@ export class Room extends DurableObject<Env> {
     this.event({ t: 'narrate', id: line.id, text: line.text, at: now });
   }
   job(j: Job) { this.x.jobs.push(j); }
+  /** the Barkeep explains a step (settings.explain), a moment after the phase cue so both are heard */
+  vetoExplain(delay: number) {
+    this.explain('how_veto', delay, 'veto');
+    if (this.s.record.rounds === 0) this.explain('how_star', delay + 9000, 'veto'); // star tip on a table's first shootout only
+  }
+  explain(key: NarrKey, delay: number, ph = this.s.phase) {
+    if (!this.s.settings.explain) return;
+    this.job({ at: Date.now() + delay, k: 'narr', ph, key });
+  }
 
   schedule() {
     const s = this.s, x = this.x;
@@ -331,6 +341,7 @@ export class Room extends DurableObject<Env> {
       };
       this.s.players.push(p);
       this.narr(freshRoom ? 'open' : 'join');
+      if (freshRoom) this.explain('how_lobby', 3600);
     } else if (!p.connected) {
       this.narr('back');
     }
@@ -377,6 +388,15 @@ export class Room extends DurableObject<Env> {
         this.broadcast();
         return this.recomputePool();
       }
+      case 'resetRecord': {
+        if (!this.isHost(pid)) throw new Bad('Only the host can wipe the slate.');
+        if (s.phase !== 'lobby' && s.phase !== 'nominate' && s.phase !== 'result') throw new Bad('Finish the round first.');
+        s.history = [];
+        s.record = emptyRecord();
+        if (s.result) { s.result.repeatCount = 0; s.result.neverSurvive = undefined; }
+        this.broadcast();
+        return;
+      }
       case 'settings': {
         if (s.phase !== 'lobby' && s.phase !== 'nominate') throw new Bad('Rules are set once the shooting starts.');
         if (!this.isHost(pid)) throw new Bad('Only the host sets the house rules.');
@@ -408,6 +428,10 @@ export class Room extends DurableObject<Env> {
         if (n.sheriff !== undefined) {
           if (typeof n.sheriff !== 'boolean') throw new Bad('Sheriff on or off.');
           st.sheriff = n.sheriff;
+        }
+        if (n.explain !== undefined) {
+          if (typeof n.explain !== 'boolean') throw new Bad('Explain on or off.');
+          st.explain = n.explain;
         }
         const flip = st.nominations !== s.settings.nominations;
         s.settings = st;
@@ -651,8 +675,8 @@ export class Room extends DurableObject<Env> {
         this.clearDraft();
         if (added) {
           this.narr('house');
-          this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' });
-        } else this.narr('draw');
+          this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' }); this.vetoExplain(5600);
+        } else { this.narr('draw'); this.vetoExplain(3000); }
         this.startVeto(pid);
         this.broadcast();
         return;
@@ -662,7 +686,7 @@ export class Room extends DurableObject<Env> {
         if (!this.isHost(pid)) throw new Bad('Only the host calls a rematch.');
         if (!s.board.length) throw new Bad('Nothing to rematch.');
         this.narr('rematch');
-        this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' });
+        this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' }); this.vetoExplain(5600);
         this.startVeto(pid);
         this.broadcast();
         return;
@@ -733,8 +757,8 @@ export class Room extends DurableObject<Env> {
 
   // ---------- draft ----------
   openNominations() {
-    if (this.s.settings.nominations === 'draft') { this.dealDraft(); this.narr('draft'); }
-    else { this.clearDraft(); this.narr('deal'); }
+    if (this.s.settings.nominations === 'draft') { this.dealDraft(); this.narr('draft'); this.explain('how_draft', 3400); }
+    else { this.clearDraft(); this.narr('deal'); this.explain('how_nominate', 3400); }
     this.scheduleBotNoms();
   }
 
@@ -1194,6 +1218,7 @@ export class Room extends DurableObject<Env> {
     s.roulette = { chambers: shuffle(chambers), target: Math.floor(Math.random() * 6), startedAt: Date.now() + 400, duration: SPIN_MS };
     s.phase = 'roulette';
     this.narr('cylinder');
+    this.explain('how_cylinder', 3000);
   }
 
   // ---------- whiskey slide ----------
@@ -1223,6 +1248,7 @@ export class Room extends DurableObject<Env> {
     this.x.slideAt = 0;
     s.phase = 'slide';
     this.narr('slide');
+    this.explain('how_slide', 3200);
     this.botSlide();
     return true;
   }
@@ -1296,6 +1322,7 @@ export class Room extends DurableObject<Env> {
     s.duel = { games: [a.appid, b.appid], champs: [champs[0], champs[1]], startedAt, drawAt, taps: {} };
     s.phase = 'duel';
     this.narr('duel');
+    this.explain('how_duel', 700);
     for (const c of champs) {
       if (!s.players.find((p) => p.id === c)?.bot) continue;
       const r = rnd(260, 520);
@@ -1411,6 +1438,7 @@ export class Room extends DurableObject<Env> {
     s.launch = { ready: {} } satisfies Launch;
     for (const b of s.players.filter((p) => p.bot)) this.job({ at: Date.now() + rnd(1000, 3000), k: 'bready', ph: 'result', pid: b.id });
     this.narr(repeat > 0 ? 'repeat' : 'result');
+    this.explain('how_result', 7200);
     if (ns && Math.random() < 0.5) this.job({ at: Date.now() + 4500, k: 'narr', ph: 'result', key: 'never_survive' });
 
     // lifetime stats (humans only)

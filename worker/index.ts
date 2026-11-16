@@ -17,6 +17,8 @@ export default {
     }
     const img = url.pathname.match(/^\/api\/img\/(\d{1,10})\/(box|header|hero|capsule)$/);
     if (img) return art(Number(img[1]), img[2]);
+    const media = url.pathname.match(/^\/media\/([a-z0-9_-]{1,40}\.(?:mp3|m4a|ogg))$/);
+    if (media) return serveMedia(req, media[1], env);
     if (url.pathname === '/api/search') return search(url.searchParams.get('q') ?? '', env);
     if (url.pathname === '/api/health') return Response.json({ ok: true, steamKey: !!env.STEAM_API_KEY });
     return serveStatic(req, url.pathname);
@@ -110,4 +112,31 @@ async function art(appid: number, kind: string): Promise<Response> {
     'content-type': r.headers.get('content-type') ?? 'image/jpeg',
   });
   return new Response(r.ok ? r.body : null, { status: r.ok ? 200 : 404, headers });
+}
+
+// Large audio (music tracks) lives in KV under "media:<file>" (uploaded once with `wrangler kv key put`),
+// so it doesn't bloat the Worker bundle (3 MB free-plan limit). Long browser cache, byte ranges for iOS.
+const MEDIA = new Map<string, Uint8Array<ArrayBuffer>>();
+async function serveMedia(req: Request, file: string, env: Env): Promise<Response> {
+  let bytes = MEDIA.get(file);
+  if (!bytes) {
+    const buf = await env.CACHE.get(`media:${file}`, 'arrayBuffer');
+    if (!buf) return new Response('Not found', { status: 404 });
+    bytes = new Uint8Array(buf);
+    if (MEDIA.size > 6) MEDIA.delete(MEDIA.keys().next().value!);
+    MEDIA.set(file, bytes);
+  }
+  const type = file.endsWith('.m4a') ? 'audio/mp4' : file.endsWith('.ogg') ? 'audio/ogg' : 'audio/mpeg';
+  const headers = new Headers({ 'content-type': type, 'cache-control': 'public, max-age=604800', 'accept-ranges': 'bytes' });
+  const range = req.headers.get('range')?.match(/^bytes=(\d*)-(\d*)$/);
+  if (range && (range[1] || range[2])) {
+    const size = bytes.length;
+    let start = range[1] ? Number(range[1]) : size - Number(range[2]);
+    let end = range[1] && range[2] ? Number(range[2]) : size - 1;
+    start = Math.max(0, start); end = Math.min(size - 1, end);
+    if (start > end) return new Response(null, { status: 416, headers: { 'content-range': `bytes */${size}` } });
+    headers.set('content-range', `bytes ${start}-${end}/${size}`);
+    return new Response(bytes.slice(start, end + 1), { status: 206, headers });
+  }
+  return new Response(bytes, { headers });
 }
