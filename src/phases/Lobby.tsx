@@ -73,7 +73,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
       <section className="nh-sec">
         <div className="nh-label">Your outfit</div>
         <div className="nh-me nh-me-look">
-          {mine?.style ? <BustPreview look={mine.style} scale={1} className="nh-me-bust" /> : <Avatar p={mine} size={44} />}
+          {mine?.style ? <span className="nh-me-bust"><BustPreview look={mine.style} scale={1} /></span> : <Avatar p={mine} size={44} />}
           <div className="nh-me-txt"><b>{mine?.name}</b><span>{mine?.style ? 'Dressed for the occasion' : 'Still in travelling clothes'}</span></div>
           <button type="button" className="nh-btn nh-btn-sm" onClick={() => { sfx.unlock(); sfx.click(); setDressing(true); }}>Change outfit</button>
         </div>

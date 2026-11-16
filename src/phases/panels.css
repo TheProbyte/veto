@@ -747,7 +747,7 @@
 .nh-step { margin-left: 8px; padding: 1px 6px; background: var(--nh-red); color: var(--nh-parch); letter-spacing: .08em; }
 .nh-label-q { color: var(--nh-parch); letter-spacing: .08em; }
 .nh-me-look { gap: 10px; }
-.nh-me-bust { flex: none; width: 48px; height: 56px; image-rendering: pixelated; }
+.nh-me-bust { flex: none; width: 48px; height: 56px; overflow: hidden; display: grid; place-items: start center; background: #0d0805; box-shadow: 0 0 0 2px #4a2c14; }
 .nh-posse-bust { flex: none; width: 32px; height: 36px; overflow: hidden; display: grid; place-items: start center; background: #0d0805; box-shadow: 0 0 0 2px #4a2c14; }
 .nh-posse-bust > * { transform: scale(.66); transform-origin: top center; }
 .nh-dressed { flex: none; font-family: var(--nh-px); font-size: 11px; color: rgba(232,213,181,.45); white-space: nowrap; }
