@@ -3,3 +3,5 @@ dist
 .wrangler
 .dev.vars
 worker/static.gen.ts
+vite.p*.config.ts
+vite.tmp*.config.ts
