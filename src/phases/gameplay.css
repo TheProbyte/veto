@@ -595,7 +595,7 @@
 
 @media (max-width: 640px) and (min-height: 501px) {
   /* sit the (now short) result low enough to clear the sound button, high enough to fit */
-  .saloon.phase-result { --front-top: clamp(calc(env(safe-area-inset-top) + 56px), calc(100dvh - 492px), var(--stage-top)); }
+  .saloon.phase-result { --front-top: clamp(calc(env(safe-area-inset-top) + 56px), calc(100dvh - 520px), var(--stage-top)); }
 }
 @media (max-width: 640px) and (min-height: 501px) {
   .saloon .result.gp-result { gap: 8px; padding-bottom: 6px; }
@@ -687,4 +687,9 @@
   .gp-result .poster-wanted { font-size: clamp(28px, 9.5vw, 38px); }
   .gp-result .btn-launch { min-height: 48px; }
   .gp-result .sad-host > .px-btn { min-height: 46px; }
+}
+/* landscape phones: the Saddle Up box fits the result grid's narrow right column */
+@media (max-height: 500px) and (orientation: landscape) {
+  .gp-result .sad { width: 100%; margin-top: 0; }
+  .gp-result .sad-host .btn-rematch, .gp-result .sad-host .btn-again { flex-basis: 120px; font-size: 14px; }
 }
