@@ -47,8 +47,8 @@ export interface BustLook {
   shirt?: string;
 }
 // per coat option: sleeve colour + shirt colour (indexed like COATS)
-const SLEEVES = ['#6b5032', '#1c1d22', '#4a2c1a', '#1e2c4a', '#d8ccb0', '#9e3b2a', '#8a3a1c', '#cfc2a4'];
-const SHIRTS = [PAL.parch2, PAL.parch, '#3a5470', '#2b3f66', '#d8ccb0', '#9e3b2a', PAL.parch2, PAL.parch2];
+const SLEEVES = ['#6b5032', '#1c1d22', '#4a2c1a', '#1e2c4a', '#d8ccb0', '#7a4a30', '#8a3a1c', '#cfc2a4'];
+const SHIRTS = [PAL.parch2, PAL.parch, '#3a5470', '#2b3f66', '#d8ccb0', '#7a4a30', PAL.parch2, PAL.parch2];
 
 const wrap = (v: number, n: number) => ((Math.floor(v) % n) + n) % n;
 

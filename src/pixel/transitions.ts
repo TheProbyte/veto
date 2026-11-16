@@ -46,10 +46,11 @@ export function paintTx(buf: Uint32Array, kind: TxKind, W: number, H: number, ms
           const along = (odd ? 1 - (x0 + cw) / (W + cw) : x0 / (W + cw)) * 0.84;
           const f = along + jit;
           // closing: in once its turn comes (front sweeps from its side); opening: out in the same order
-          const on = closing ? f < u * 1.02 : f >= u * 1.02;
+          const U = closing ? u * 1.2 : u * 1.02; // closing overshoots so every card has landed by the hold
+          const on = closing ? f < U : f >= U;
           if (!on) continue;
           // still sliding: offset toward its entry side for the frame it arrives / leaves
-          const near = closing ? u * 1.02 - f : f - u * 1.02;
+          const near = closing ? U - f : f - U;
           const slide = near < 0.1 ? Math.round((0.1 - near) * 60) * (odd ? 1 : -1) * (closing ? 1 : -1) : 0;
           for (let y = Math.max(0, y0); y < Math.min(H, y0 + ch); y++) {
             const yy = y - y0;
@@ -70,9 +71,10 @@ export function paintTx(buf: Uint32Array, kind: TxKind, W: number, H: number, ms
     case 'dust': { // a swirling dust devil fills the room from the middle, then blows out from the middle
       const cols = [C('#4a3420'), C('#6b5032'), C('#8a6a48'), C('#a8845a'), C('#c9a87a')];
       const rot = t * 5;
+      const maxD = Math.hypot(cx, cy * 1.4) || 1;
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
         const dx = x - cx, dy = (y - cy) * 1.4;
-        const r = Math.hypot(dx, dy) / maxR;
+        const r = Math.hypot(dx, dy) / maxD;
         const a = (Math.atan2(dy, dx) / (Math.PI * 2) + 1) % 1;
         const sw = (a + r * 1.6 + rot * 0.1) % 1; // spiral arms
         const f = r * 0.78 + sw * 0.22;
@@ -85,7 +87,7 @@ export function paintTx(buf: Uint32Array, kind: TxKind, W: number, H: number, ms
       break;
     }
     case 'sun': { // sunlight blooms in from the top-right and whites the room out; then the glare fades off
-      const sx = W * 0.82, sy = H * 0.12, R = Math.hypot(Math.max(sx, W - sx), Math.max(sy, H - sy));
+      const sx = W * 0.82, sy = H * 0.12, R = Math.hypot(Math.max(sx, W - sx), Math.max(sy, H - sy) * 1.2) || 1;
       const white = C(PAL.white), y0 = C('#fff3c4'), y1 = C(PAL.lamp0), y2 = C(PAL.lamp1);
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
         const f = Math.hypot(x - sx, (y - sy) * 1.2) / R;
@@ -179,7 +181,7 @@ export function paintTx(buf: Uint32Array, kind: TxKind, W: number, H: number, ms
         }
       } else {
         for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-          const f = Math.hypot(x - cx, (y - cy) * 1.3) / maxR;
+          const f = Math.hypot(x - cx, (y - cy) * 1.3) / (Math.hypot(cx, cy * 1.3) || 1);
           const e = f - u * 1.12;
           if (e < 0) {
             // inside the light: a last warm dither that thins out

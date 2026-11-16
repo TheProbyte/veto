@@ -953,7 +953,7 @@ canvas.chat-bust { image-rendering: pixelated; }
 
 /* hairlines drawn by height: one chrome pixel */
 .cm-sep { height: var(--pu); margin: var(--pu) 0; }
-.dock::before { top: var(--pu); height: var(--pu); background: repeating-linear-gradient(90deg, #1f3a26 0 calc(var(--pu) * 3), #19301f calc(var(--pu) * 3) calc(var(--pu) * 6)); }
+.dock::before { top: var(--pu); height: var(--pu); background: repeating-linear-gradient(90deg, var(--felt-base, #1f3a26) 0 calc(var(--pu) * 3), var(--felt-dark, #19301f) calc(var(--pu) * 3) calc(var(--pu) * 6)); }
 .nh-rule, .nh-label::after { height: var(--pu); }
 
 /* buttons: pixel type instead of the Rye serif (Rye stays for the big titles) */

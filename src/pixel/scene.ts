@@ -1103,7 +1103,7 @@ export class SceneRenderer {
     for (let y = 0; y < H; y++) {
       const dy = y - LY;
       // wall-layer / table-layer rows for the light maps (they were baked un-shifted)
-      const rw = cxW(y, lw.y) * W, rt = cxW(y, lt.y) * W;
+      const rw = Math.min(H - 1, Math.max(0, y - lw.y)) * W, rt = Math.min(H - 1, Math.max(0, y - lt.y)) * W;
       for (let x = 0; x < W; x++) {
         const i = y * W + x, o = i * 4;
         const v = fg[i];

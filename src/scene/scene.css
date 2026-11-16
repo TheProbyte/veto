@@ -37,7 +37,8 @@ html.scene-hot .saloon-front, html.scene-hot .saloon-stage, html.scene-hot .fron
 /* ---------- the barkeep's caption-only quip: a small pixel speech bubble above his head ---------- */
 .bk-say { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .bk-say-in {
-  position: absolute; left: var(--bx); top: var(--by); transform: translate(-50%, -100%); white-space: nowrap;
+  position: absolute; left: clamp(calc(var(--pt) * 46), var(--bx), calc(100vw - var(--pt) * 46)); top: var(--by); transform: translate(-50%, -100%);
+  width: max-content; max-width: min(calc(var(--pt) * 90), 70vw); text-align: center; overflow-wrap: anywhere;
   padding: calc(var(--pu) * 1.5) calc(var(--pu) * 2.5) var(--pu); font-family: var(--px-sm); font-size: calc(var(--pt) * 8); line-height: 1.1; color: var(--ink);
   background: var(--parch);
   box-shadow: inset 0 calc(var(--pu) * -1) 0 0 var(--parch2), 0 calc(var(--pu) * -1) 0 0 var(--ink), 0 var(--pu) 0 0 var(--ink), calc(var(--pu) * -1) 0 0 0 var(--ink), var(--pu) 0 0 0 var(--ink);

@@ -74,7 +74,8 @@ export default function EmoteBar(rp: RoomProps) {
     setOpen(false);
   };
 
-  if (desk) return <EmoteRail emote={emote} emoteCool={emoteCool} />;
+  // full-screen minigames / the duel own the whole screen: no rail over them (the rail sits at z 64, under the .fun- overlays at 400)
+  if (desk) return phase === 'mini' || phase === 'duel' ? null : <EmoteRail emote={emote} emoteCool={emoteCool} />;
 
   return createPortal(
     <div className={`emo ph-${phase}`} ref={rootRef}>
