@@ -1074,7 +1074,9 @@ export class SceneRenderer {
     // ---- lighting pass
     const img = c.getImageData(0, 0, W, H);
     const d = img.data;
-    const flick = this.reduce ? 0.95 : 0.9 + 0.1 * Math.sin(sec * 9.3) * Math.sin(sec * 3.1 + 1) + (rnd(Math.floor(vt / 80), 7) > 0.93 ? -0.18 : 0);
+    let flick = this.reduce ? 0.95 : 0.9 + 0.1 * Math.sin(sec * 9.3) * Math.sin(sec * 3.1 + 1) + (rnd(Math.floor(vt / 80), 7) > 0.93 ? -0.18 : 0);
+    // knocked: the flame gutters for a moment
+    if (kAge < 900) flick *= this.reduce ? 0.8 : rnd(Math.floor(vt / 70), 13) > 0.45 ? 0.42 + kAge / 2000 : 1;
     const dawn = this.dawn;
     const amb = (D.shooter ? 0.42 : 0.52) * D.dimAll + dawn * 0.14 + boltK * 0.35;
     const R = W * 0.55;
@@ -1082,8 +1084,8 @@ export class SceneRenderer {
     const flash = shotAge < 140 ? 1.6 * (1 - shotAge / 140) : 0;
     const flashAct = D.shot && flash > 0 ? geoms.find((x) => x.p.id === D.shot!.actor) : undefined;
     const fM = flashAct ? this.muzzle(flashAct.g) : null;
-    const fX = fM ? fM.x : cx, fY = fM ? fM.y : L.tableTop;
-    const sp = shooterG ? { x: shooterG.g.x, y: shooterG.g.top + shooterG.g.h * 0.45, r: shooterG.g.h * 0.75 } : null;
+    const fX = (fM ? fM.x : cx) + lp.x, fY = (fM ? fM.y : L.tableTop) + lp.y;
+    const sp = shooterG ? { x: shooterG.g.x + lp.x, y: shooterG.g.top + shooterG.g.h * 0.45 + lp.y, r: shooterG.g.h * 0.75 } : null;
     const lampK = D.dimAll;
     const emisK = Math.max(0.75 * D.dimAll + 0.25, dawn);
     // window spill: cold blue at night, warm pink-orange at dawn, white-blue in a lightning flash
@@ -1091,18 +1093,27 @@ export class SceneRenderer {
     const cR = 0.2 + dawn * 1.2 + boltK * 0.9, cG = 0.6 + dawn * 0.15 + boltK * 0.9, cB = 1.5 - dawn * 0.9 + boltK * 0.6;
     // the piano's candle: a small warm pool in the corner
     const pn = this.geo.piano;
-    const cdx = pn ? pn.x + 8 : -999, cdy = pn ? pn.floor - 20 : -999, cdr = 30;
+    const cdx = pn ? pn.x + 8 + lw.x : -999, cdy = pn ? pn.floor - 20 + lw.y : -999, cdr = 30;
+    const LX = lx + lp.x, LY = ly + lp.y;
+    const emis = this.emis, cool = this.cool;
+    const cxW = (x: number, d: number) => Math.min(W - 1, Math.max(0, x - d));
     const cflick = 0.85 + 0.15 * Math.sin(sec * 7.1 + 2);
     const fg = this.fg;
     for (let y = 0; y < H; y++) {
-      const dy = y - ly;
+      const dy = y - LY;
+      // wall-layer / table-layer rows for the light maps (they were baked un-shifted)
+      const rw = cxW(y, lw.y) * W, rt = cxW(y, lt.y) * W;
       for (let x = 0; x < W; x++) {
         const i = y * W + x, o = i * 4;
-        const bust = fg[i] === 1;
-        if (!bust && this.emis[i]) {
-          d[o] *= emisK; d[o + 1] *= emisK; d[o + 2] *= emisK; continue;
-        }
-        const dx = x - lx;
+        const v = fg[i];
+        const bust = v === 1;
+        let cv = 0;
+        if (v === 0) {
+          const j = rw + cxW(x, lw.x);
+          if (emis[j]) { d[o] *= emisK; d[o + 1] *= emisK; d[o + 2] *= emisK; continue; }
+          cv = cool[j];
+        } else if (v === 2) cv = cool[rt + cxW(x, lt.x)];
+        const dx = x - LX;
         const dist = Math.sqrt(dx * dx + dy * dy * 1.3);
         let lamp = Math.max(0, 1 - dist / R);
         lamp = lamp * lamp * 0.95;
@@ -1130,7 +1141,7 @@ export class SceneRenderer {
         const aq = Math.floor(av * 7 + b) / 7;
         // window / doorway spill (and its lightning + dawn colour) lights the wall and floor, never the busts:
         // they get the storm and the morning through the seat-independent ambient term instead
-        const cl = bust ? 0 : Math.floor(this.cool[i] * 3 + b) / 3 * coolK;
+        const cl = bust ? 0 : Math.floor(cv * 3 + b) / 3 * coolK;
         d[o] = d[o] * (aq * 0.85 + lq * 1.3 + cl * cR);
         d[o + 1] = d[o + 1] * (aq * 0.9 + lq * 1.0 + cl * cG);
         d[o + 2] = d[o + 2] * (aq * 1.12 + lq * 0.62 + cl * cB);
@@ -1139,6 +1150,7 @@ export class SceneRenderer {
     c.putImageData(img, 0, 0);
 
     // ---- emissive layer: lamp glass + flame
+    T(lp);
     const fh = 4 + (rnd(Math.floor(vt / 90), 3) > 0.5 ? 1 : 0);
     c.fillStyle = shade(PAL.lamp1, 0.8 * lampK + 0.2); c.fillRect(lx - 2, ly + 1, 5, 7);
     c.fillStyle = PAL.lamp2; c.fillRect(lx - 3, ly + 2, 1, 5); c.fillRect(lx + 3, ly + 2, 1, 5);
@@ -1166,6 +1178,8 @@ export class SceneRenderer {
     }
 
     // ---- rain blown in through the doors
+    T(lw);
+    this.drawClinks(c, vt);
     if (this.gust.length) {
       this.gust = this.gust.filter((g) => (g.life -= dt) > 0);
       for (const g of this.gust) {
@@ -1176,6 +1190,7 @@ export class SceneRenderer {
     }
 
     // ---- muzzle flash + smoke at the shooter
+    T(lp);
     if (D.shot && shotAge < 2200) {
       const act = geoms.find((x) => x.p.id === D.shot!.actor);
       if (act) {
@@ -1209,7 +1224,9 @@ export class SceneRenderer {
     // ---- emote props that leave the bust: spit arc + spittoon, steam puffs
     for (const o of overlays) this.drawEmoteFx(c, o.g, o.a, o.age, o.ox, o.oy, o.ps);
     // ---- the cat's MEOW! / hearts / HISS (unlit, so they read)
+    T(lw);
     this.drawCatFx(c, vt);
+    c.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   private drawWeather(c: Ctx, vt: number, dt: number, boltK: number, storm: boolean) {

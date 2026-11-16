@@ -128,7 +128,7 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
           const u = open ? undefined : unlockOf(k, v);
           return (
             <div key={k} className={`cc-row ${open ? '' : 'is-locked'}`}>
-              <button type="button" className="cc-arrow" onClick={() => cycle(k, -1)} aria-label={`Previous ${label.toLowerCase()}`} disabled={tip}><PixelIcon name="arrowL" /></button>
+              <button type="button" className="cc-arrow coin" onClick={() => cycle(k, -1)} aria-label={`Previous ${label.toLowerCase()}`} disabled={tip}><PixelIcon name="arrowL" /></button>
               <div className="cc-mid">
                 <span className="cc-field">{label}</span>
                 <b className="cc-val" aria-live="polite">{!open && <span aria-label="locked">🔒 </span>}{LOOK_LABELS[k][v]}</b>
@@ -139,7 +139,7 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
                   </span>
                 )}
               </div>
-              <button type="button" className="cc-arrow" onClick={() => cycle(k, 1)} aria-label={`Next ${label.toLowerCase()}`} disabled={tip}><PixelIcon name="arrowR" /></button>
+              <button type="button" className="cc-arrow coin" onClick={() => cycle(k, 1)} aria-label={`Next ${label.toLowerCase()}`} disabled={tip}><PixelIcon name="arrowR" /></button>
             </div>
           );
         })}

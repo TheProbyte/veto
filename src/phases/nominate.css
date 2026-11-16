@@ -390,3 +390,45 @@
   .dh-card.is-giving:not(.is-sel) .dh-face { animation: none; border-color: #9fe07a; }
   .dh-card.is-burning .dh-face, .dh-fire::before, .dh-fire i { animation: none; }
 }
+
+/* ================= pass 10: the host's felt, wooden buttons + chips, brass coin pager, card backs ================= */
+.nm { background: repeating-conic-gradient(rgba(0,0,0,.18) 0 25%, transparent 0 50%) 0 0 / calc(var(--u) * 2) calc(var(--u) * 2), color-mix(in srgb, var(--felt-base, #1f4a2c) 64%, transparent); }
+.nm-felt { background: color-mix(in srgb, var(--felt-dark, #12301c) 60%, transparent); }
+.nm.is-draft .nm-felt { background: color-mix(in srgb, var(--felt-dark, #12301c) 70%, transparent); }
+
+/* small wooden plank buttons (draft bar, pitches) */
+.nm-btn {
+  --d: var(--u); position: relative; border: 0; padding: 0 calc(var(--u) * 3); color: #f6e4c4; font-weight: 700;
+  text-shadow: 0 calc(var(--t) * -1) 0 rgba(20,8,2,.7);
+  background: linear-gradient(180deg, #8f5e34 0 var(--u), transparent var(--u) calc(100% - var(--u)), #4a2c14 calc(100% - var(--u))),
+    repeating-linear-gradient(180deg, transparent 0 calc(var(--u) * 3), rgba(30,14,4,.2) calc(var(--u) * 3) calc(var(--u) * 4)), #6e4626;
+  box-shadow: 0 calc(var(--u) * -1) 0 0 var(--ink), calc(var(--u) * -1) 0 0 0 var(--ink), var(--u) 0 0 0 var(--ink), 0 var(--d) 0 0 #2a1608, 0 calc(var(--d) + var(--u)) 0 0 var(--ink);
+  margin-bottom: calc(var(--u) * 2);
+}
+@media (hover: hover) { .nm-btn:hover:not(:disabled) { background-color: #6e4626; filter: brightness(1.14); transform: translateY(calc(var(--u) * -1)); --d: calc(var(--u) * 2); } }
+.nm-btn:active:not(:disabled) { transform: translateY(var(--u)); --d: 0px; }
+.nm-btn:disabled { filter: grayscale(1) brightness(.6); }
+.nm-btn.dh-play, .nm-btn.nm-btn-go { color: #3a1006; text-shadow: 0 var(--t) 0 rgba(255,236,196,.6);
+  background: linear-gradient(180deg, #ffe2a6 0 var(--u), transparent var(--u) calc(100% - var(--u)), #c4581f calc(100% - var(--u))), #ffb35c;
+  box-shadow: inset 0 0 0 var(--u) #b3221c, 0 calc(var(--u) * -1) 0 0 var(--ink), calc(var(--u) * -1) 0 0 0 var(--ink), var(--u) 0 0 0 var(--ink), 0 var(--d) 0 0 #6e1a10, 0 calc(var(--d) + var(--u)) 0 0 var(--ink); }
+.nm-btn.is-ghost { color: var(--parch); background: linear-gradient(180deg, #533520 0 var(--u), transparent var(--u) calc(100% - var(--u)), #24160b calc(100% - var(--u))), #3a2414; }
+.nm-btn.is-red { color: #fff1d6; text-shadow: 0 calc(var(--t) * -1) 0 #4a0a06;
+  background: linear-gradient(180deg, #f07060 0 var(--u), transparent var(--u) calc(100% - var(--u)), #6e1010 calc(100% - var(--u))), #b8281e; }
+
+/* filter chips: little wooden tokens; on = a brass-painted token pressed in */
+.nm-chip { border: 0; color: rgba(246,228,196,.85); background: linear-gradient(180deg, #5a3a22 0 var(--u), #3b2416 var(--u)); box-shadow: 0 0 0 var(--u) var(--ink), 0 var(--u) 0 var(--u) var(--ink); margin: var(--u) var(--u) calc(var(--u) * 2); }
+@media (hover: hover) { .nm-chip:not(.on):hover { color: #fff3dc; filter: brightness(1.15); transform: translateY(calc(var(--u) * -1)); } }
+.nm-chip.on { color: #2a1206; background: linear-gradient(180deg, #ffe2a6 0 var(--u), #ffb35c var(--u) calc(100% - var(--u)), #d9732e calc(100% - var(--u))); box-shadow: 0 0 0 var(--u) var(--ink); transform: translateY(var(--u)); }
+.nm-chip.on::before { content: none; }
+
+/* the pager: round brass coins with pixel arrows */
+.nm-pips { height: max(calc(var(--t) * 12), calc(var(--u) * 5)); }
+.nm-pg.coin { width: calc(var(--t) * 11); height: calc(var(--t) * 11); margin: 0 var(--u); box-shadow: none; }
+.nm-pg.coin:hover:not(:disabled), .nm-pg.coin:disabled { background: linear-gradient(180deg, #120904 0 50%, #6b4512 50%); }
+.nm-pg.coin .pxi { width: calc(var(--t) * 6); height: calc(var(--t) * 6); }
+
+/* empty pick slots + face-down stacks wear the host's card backs */
+.nm-slot.deck-back { border: 0; box-shadow: 0 0 0 var(--u) var(--ink), var(--u) var(--u) 0 var(--u) rgba(0,0,0,.35); color: var(--deck-b); opacity: .9; }
+.nm-slot.deck-back b { padding: 0 2px; background: var(--deck-a); text-shadow: 0 1px 0 rgba(0,0,0,.5); }
+.dh-back.deck-back { box-shadow: 0 0 0 calc(var(--u) / 2) var(--ink); }
+.nm-loading { justify-content: center; }

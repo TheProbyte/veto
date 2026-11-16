@@ -10,6 +10,7 @@ import Cover from '../scene/Cover';
 import { DockActions, launchCard, play } from '../scene/Dock';
 import { ShotArt } from '../ui/ShotFlip';
 import LoadingScreen from '../ui/LoadingScreen';
+import PixelIcon from '../ui/PixelIcon';
 import { useTableTheme } from '../ui/tableTheme';
 import './nominate.css';
 
@@ -204,12 +205,12 @@ export function PagedDeck({ pager, children, label, className = '', empty }: {
       </div>
       {pages > 1 && (
         <div className="nm-pips" role="group" aria-label={`Page ${page + 1} of ${pages}`}>
-          <button type="button" className="nm-pg nm-pg-prev" disabled={page <= 0} onClick={() => go(-1)} aria-label="Previous page"><i aria-hidden>◀</i></button>
+          <button type="button" className="nm-pg nm-pg-prev coin" disabled={page <= 0} onClick={() => go(-1)} aria-label="Previous page"><PixelIcon name="arrowL" /></button>
           {pages <= 12 && Array.from({ length: pages }, (_, i) => (
             <button key={i} type="button" className={`nm-pip-b ${i === page ? 'on' : ''}`} aria-label={`Page ${i + 1}`} aria-current={i === page} onClick={() => jump(i)} />
           ))}
           <span className="nm-pager-n">{page + 1}/{pages}</span>
-          <button type="button" className="nm-pg nm-pg-next" disabled={page >= pages - 1} onClick={() => go(1)} aria-label="Next page"><i aria-hidden>▶</i></button>
+          <button type="button" className="nm-pg nm-pg-next coin" disabled={page >= pages - 1} onClick={() => go(1)} aria-label="Next page"><PixelIcon name="arrowR" /></button>
         </div>
       )}
     </div>
