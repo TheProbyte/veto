@@ -11,13 +11,13 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 - **Don't say player or game names** — the lines are written to work at every table.
 - Send me the files (or a zip) and I'll drop them into `public/voice/`; the game plays them
   automatically under the Effects volume, with the caption on screen.
-- You don't need all of them. Start with the ⭐ ones (they fire the most).
+- ✅ = already recorded (thanks!). 🆕 = new "Barkeep explains" lines: these teach new players what to do, so they're the most useful to record next. Then the ⭐ ones (they fire the most).
 
 ## open: First player opens a new table
 
 | File | Line | Direction |
 |---|---|---|
-| `open_1.mp3` | Evenin'. Pull up a chair, the night's young. | warm, slow, wiping a glass |
+| ✅ `open_1.mp3` | Evenin'. Pull up a chair, the night's young. | warm, slow, wiping a glass |
 | `open_2.mp3` | Doors are open. Bring your friends and your grudges. |  |
 | `open_3.mp3` | Another night, another argument over what to play. |  |
 
@@ -62,7 +62,7 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `deal_1.mp3` | Alright. Toss your games on the table. Three apiece. | businesslike, rapping the bar |
+| ✅ `deal_1.mp3` | Alright. Toss your games on the table. Three apiece. | businesslike, rapping the bar |
 | `deal_2.mp3` | Let's see what y'all are bringin' to the fight. |  |
 
 ## house: The house auto-fills empty nominations
@@ -83,7 +83,7 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `draw_1.mp3` | Hands where I can see em. ...DRAW! | low build to a shout on DRAW |
+| ✅ `draw_1.mp3` | Hands where I can see em. ...DRAW! | low build to a shout on DRAW |
 | `draw_2.mp3` | Last game standing gets played. Make it count. |  |
 | `draw_3.mp3` | Nobody leaves till there's one left. |  |
 
@@ -91,15 +91,15 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `first_1.mp3` | First blood. Somebody had to. |  |
+| ✅ `first_1.mp3` | First blood. Somebody had to. |  |
 | `first_2.mp3` | And there goes the first one. Won't be the last. |  |
 
 ## kill: A game is shot down (pick occasionally, not every shot)
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `kill_1.mp3` | Nah. Ain’t happenin. |  |
-| ⭐ `kill_2.mp3` | Cold. Real cold. |  |
+| ✅ `kill_1.mp3` | Nah. Ain’t happenin. |  |
+| ✅ `kill_2.mp3` | Cold. Real cold. |  |
 | `kill_3.mp3` | That one ain’t gettin’ up. |  |
 | `kill_4.mp3` | Somebody fetch a shovel. |  |
 | `kill_5.mp3` | Clean shot. |  |
@@ -115,7 +115,7 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `revenge_1.mp3` | Oh, that was personal. | delighted, leaning in |
+| ✅ `revenge_1.mp3` | Oh, that was personal. | delighted, leaning in |
 | `revenge_2.mp3` | An eye for an eye. Love to see it. |  |
 | `revenge_3.mp3` | Revenge is a dish best served... at my bar. |  |
 
@@ -123,7 +123,7 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `ricochet_1.mp3` | PING! Somebody was protectin’ that one. | surprised laugh |
+| ✅ `ricochet_1.mp3` | PING! Somebody was protectin’ that one. | surprised laugh |
 | `ricochet_2.mp3` | Ricochet! There was a star on it the whole time. |  |
 | `ricochet_3.mp3` | Ha! Sneaky. Real sneaky. |  |
 
@@ -138,7 +138,7 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `misfire_1.mp3` | Fuse ran out. Gun went off on its own. |  |
+| ✅ `misfire_1.mp3` | Fuse ran out. Gun went off on its own. |  |
 | `misfire_2.mp3` | Too slow, partner. The iron decided for ya. |  |
 
 ## fuse_low: Shooter has 5 seconds left
@@ -158,14 +158,14 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `cylinder_1.mp3` | Can't decide? Let the cylinder decide. | spinning the gun, mischievous |
+| ✅ `cylinder_1.mp3` | Can't decide? Let the cylinder decide. | spinning the gun, mischievous |
 | `cylinder_2.mp3` | Six chambers. One fate. Spin it. |  |
 
 ## duel: Quick-draw duel starts
 
 | File | Line | Direction |
 |---|---|---|
-| `duel_1.mp3` | Two games. Two guns. Steady now... | hushed, tense |
+| ✅ `duel_1.mp3` | Two games. Two guns. Steady now... | hushed, tense |
 | ⭐ `duel_2.mp3` | Wait for it... wait for it... |  |
 
 ## duel_foul: A champion fires before DRAW
@@ -186,7 +186,7 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 
 | File | Line | Direction |
 |---|---|---|
-| ⭐ `result_1.mp3` | There it is. Tonight's game. Now go play it. | proud, final |
+| ✅ `result_1.mp3` | There it is. Tonight's game. Now go play it. | proud, final |
 | `result_2.mp3` | Wanted: one good night. Reward: this game. |  |
 | `result_3.mp3` | The dust settles. We have a winner. |  |
 
@@ -215,6 +215,146 @@ game nights. Dry, amused, a little theatrical. Think "grizzled cowboy storytelle
 | File | Line | Direction |
 |---|---|---|
 | `kick_1.mp3` | And stay out! |  |
+
+## slide: Whiskey Slide finale starts
+
+| File | Line | Direction |
+|---|---|---|
+| `slide_1.mp3` | Alright, sharpshooters. Let's see how steady them hands really are. | sliding a glass down the bar |
+| `slide_2.mp3` | Slide it to the mark. Spill it off the end and you buy the next round. |  |
+
+## slide_fall: A glass slides off the end of the bar
+
+| File | Line | Direction |
+|---|---|---|
+| `slidefall_1.mp3` | Aaand it’s on the floor. | wincing at the crash |
+| `slidefall_2.mp3` | That's comin' out of your tab. |  |
+
+## slide_close: A glass stops very near the mark
+
+| File | Line | Direction |
+|---|---|---|
+| `slideclose_1.mp3` | Ooh. Right on the money. |  |
+| `slideclose_2.mp3` | Now that's a steady hand. |  |
+
+## slide_win: Whiskey Slide decided
+
+| File | Line | Direction |
+|---|---|---|
+| `slidewin_1.mp3` | Closest glass wins. Drinks are on the loser. |  |
+
+## sheriff: A Sheriff is appointed for the shootout
+
+| File | Line | Direction |
+|---|---|---|
+| `sheriff_1.mp3` | There's a new Sheriff in town. Behave. | mock-serious |
+| `sheriff_2.mp3` | Somebody pinned on the badge. Lord help us. |  |
+
+## pardon: Sheriff pardons a shot-down game
+
+| File | Line | Direction |
+|---|---|---|
+| `pardon_1.mp3` | The Sheriff giveth. Back from the dead! |  |
+| `pardon_2.mp3` | Pardoned! Dust yourself off, partner. |  |
+
+## jail: Sheriff jails a player
+
+| File | Line | Direction |
+|---|---|---|
+| `jail_1.mp3` | Into the cell you go. Sit this one out. |  |
+
+## ousted: The posse runs the Sheriff out of town
+
+| File | Line | Direction |
+|---|---|---|
+| `ousted_1.mp3` | The people have spoken. Hand over the badge. | gleeful |
+| `ousted_2.mp3` | Run outta town! Didn’t even finish their drink. |  |
+
+## draft: Cards are dealt in draft mode
+
+| File | Line | Direction |
+|---|---|---|
+| `draft_1.mp3` | Five cards each. Play em, burn em, or trade em. | dealing cards |
+
+## trade: Two players complete a trade
+
+| File | Line | Direction |
+|---|---|---|
+| `trade_1.mp3` | A deal is struck. |  |
+| `trade_2.mp3` | Hope you know what you’re doin’ with that one. |  |
+
+## burn: Someone burns a card
+
+| File | Line | Direction |
+|---|---|---|
+| `burn_1.mp3` | Into the stove it goes. |  |
+
+## how_lobby: EXPLAIN (settings.explain): lobby opens
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_lobby_1.mp3` | Pick your look, link your Steam, and wait for the posse. | friendly, clear, unhurried |
+
+## how_nominate: EXPLAIN: nominations open (browse mode)
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_nom_1.mp3` | Tap the games you want to play. They land on the table. | clear, helpful |
+
+## how_draft: EXPLAIN: nominations open (card draft)
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_draft_1.mp3` | These cards are yours. Play the ones you want. Trade the rest. | clear, helpful |
+
+## how_veto: EXPLAIN: shootout begins
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_veto_1.mp3` | On your turn, aim at a game you DON'T want, and pull the trigger. | clear, slow, emphasis on DON'T |
+
+## how_star: EXPLAIN: a few seconds into the first shootout
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_star_1.mp3` | Tap the badge on a game to protect it. Only you'll know. | sly whisper |
+
+## how_slide: EXPLAIN: whiskey slide starts
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_slide_1.mp3` | Hold your glass, let go to slide it. Closest to the chalk wins. | clear, helpful |
+
+## how_cylinder: EXPLAIN: revolver roulette starts
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_cyl_1.mp3` | Nothing to do but watch. The cylinder picks. | calm |
+
+## how_duel: EXPLAIN: quick-draw duel starts
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_duel_1.mp3` | Wait for DRAW. Then tap as fast as you can. Too early, you lose. | tense, clear |
+
+## how_result: EXPLAIN: result screen
+
+| File | Line | Direction |
+|---|---|---|
+| 🆕 `how_result_1.mp3` | Mark yourself ready, then saddle up together. | warm |
+
+## saddle: Synced launch countdown starts
+
+| File | Line | Direction |
+|---|---|---|
+| `saddle_1.mp3` | Saddle up! Three... two... one... | big, rallying |
+
+## straggler: Launch countdown starts but someone isn't ready
+
+| File | Line | Direction |
+|---|---|---|
+| `straggler_1.mp3` | Somebody's still downloadin'. Shameful. |  |
+| `straggler_2.mp3` | Some of y’all ain’t got the game. Buy it, partner. |  |
 
 ## Bonus barks (optional, I can wire these in too)
 
