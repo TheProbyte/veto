@@ -88,9 +88,10 @@ function rowSeat(L: Layout, seat: number, all: number[]): SeatGeom {
     const depth = 0.45 - 0.15 * Math.min(1, Math.abs(off) / (L.W * 0.5));
     return { x, top: base - h, base, edge, w, h, depth, scale: fs, slot: sp };
   }
-  const scale = fs * 0.84;
+  const scale = fs * 0.8;
   const w = Math.round(BUST_W * scale), h = Math.round(BUST_H * scale);
-  const base = edge + 2; // table edge still hides the cut-off bottom between front busts
+  // sits higher so faces peek between the front hats; the front busts' shoulders hide the cut-off bottom
+  const base = edge - Math.round(BUST_H * fs * 0.14);
   return { x, top: base - h, base, edge, w, h, depth: 0.92, scale, back: true, slot: sp };
 }
 
@@ -266,7 +267,8 @@ function drawTable(c: Ctx, L: Layout) {
     const x = Math.round(cx + Math.cos(Math.PI + a) * (rx - 4)), y = Math.round(cy - Math.sin(a) * (ry - 3) + 1);
     px(c, x, y, rnd(i, 62) > 0.5 ? PAL.wood2 : PAL.wood4);
   }
-  // props: chips, cards, glass
+  // props: chips, cards, glass (portrait: the felt is under the UI and the nameplates, skip them)
+  if (L.portrait) return;
   const py = L.tableTop + Math.round(L.ry * 0.28);
   const chipX = Math.round(cx - W * 0.3), cardX = Math.round(cx + W * 0.22), glassX = Math.round(cx + W * 0.36);
   const chipCols = [[PAL.red1, PAL.red2], [PAL.parch, PAL.parch3], [PAL.blue2, PAL.blue1], [PAL.red1, PAL.red2]];

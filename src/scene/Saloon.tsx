@@ -80,7 +80,7 @@ export default function Saloon({ state, me, children }: RoomProps & { children: 
     <div className={`saloon phase-${state.phase} ${shooter ? 'has-shooter' : ''}`} style={{ '--P': `${layout.P}px`, '--stage-top': `${stageTop}px` } as CSSProperties}>
       <div className="scene">
         <PixelScene layout={layout} data={data} />
-        <div className="seats">
+        <div className={`seats ${layout.portrait && state.players.length > 4 ? 'has-back' : ''}`}>
           {state.players.map((p) => (
             <Seat key={p.id} p={p} me={me} L={layout} seats={seats} shooter={shooter} order={veto ? state.turnOrder.indexOf(p.id) : -1} turnIdx={state.turnIdx} n={state.turnOrder.length} />
           ))}
