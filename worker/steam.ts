@@ -2,6 +2,7 @@ export interface Env {
   ROOM: DurableObjectNamespace;
   CACHE: KVNamespace;
   STEAM_API_KEY?: string;
+  FAKE_STEAM?: string;
 }
 
 export interface OwnedGame { appid: number; name: string; mins: number; mins2w: number }

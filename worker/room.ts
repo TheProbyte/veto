@@ -336,6 +336,7 @@ export class Room extends DurableObject<Env> {
   async link(pid: string, profile: string) {
     const key = this.env.STEAM_API_KEY;
     const p = this.me(pid);
+    if (this.env.FAKE_STEAM === '1' && profile.startsWith('fake:')) return this.fakeLink(pid, profile.slice(5));
     if (!key) throw new Bad('The server has no STEAM_API_KEY set yet.');
     if (!profile.trim()) throw new Bad('Paste your Steam profile link.');
     p.linking = true; p.linkError = undefined;
@@ -358,6 +359,20 @@ export class Room extends DurableObject<Env> {
       q.linking = false;
       q.linkError = e instanceof Error ? e.message : 'Steam link failed.';
     }
+    this.broadcast();
+    await this.recomputePool();
+  }
+
+  // dev only (FAKE_STEAM=1 in .dev.vars): lets the whole flow run without Steam access
+  async fakeLink(pid: string, nick: string) {
+    const ids: [number, string][] = [[730, 'Counter-Strike 2'], [252490, 'Rust'], [892970, 'Valheim'], [1966720, 'Lethal Company'],
+      [548430, 'Deep Rock Galactic'], [105600, 'Terraria'], [413150, 'Stardew Valley'], [632360, 'Risk of Rain 2'], [739630, 'Phasmophobia'],
+      [1086940, "Baldur's Gate 3"], [553850, 'HELLDIVERS 2'], [945360, 'Among Us'], [322330, "Don't Starve Together"], [620, 'Portal 2'],
+      [550, 'Left 4 Dead 2'], [1145360, 'Hades'], [381210, 'Dead by Daylight'], [1623730, 'Palworld']];
+    const games = ids.filter(() => Math.random() < 0.75).map(([appid, name]) => ({ appid, name, mins: Math.floor(Math.random() * 9000), mins2w: Math.random() < 0.2 ? 60 : 0 }));
+    const p = this.me(pid);
+    p.steam = { steamid: '7656119' + Math.floor(Math.random() * 1e10), name: nick || p.name, avatar: '', private: nick === 'private', gameCount: games.length };
+    if (nick !== 'private') { this.libs.set(pid, games); await this.ctx.storage.put(`lib:${pid}`, games); }
     this.broadcast();
     await this.recomputePool();
   }
