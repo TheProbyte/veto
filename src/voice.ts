@@ -104,3 +104,10 @@ function start(id: string, channel: 'narr' | 'emote', gain: number): boolean {
     return false;
   }
 }
+
+/** stop the Barkeep mid-sentence (the player tapped the explain card): drops his queued explanations too */
+export function stopNarrator(): void {
+  const c = channels.narr;
+  if (c) { c.el.pause(); held.delete(c); }
+  for (let i = narrQueue.length - 1; i >= 0; i--) if (narrQueue[i].id.startsWith('how_')) narrQueue.splice(i, 1);
+}

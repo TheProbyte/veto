@@ -2,7 +2,7 @@
 // and plays /voice/<id>.mp3 when that recording exists (see src/voiceManifest.ts).
 import { useEffect, useRef, useState } from 'react';
 import type { RoomProps } from '../props';
-import { playVoice } from '../voice';
+import { playVoice, stopNarrator } from '../voice';
 
 interface Cap { id: string; text: string; key: number }
 
@@ -10,11 +10,14 @@ interface Cap { id: string; text: string; key: number }
  * The Barkeep's explain card: while the server holds play for an explanation (state.explainUntil), cover the
  * screen with his line in big pixel text so nobody can act until he's done. Taps and keys are swallowed.
  */
-function ExplainCard({ state, skew }: { state: RoomProps['state']; skew: number }) {
+function ExplainCard({ state, skew, send }: { state: RoomProps['state']; skew: number; send: RoomProps['send'] }) {
   const until = state.explainUntil ?? 0;
   const from = state.explainFrom ?? 0;
   const [now, setNow] = useState(() => Date.now() + skew);
-  const active = !!state.explainText && until > now;
+  // tapping the card skips it for me (stops his voice); the server lets play continue once everyone has skipped
+  const [skipped, setSkipped] = useState(0);
+  const active = !!state.explainText && until > now && skipped !== until;
+  const skip = () => { stopNarrator(); setSkipped(until); send({ t: 'skipExplain' }); };
   useEffect(() => {
     if (until <= Date.now() + skew) return;
     const t = window.setInterval(() => setNow(Date.now() + skew), 100);
@@ -39,17 +42,18 @@ function ExplainCard({ state, skew }: { state: RoomProps['state']; skew: number 
   return (
     <div className="xcard" role="dialog" aria-live="assertive" aria-label="The Barkeep explains"
       onPointerDownCapture={(e) => { e.stopPropagation(); e.preventDefault(); }}
-      onClickCapture={(e) => { e.stopPropagation(); e.preventDefault(); }}>
+      onClickCapture={(e) => { e.stopPropagation(); e.preventDefault(); skip(); }}>
       <div className="xcard-box">
         <div className="xcard-who">The Barkeep</div>
         <div className="xcard-text">{state.explainText}</div>
         <div className="xcard-bar"><span style={{ transform: `scaleX(${left})` }} /></div>
+        <div className="xcard-skip">tap to skip</div>
       </div>
     </div>
   );
 }
 
-export default function Narrator({ on, state, skew }: RoomProps) {
+export default function Narrator({ on, state, skew, send }: RoomProps) {
   const [cap, setCap] = useState<Cap | null>(null);
   const [shown, setShown] = useState(0); // typewriter chars
   const timer = useRef<number>();
@@ -79,7 +83,7 @@ export default function Narrator({ on, state, skew }: RoomProps) {
     return () => clearInterval(tick);
   }, [cap]);
 
-  const card = <ExplainCard state={state} skew={skew} />;
+  const card = <ExplainCard state={state} skew={skew} send={send} />;
   if (!cap) return <>{card}<style>{CSS}</style></>;
   return (
     <>{card}
@@ -127,6 +131,8 @@ const CSS = `
 .xcard-text{font-family:'Pixelify Sans','Silkscreen',monospace;font-size:clamp(22px,calc(var(--pt,3px)*11),44px);line-height:1.2;-webkit-font-smoothing:none}
 .xcard-bar{margin:calc(var(--pu,3px)*5) auto 0;height:calc(var(--pu,3px)*2);width:60%;background:#160d08;
   box-shadow:0 0 0 var(--pu,3px) #5a3a22}
+.xcard-skip{margin-top:calc(var(--pu,3px)*3);font-family:'Silkscreen',monospace;font-size:calc(var(--pt,2px)*5);color:#e8d5b5a0;letter-spacing:.1em;text-transform:uppercase}
+.xcard{cursor:var(--cur-pointer,pointer)}
 .xcard-bar span{display:block;height:100%;background:#ffb35c;transform-origin:left center}
 @keyframes xcard-in{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.xcard{animation:none}}
