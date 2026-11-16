@@ -15,9 +15,9 @@
   --nh-rim: #6b3f1c;
   /* stepped 2px pixel border: inner amber/rim line + dark outer ring with stair corners */
   --nh-pxb: 0 -2px 0 0 var(--nh-rim), 0 2px 0 0 var(--nh-rim), -2px 0 0 0 var(--nh-rim), 2px 0 0 0 var(--nh-rim),
-    0 -4px 0 -2px var(--nh-edge), 0 4px 0 -2px var(--nh-edge), -4px 0 0 -2px var(--nh-edge), 4px 0 0 -2px var(--nh-edge);
+    0 -6px 0 -2px var(--nh-edge), 0 6px 0 -2px var(--nh-edge), -6px 0 0 -2px var(--nh-edge), 6px 0 0 -2px var(--nh-edge);
   --nh-pxb-amber: 0 -2px 0 0 var(--nh-amber), 0 2px 0 0 var(--nh-amber), -2px 0 0 0 var(--nh-amber), 2px 0 0 0 var(--nh-amber),
-    0 -4px 0 -2px var(--nh-edge), 0 4px 0 -2px var(--nh-edge), -4px 0 0 -2px var(--nh-edge), 4px 0 0 -2px var(--nh-edge);
+    0 -6px 0 -2px var(--nh-edge), 0 6px 0 -2px var(--nh-edge), -6px 0 0 -2px var(--nh-edge), 6px 0 0 -2px var(--nh-edge);
   --nh-dither: repeating-conic-gradient(rgba(0,0,0,.16) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
   --nh-dither-lt: repeating-conic-gradient(rgba(255,200,140,.05) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
   --nh-plankbg: repeating-linear-gradient(180deg, transparent 0 22px, rgba(0,0,0,.45) 22px 24px, rgba(255,179,92,.06) 24px 26px),
@@ -354,9 +354,9 @@
   box-shadow:
     4px 0 #fff3d0, -4px 0 #fff3d0, 0 4px #ffd27a, 4px 4px #ffb35c, -4px 4px #ffb35c, 0 -4px #ffe4a8,
     8px 0 #ff8a3d, -8px 0 #ff8a3d, 8px 4px #c46a24, -8px 4px #c46a24, 0 8px #ff8a3d,
-    -12px -8px #3b2416, -8px -8px #3b2416, -4px -8px #3b2416, 0 -8px #3b2416, 4px -8px #3b2416, 8px -8px #3b2416, 12px -8px #3b2416,
-    -12px 12px #3b2416, -8px 12px #3b2416, -4px 12px #3b2416, 0 12px #3b2416, 4px 12px #3b2416, 8px 12px #3b2416, 12px 12px #3b2416,
-    0 -12px #1a0f08, 0 -16px #1a0f08, 0 -20px #1a0f08;
+    -12px -8px #c8953f, -8px -8px #c8953f, -4px -8px #c8953f, 0 -8px #c8953f, 4px -8px #c8953f, 8px -8px #c8953f, 12px -8px #c8953f,
+    -12px 12px #c8953f, -8px 12px #c8953f, -4px 12px #c8953f, 0 12px #c8953f, 4px 12px #c8953f, 8px 12px #c8953f, 12px 12px #c8953f,
+    0 -12px #8a5a1a, 0 -16px #8a5a1a, 0 -20px #8a5a1a;
 }
 .nh-grain { opacity: .12; }
 .nh-dust span { border-radius: 0; box-shadow: none; width: 2px !important; height: 2px !important; }
@@ -387,7 +387,7 @@
   background: var(--nh-dither), var(--nh-plankbg), linear-gradient(180deg, #33200f, #24160b);
   box-shadow:
     0 -4px 0 0 var(--nh-rim), 0 4px 0 0 var(--nh-rim), -4px 0 0 0 var(--nh-rim), 4px 0 0 0 var(--nh-rim),
-    0 -8px 0 -4px var(--nh-edge), 0 8px 0 -4px var(--nh-edge), -8px 0 0 -4px var(--nh-edge), 8px 0 0 -4px var(--nh-edge),
+    0 -12px 0 -4px var(--nh-edge), 0 12px 0 -4px var(--nh-edge), -12px 0 0 -4px var(--nh-edge), 12px 0 0 -4px var(--nh-edge),
     inset 0 0 0 2px rgba(255,179,92,.18), inset 0 0 0 6px rgba(0,0,0,.35), 10px 10px 0 rgba(0,0,0,.5);
 }
 .nh-panel { margin: 8px auto; }
@@ -395,7 +395,7 @@
   background: repeating-conic-gradient(rgba(110,60,20,.12) 0 25%, transparent 0 50%) 0 0 / 4px 4px, #e3cca6;
   box-shadow:
     0 -4px 0 0 #8a5a2b, 0 4px 0 0 #8a5a2b, -4px 0 0 0 #8a5a2b, 4px 0 0 0 #8a5a2b,
-    0 -8px 0 -4px var(--nh-edge), 0 8px 0 -4px var(--nh-edge), -8px 0 0 -4px var(--nh-edge), 8px 0 0 -4px var(--nh-edge),
+    0 -12px 0 -4px var(--nh-edge), 0 12px 0 -4px var(--nh-edge), -12px 0 0 -4px var(--nh-edge), 12px 0 0 -4px var(--nh-edge),
     inset 0 0 0 4px rgba(110,60,20,.18), 10px 10px 0 rgba(0,0,0,.55);
 }
 .nh-gate { transform: none; animation-timing-function: steps(5, end); }
@@ -492,7 +492,7 @@
 .nh-game:hover { transform: translateY(-2px); box-shadow: var(--nh-pxb-amber), 6px 8px 0 rgba(0,0,0,.45); }
 .nh-game:active { transform: translateY(2px); }
 .nh-game.is-nom { box-shadow: 0 -2px 0 0 #6d8aa8, 0 2px 0 0 #6d8aa8, -2px 0 0 0 #6d8aa8, 2px 0 0 0 #6d8aa8,
-    0 -4px 0 -2px var(--nh-edge), 0 4px 0 -2px var(--nh-edge), -4px 0 0 -2px var(--nh-edge), 4px 0 0 -2px var(--nh-edge), 6px 6px 0 rgba(0,0,0,.45); }
+    0 -6px 0 -2px var(--nh-edge), 0 6px 0 -2px var(--nh-edge), -6px 0 0 -2px var(--nh-edge), 6px 0 0 -2px var(--nh-edge), 6px 6px 0 rgba(0,0,0,.45); }
 .nh-game.is-mine, .nh-pcard.is-mine { box-shadow: var(--nh-pxb-amber), 6px 6px 0 rgba(0,0,0,.45); animation: nh-pxglow 1.2s steps(2, end) infinite; }
 @keyframes nh-pxglow { 50% { box-shadow: var(--nh-pxb-amber), 0 0 0 6px rgba(255,138,61,.35), 6px 6px 0 rgba(0,0,0,.45); } }
 .nh-game-art { background: var(--nh-dither), #2a170c; border-bottom: 2px solid var(--nh-edge); }
@@ -506,7 +506,7 @@
 .nh-board { border-radius: 0; margin: 4px;
   background: repeating-conic-gradient(rgba(0,0,0,.18) 0 25%, transparent 0 50%) 0 0 / 4px 4px, #163222;
   box-shadow: 0 -4px 0 0 #5a3417, 0 4px 0 0 #5a3417, -4px 0 0 0 #5a3417, 4px 0 0 0 #5a3417,
-    0 -8px 0 -4px var(--nh-edge), 0 8px 0 -4px var(--nh-edge), -8px 0 0 -4px var(--nh-edge), 8px 0 0 -4px var(--nh-edge), inset 0 0 0 2px rgba(0,0,0,.4); }
+    0 -12px 0 -4px var(--nh-edge), 0 12px 0 -4px var(--nh-edge), -12px 0 0 -4px var(--nh-edge), 12px 0 0 -4px var(--nh-edge), inset 0 0 0 2px rgba(0,0,0,.4); }
 .nh-box-art { box-shadow: 0 0 0 2px #120904, 4px 4px 0 rgba(0,0,0,.5); }
 .nh-box.is-pitch .nh-box-art { box-shadow: 0 0 0 2px #12324a, 0 0 0 4px #8fd0ff, 4px 4px 0 rgba(0,0,0,.5); }
 .nh-box:nth-child(odd) .nh-box-art, .nh-box:nth-child(even) .nh-box-art { transform: none; }
@@ -551,3 +551,7 @@
     repeating-linear-gradient(90deg, #3b2416 0 24px, #33200f 24px 48px, #2a170c 48px 52px); }
 .nh-home-main .nh-btn-big { margin-top: 6px; }
 @media (max-width: 560px) { .nh-counter { height: 8%; } }
+.nh-lamp-l { top: calc(52px - 35vmax); }
+.nh-lamp-r { top: calc(68px - 35vmax); }
+.nh-lamp-c { top: calc(60px - 35vmax); }
+.nh-lamp::before { transform: scale(2); }
