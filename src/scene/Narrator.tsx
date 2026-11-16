@@ -19,7 +19,7 @@ function playVoice(id: string) {
   } catch {}
 }
 
-export default function Narrator({ on }: RoomProps) {
+export default function Narrator({ on, state }: RoomProps) {
   const [cap, setCap] = useState<Cap | null>(null);
   const [shown, setShown] = useState(0); // typewriter chars
   const timer = useRef<number>();
@@ -50,7 +50,7 @@ export default function Narrator({ on }: RoomProps) {
 
   if (!cap) return null;
   return (
-    <div className="narr" key={cap.key} role="status" aria-live="polite">
+    <div className={`narr${state.phase === 'result' || state.phase === 'duel' ? ' narr-low' : ''}`} key={cap.key} role="status" aria-live="polite">
       <style>{CSS}</style>
       <span className="narr-who">Barkeep</span>
       <span className="narr-text">{cap.text.slice(0, shown)}<span className="narr-ghost">{cap.text.slice(shown)}</span></span>
@@ -68,6 +68,8 @@ const CSS = `
 .narr-who{font-family:'Silkscreen',monospace;font-size:10px;letter-spacing:.12em;color:#ffb35c;text-transform:uppercase}
 .narr-ghost{opacity:0}
 @keyframes narr-in{from{opacity:0;transform:translate(-50%,-6px)}to{opacity:1;transform:translate(-50%,0)}}
+
+.narr.narr-low{top:auto;bottom:calc(env(safe-area-inset-bottom,0px) + 14px)}
 @media (max-width:640px){.narr{font-size:13px;top:calc(env(safe-area-inset-top,0px) + 54px);max-width:calc(100vw - 72px)}}
 @media (prefers-reduced-motion:reduce){.narr{animation:none}}
 `;
