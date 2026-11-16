@@ -1,0 +1,12 @@
+/* "tap to enter" gate: collects the click browsers require before they allow sound */
+.enter-gate{position:fixed;inset:0;z-index:9500;display:grid;place-items:center;border:0;padding:0;margin:0;
+  background:#0b0705c4;cursor:var(--cur-pointer,pointer);font:inherit;color:#e8d5b5;-webkit-tap-highlight-color:transparent}
+.enter-gate-box{display:flex;flex-direction:column;align-items:center;gap:calc(var(--pu,3px)*4);padding:calc(var(--pu,3px)*8) calc(var(--pu,3px)*12);
+  background:#2a1a10;box-shadow:0 calc(var(--pu,3px)*-1) 0 #5a3a22,0 var(--pu,3px) 0 #5a3a22,calc(var(--pu,3px)*-1) 0 0 #5a3a22,var(--pu,3px) 0 0 #5a3a22,
+  0 0 0 calc(var(--pu,3px)*2) #0b0705,0 calc(var(--pu,3px)*3) 0 calc(var(--pu,3px)*2) #0008}
+.enter-gate-title{font-family:'Silkscreen',monospace;font-size:calc(var(--pt,2px)*6);letter-spacing:.14em;color:#ffb35c;text-transform:uppercase;-webkit-font-smoothing:none}
+.enter-gate-btn{font-family:'Rye',serif;font-size:clamp(24px,calc(var(--pt,2px)*14),44px);color:#2a1206;padding:calc(var(--pu,3px)*3) calc(var(--pu,3px)*8);
+  background:#ffb35c;box-shadow:0 calc(var(--pu,3px)*2) 0 #c4581f,0 0 0 var(--pu,3px) #0b0705;animation:enter-pulse 1.4s steps(2) infinite}
+.enter-gate-sub{font-family:'Silkscreen',monospace;font-size:calc(var(--pt,2px)*5);color:#e8d5b5a0;letter-spacing:.08em;text-transform:uppercase}
+@keyframes enter-pulse{50%{filter:brightness(1.15)}}
+@media (prefers-reduced-motion:reduce){.enter-gate-btn{animation:none}}

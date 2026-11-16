@@ -55,6 +55,12 @@ function ExplainCard({ state, skew, send }: { state: RoomProps['state']; skew: n
   );
 }
 
+/** the last line the server narrated, so it can be replayed if audio unlocks a moment later (tap-to-enter) */
+let lastNarr: { id: string; at: number } | null = null;
+export function replayRecentNarration(maxAgeMs = 9000): void {
+  if (lastNarr && Date.now() - lastNarr.at < maxAgeMs) playVoice(lastNarr.id, 'narr');
+}
+
 export default function Narrator({ on, state, skew, send }: RoomProps) {
   const [cap, setCap] = useState<Cap | null>(null);
   const [shown, setShown] = useState(0); // typewriter chars
@@ -63,6 +69,7 @@ export default function Narrator({ on, state, skew, send }: RoomProps) {
 
   useEffect(() => on((e) => {
     if (e.t !== 'narrate') return;
+    lastNarr = { id: e.id, at: Date.now() };
     playVoice(e.id, 'narr');
     if (e.id.startsWith('how_')) return; // shown on the big explain card instead
     seq.current += 1;

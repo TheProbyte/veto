@@ -111,3 +111,20 @@ export function stopNarrator(): void {
   if (c) { c.el.pause(); held.delete(c); }
   for (let i = narrQueue.length - 1; i >= 0; i--) if (narrQueue[i].id.startsWith('how_')) narrQueue.splice(i, 1);
 }
+
+/** Warm the browser cache with every recorded line (after audio unlocks), so the Barkeep starts talking instantly. */
+let prefetched = false;
+export function prefetchVoices(): void {
+  if (prefetched) return;
+  prefetched = true;
+  const ids = [...VOICE_IDS];
+  // explanations + common cues first
+  ids.sort((a, b) => Number(!a.startsWith('how_')) - Number(!b.startsWith('how_')));
+  let i = 0;
+  const next = () => {
+    if (i >= ids.length) return;
+    const id = ids[i++];
+    fetch(`/media/v_${id}.mp3`, { priority: 'low' } as RequestInit).catch(() => {}).finally(() => setTimeout(next, 120));
+  };
+  next(); next();
+}

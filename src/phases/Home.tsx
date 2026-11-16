@@ -1,3 +1,4 @@
+import { navigate } from '../nav';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { sfx } from '../sfx';
 import { PixelScene, usePixelLayout } from '../pixel/PixelCanvas';
@@ -28,7 +29,7 @@ function Hand() {
   );
 }
 
-const go = (c: string) => { setTimeout(() => { location.href = `/r/${c}`; }, 120); };
+const go = (c: string) => { sfx.unlock(); setTimeout(() => navigate(`/r/${c}`), 120); };
 
 export default function Home() {
   const L = usePixelLayout();
