@@ -53,7 +53,8 @@ function pickTake(id: string): string {
 
 /** narrator lines queue behind the one still talking (instead of cutting it off); stale ones are dropped */
 const narrQueue: { id: string; gain: number; at: number }[] = [];
-const MAX_WAIT = 9000;
+const MAX_WAIT = 3500; // a line that waited longer than this would land at an odd time: drop it
+const MAX_WAIT_EXPLAIN = 10000;
 function narrBusy() {
   const c = channels.narr;
   return !!c && !c.el.paused && !c.el.ended && c.el.currentTime < (c.el.duration || Infinity) - 0.05;
@@ -61,7 +62,7 @@ function narrBusy() {
 function drainNarr() {
   const next = narrQueue.shift();
   if (!next) return;
-  if (Date.now() - next.at > MAX_WAIT) return drainNarr();
+  if (Date.now() - next.at > (next.id.startsWith('how_') ? MAX_WAIT_EXPLAIN : MAX_WAIT)) return drainNarr();
   start(next.id, 'narr', next.gain);
 }
 
@@ -71,8 +72,9 @@ export function playVoice(id: string, channel: 'narr' | 'emote' = 'narr', gain =
   if (sfx.isMuted()) return true; // recorded, just muted: callers shouldn't fall back to a synth
   if (sfx.isBackground()) return true; // page hidden: say nothing (and no synth fallback either)
   if (channel === 'narr' && narrBusy()) {
-    narrQueue.push({ id, gain, at: Date.now() });
-    if (narrQueue.length > 2) narrQueue.shift(); // keep only the freshest two waiting
+    if (id.startsWith('how_')) narrQueue.unshift({ id, gain, at: Date.now() });
+    else narrQueue.push({ id, gain, at: Date.now() });
+    if (narrQueue.length > 2) narrQueue.pop(); // keep at most two waiting (explanations first)
     return true;
   }
   return start(id, channel, gain);

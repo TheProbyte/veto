@@ -43,6 +43,9 @@ const invisible = (c: number) => c < 0x20 || (c >= 0x7f && c <= 0x9f) || (c >= 0
 const isKill = (e: ShotEvent) => e.kind === 'hit' || e.kind === 'misfire';
 
 class Bad extends Error {}
+/** game actions held while the Barkeep explains a step (chat, emotes, looks, settings are not) */
+const HELD = new Set<Intent['t']>(['nominate', 'draftPlay', 'draftBurn', 'draftOffer', 'draftAccept', 'pitch', 'react',
+  'beginVeto', 'fire', 'aim', 'shield', 'slide', 'bang', 'pardon', 'jail', 'oust', 'start']);
 
 /** Timed server work (bots, fuse warnings, delayed narration). All driven by the single DO alarm. */
 interface Job {
@@ -385,6 +388,7 @@ export class Room extends DurableObject<Env> {
 
   async handle(pid: string, i: Intent) {
     const s = this.s;
+    if (HELD.has(i.t) && s.explainUntil && Date.now() < s.explainUntil - 200) throw new Bad('Hold up. Listen to the Barkeep.');
     switch (i.t) {
       case 'link': return this.link(pid, String(i.profile ?? ''));
       case 'style': {
@@ -781,6 +785,7 @@ export class Room extends DurableObject<Env> {
 
   // ---------- draft ----------
   openNominations() {
+    this.s.explainUntil = undefined; // a leftover hold from the previous screen doesn't carry over
     if (this.s.settings.nominations === 'draft') { this.dealDraft(); if (!this.explain('how_draft', 400)) this.narr('draft'); }
     else { this.clearDraft(); if (!this.explain('how_nominate', 400)) this.narr('deal'); }
     this.scheduleBotNoms();
@@ -1011,6 +1016,11 @@ export class Room extends DurableObject<Env> {
   runJob(j: Job): boolean {
     const s = this.s;
     if (j.k === 'narr') { if (j.key) this.narr(j.key); return false; }
+    // bots wait for the Barkeep to finish explaining, like everyone else
+    if (j.k !== 'bready' && j.k !== 'bemote' && j.k[0] === 'b' && s.explainUntil && Date.now() < s.explainUntil) {
+      this.job({ ...j, at: s.explainUntil + rnd(400, 1600) });
+      return false;
+    }
     if (j.k === 'fuse') {
       if (s.phase === 'veto' && j.seq === this.x.seq && s.turnDeadline > Date.now()) this.narr('fuse_low');
       return false;
@@ -1119,6 +1129,7 @@ export class Room extends DurableObject<Env> {
 
   startVeto(pid: string, hold = 0) {
     const s = this.s, x = this.x;
+    if (!hold) s.explainUntil = undefined;
     for (const p of s.players) { p.shieldUsed = false; p.revengeOn = undefined; p.badges = undefined; }
     s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; g.cracks = 0; g.lastWords = undefined; });
     s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.duel = undefined; s.result = undefined;
