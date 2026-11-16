@@ -95,3 +95,53 @@ log: { t, actor, action, appid }[]   // feeds the shot animations + stats later
 **In v1:** lobby, Steam linking with private-profile help, everyone owns + almost tiers, nominations (manual + auto-fill), carousel shooting turns, fuse timeout, tin-star shields, revolver roulette, WANTED result, deploy.
 
 **Cut, in priority order for later:** pitched buys + store search (crack-then-shatter) → room history + the "you played this last 3 times" warning → stats ("fastest draw", "biggest vetoer", "nominations that never survive") → the playtime filter UI → real sound files and sprite art.
+
+---
+
+# Pass 3: "Feels like a game"
+
+## A. Animations (what happens when you do things)
+| Moment | Animation | Sound |
+|---|---|---|
+| Player joins | Bust rises from behind the table, a hat bob, and a small dust puff | chair scrape plus boots on boards |
+| Character creator | Each change makes the hat drop onto the head with a bounce, and the outfit swaps in a smoke puff | hat "fwump", a cloth swish per option, a coin flip for "Random" |
+| Ready / finished dressing | Bust tips its hat | spur jingle |
+| Nominate a game | The card arcs from the list onto the dealer's table dock (bottom bar) and slaps down | card slap |
+| Un-nominate | The card slides back off the dock | card slide |
+| Pitch / vote | The price tag swings in; "I'd buy it" shows coins, "Nope" shows a spit | coin clink / spittoon "ptoo" |
+| Host deals → shootout | Cards fly from the dock into the carousel; the screen does an iris-wipe to black and back; "DRAW!" slams in | card riffle, then a cymbal/gunshot sting |
+| My turn | My bust raises a pixel revolver; the crosshair sways | hammer cock |
+| Fire | Bust recoil, muzzle flash at the shooter, the others flinch | gunshot plus room echo |
+| Tin star | The star spins and pins onto the box | metallic "clink" |
+| 3 left | The lamp swings hard and the carousel slides away; the cylinder slides in | cylinder open/close |
+| Spin | Ratcheting spin, with a big live readout of the game under the hammer flickering as it passes | ratchet clicks, then the hammer drop BANG |
+| Winner | The winning chamber zooms toward you, becomes the WANTED poster, and gets nailed up | 2–3 nail hammer thunks, then a new victory sting (replaces the current one) |
+
+## B. Music
+- A procedural spaghetti-western loop made in the browser, so there are no audio files:
+  - nylon-guitar plucks over Am – G – F – E
+  - a low bass
+  - a soft whistle line every few bars
+- The music changes with the phase:
+  - **Lobby / nominate:** relaxed, about 76 bpm.
+  - **Veto:** adds a heartbeat kick and a ticking hi-hat, about 92 bpm.
+  - **Roulette:** a drum roll swell, then the melody drops out.
+  - **Result:** a triumphant major cadence, then back to the lobby groove.
+- The sound menu gets two sliders, **Music** and **Effects**, plus mute. Both are saved per player.
+
+## C. Mobile layout
+- **Fixed top:** the saloon, the lamp and the players never scroll away.
+- **Middle:** the only part that scrolls, holding the panel content.
+- **Sticky bottom dock, the "dealer's table":** your picked games as small cards, plus the main action button (Deal / To the guns / FIRE bar).
+
+## D. Character creation
+Before you deal, everyone picks a look:
+- hat style, hat color, skin, face (beard/moustache/stubble/scar/clean), bandana, and coat
+- a live pixel preview of your bust and a Random button
+- the server saves your look and everyone sees it at the table
+
+## E. Game covers
+- **Real pixel-art look instead of blur:** covers are shrunk down, reduced to the game's limited palette with ordered dithering, given a dark outline, and scaled up with crisp pixels.
+- **Applies everywhere:** the pick list, the dock, the carousel, the chambers and the poster.
+- **Images go through our Worker** so the browser is allowed to recolor them. They're cached in the browser for 7 days and at Cloudflare's edge, which keeps it within the free plan.
+- **Readable chambers:** bigger, less-reduced art, name labels, and the live "under the hammer" readout.
