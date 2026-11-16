@@ -204,7 +204,7 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   if (L.hat !== 6 && !noHat) { R(14, 12, 2, 6, L.hair); R(32, 12, 2, 6, L.hair); }
 
   // --- hat (offset for drop / tip animations)
-  const hdy = Math.round((o.hatDy ?? 0) * s), hdx = Math.round((o.hatDx ?? 0) * s);
+  const hdy = noHat ? 0 : Math.round((o.hatDy ?? 0) * s), hdx = noHat ? 0 : Math.round((o.hatDx ?? 0) * s);
   c.save();
   c.translate(hdx, hdy);
   const hc = L.hatCol;

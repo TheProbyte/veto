@@ -83,7 +83,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
       const fresh = [...now].filter((a) => !starSeen.current!.has(a));
       if (fresh.length) {
         setPinning(new Set(fresh));
-        const t1 = window.setTimeout(() => (sfx as any).clink?.(), 480);
+        const t1 = window.setTimeout(() => sfx.clink(), 480);
         const t2 = window.setTimeout(() => setPinning(new Set()), 900);
         starSeen.current = now;
         return () => { clearTimeout(t1); clearTimeout(t2); };

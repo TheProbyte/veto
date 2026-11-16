@@ -18,7 +18,7 @@ function Intro({ r, skew, finalists, nameOf }: { r: R; skew: number; finalists: 
   const [on, setOn] = useState(show);
   useEffect(() => {
     if (!show) return;
-    (sfx as any).cylinderOpen?.();
+    sfx.cylinderOpen();
     const t = window.setTimeout(() => setOn(false), 800);
     return () => clearTimeout(t);
   }, [show]);
@@ -118,7 +118,6 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
   useEffect(() => {
     if (done && !wasDone.current) {
       sfx.cock();
-      (sfx as any).drawSting?.();
       setLanded(true);
       const t = window.setTimeout(() => setLanded(false), 600);
       wasDone.current = done;
@@ -134,6 +133,7 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
     return () => clearTimeout(t);
   }, [r.startedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [intro] = useState(() => Date.now() + skew - r.startedAt < 600);
   const winner = r.chambers[r.target];
   const under = ((passed % 6) + 6) % 6; // chamber under the hammer right now
   const spinning = p > 0 && !done;
@@ -142,7 +142,7 @@ function Cylinder({ r, skew, nameOf }: { r: R; skew: number; nameOf: (a: number)
       <div className={`px-readout ${done ? 'locked' : spinning && passed % 2 ? 'flick' : ''}`} aria-live={done ? 'polite' : 'off'}>
         <span className="arrow">▶</span>{nameOf(done ? winner : r.chambers[under])}
       </div>
-      <div className="cyl-stage px-cyl-in" aria-label="revolver cylinder">
+      <div className={`cyl-stage ${intro ? 'px-cyl-in' : ''}`} aria-label="revolver cylinder">
         <PixelSprite draw={drawHammer} w={16} h={16} className={`hammer ${done ? 'down' : ''}`} />
         <PixelSprite draw={drawNotch} w={7} h={4} className="cyl-notch" />
         {landed && <PixelSprite draw={drawFlash} w={21} h={21} className="px-hammer-flash" />}

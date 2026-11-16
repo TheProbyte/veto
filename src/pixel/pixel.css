@@ -28,10 +28,10 @@
 }
 
 /* ---- veto: carousel exit when 3 are left (played by Roulette's intro) ---- */
-.px-intro-boxes { position: absolute; left: 0; right: 0; top: 30%; display: flex; justify-content: center; gap: 4%; pointer-events: none; z-index: 5; animation: px-slide-away .7s steps(7) forwards; }
+.px-intro-boxes { position: absolute; left: 0; right: 0; top: 30%; display: flex; justify-content: center; gap: 4%; pointer-events: none; z-index: 5; animation: px-slide-away .5s steps(6) forwards; }
 .px-intro-boxes > div { width: 22%; max-width: 120px; aspect-ratio: 2 / 3; box-shadow: 6px 6px 0 rgba(0,0,0,.6); }
 @keyframes px-slide-away { 0% { transform: none; opacity: 1; } 100% { transform: translateX(-120vw); opacity: 1; } }
-.px-cyl-in { animation: px-cyl-in .55s .55s steps(6) both; }
+.px-cyl-in { animation: px-cyl-in .4s .3s steps(5) both; }
 @keyframes px-cyl-in { 0% { transform: translateX(110vw) rotate(180deg); } 80% { transform: translateX(-3%) rotate(-8deg); } 100% { transform: none; } }
 
 /* ---- roulette: bigger, readable chambers ---- */
@@ -80,7 +80,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .px-star-pin, .px-intro-boxes, .px-cyl-in, .px-poster-in, .px-chamber.win .px-chamber-art, .px-readout.locked { animation: none !important; }
-  .px-intro-boxes { display: none; }
+  .px-intro-boxes, .px-cyl-flash, .px-hammer-flash { display: none; }
   .px-nail { opacity: 1; }
 }
 .px-star-wrap { position: absolute; inset: 0; pointer-events: none; transform-origin: calc(100% - 29px) 29px; z-index: 3; }

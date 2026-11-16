@@ -28,7 +28,7 @@ export default function Result({ state, me, send }: RoomProps) {
     if (reduce) { setNails(3); return; }
     const ts = [950, 1250, 1550].map((ms, i) => window.setTimeout(() => {
       setNails(i + 1);
-      (sfx as any).hammerNail?.();
+      sfx.hammerNail();
       const el = posterRef.current;
       if (el) { el.classList.remove('px-poster-thunk'); void el.offsetWidth; el.classList.add('px-poster-thunk'); }
     }, ms));
