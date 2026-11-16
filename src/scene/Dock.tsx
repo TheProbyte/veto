@@ -125,6 +125,19 @@ function DockCard({ g, leaving, byId, me }: { g: BoardGame; leaving?: boolean; b
       fly(el, p.rect, p.art, () => { if (!play('cardSlap')) sfx.stamp(); setLanded(true); });
     } else setLanded(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // tossing in a game that's already on the table (someone else's pick): my card still flies onto it
+  const byKey = g.by.join(',');
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    if (!mounted.current) { mounted.current = true; return; }
+    const p = pending.get(g.appid);
+    const el = ref.current;
+    if (!p || !el || !g.by.includes(me)) return;
+    pending.delete(g.appid);
+    if (performance.now() - p.at > 2000) return;
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    fly(el, p.rect, p.art, () => { if (!play('cardSlap')) sfx.stamp(); });
+  }, [byKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const mine = g.by.includes(me);
   return (
     <div ref={ref} className={`dock-card ${leaving ? 'is-leaving' : ''} ${landed ? 'is-landed' : ''} ${mine ? 'is-mine' : ''} ${g.tier === 'pitch' ? 'is-pitch' : ''}`} title={g.name}>
@@ -154,7 +167,7 @@ export function DockBoard({ board, players, me }: { board: BoardGame[]; players:
   return (
     <div className="dock-board">
       <div className="dock-label">On the table <b>{board.length}</b></div>
-      {shown.length === 0 ? <div className="dock-empty">Felt's bare. Toss something in.</div> : (
+      {shown.length === 0 ? <div className="dock-empty">Nothing yet.</div> : (
         <div className="dock-row">
           {shown.map(({ g, leaving: l }) => <DockCard key={g.appid} g={g} leaving={l} byId={byId} me={me} />)}
         </div>

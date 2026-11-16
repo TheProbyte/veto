@@ -13,8 +13,10 @@ import { MiniBust } from '../pixel/BustPreview';
 import Narrator from './Narrator';
 import { playVoice } from '../voice';
 import EmoteBar from './EmoteBar';
+import ContextMenu from './ContextMenu';
+import { useDeskChat } from './ChatPanel';
 
-/** piano player's tempo per music mode (matches src/music.ts grooves) */
+/** piano player's tempo per music mode (fallback until sfx.getMusicBpm exists; matches src/music.ts grooves) */
 const BPM: Record<string, number> = { lobby: 76, veto: 92, roulette: 92, result: 76, off: 0 };
 const EMOTE_SFX: Record<string, () => void> = {
   // recorded barks (public/voice/emote_*.mp3) win over the synth versions when they exist
@@ -109,7 +111,12 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   const sceneFx = useRef<SceneFX>(null as unknown as SceneFX);
   if (!sceneFx.current) sceneFx.current = {
     queue: [],
-    tempo: () => (sfx.isMuted() || sfx.getMusicVolume() < 0.01 ? 0 : BPM[sfx.getMusicMode()] ?? 0),
+    tempo: () => {
+      if (sfx.isMuted() || sfx.getMusicVolume() < 0.01) return 0;
+      // the audio side knows the real tempo (recorded or procedural); fall back to the procedural grooves
+      const bpm = (sfx as unknown as { getMusicBpm?: () => number }).getMusicBpm?.();
+      return typeof bpm === 'number' && Number.isFinite(bpm) ? bpm : BPM[sfx.getMusicMode()] ?? 0;
+    },
     onBolt: (big) => { window.setTimeout(() => sfx.thunder(big ? 0.85 : 0.3 + Math.random() * 0.35), big ? 500 : 900 + Math.random() * 1800); },
   };
   if (import.meta.env.DEV) (window as unknown as { __nahFx: SceneFX }).__nahFx = sceneFx.current; // TEMP-VERIFY
@@ -232,6 +239,9 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   const veto = state.phase === 'veto';
   const shooter = veto ? state.turnOrder[state.turnIdx] : undefined;
 
+  // the "LAST TIME" poster: the previous round's game (at the result, the newest entry is this round's)
+  const hist = state.history ?? [];
+  const posterId = hist[hist.length - (state.phase === 'result' && state.result ? 2 : 1)]?.appid ?? 0;
   const data: SceneData = useMemo(() => ({
     players: state.players.map((p) => ({ id: p.id, seat: p.seat, look: p.look, style: p.style, connected: p.connected, bot: p.bot }) as ScenePlayer),
     shooter,
@@ -239,14 +249,16 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
     shot: shotRef.current,
     dimAll: state.phase === 'roulette' ? 0.45 : state.phase === 'result' ? 0.6 : 1,
     fx: sceneFx.current,
-  }), [state.players, shooter, state.phase, fx]); // eslint-disable-line react-hooks/exhaustive-deps
+    poster: posterId,
+  }), [state.players, shooter, state.phase, fx, posterId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stageTop = layout.tableTop * layout.P + (layout.portrait ? 30 : 44);
   const seats = useMemo(() => state.players.map((p) => p.seat), [state.players]);
   const table = phase === 'lobby' || phase === 'nominate';
+  const chat = useDeskChat();
 
   return (
-    <div className={`saloon phase-${phase} ${shooter ? 'has-shooter' : ''} ${table ? 'has-dock' : ''} ${split ? 'is-split' : ''}`} style={{ '--P': `${layout.P}px`, '--stage-top': `${stageTop}px` } as CSSProperties}>
+    <div className={`saloon phase-${phase} ${shooter ? 'has-shooter' : ''} ${table ? 'has-dock' : ''} ${split ? 'is-split' : ''} ${chat.desk ? (chat.open ? 'has-chat' : 'has-chat-tab') : ''}`} style={{ '--P': `${layout.P}px`, '--stage-top': `${stageTop}px` } as CSSProperties}>
       <div className="scene">
         <PixelScene layout={layout} data={data} />
         <div className={`seats ${layout.portrait && state.players.length > 4 ? 'has-back' : ''}`}>
@@ -298,6 +310,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
       {wipe && <PhaseWipe key={wipe.id} w={wipe} />}
 
       <SoundMenu phase={state.phase} />
+      <ContextMenu room={rp} />
     </div>
   );
 }

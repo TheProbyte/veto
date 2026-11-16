@@ -721,7 +721,8 @@
   animation: vt-gold 1.6s steps(2) infinite;
 }
 @keyframes vt-gold { 50% { filter: sepia(1) saturate(5) hue-rotate(-12deg) brightness(1.45) drop-shadow(2px 2px 0 #000) drop-shadow(0 0 10px rgba(255,179,92,1)); } }
-.vt-badge:focus-visible { outline: 2px solid var(--amber); outline-offset: -6px; }
+.vt-badge:focus { outline: none; }
+.vt-badge:focus-visible .tinstar { opacity: 1; transform: scale(1.15); }
 .vt-badge-pin { display: grid; place-items: center; animation: px-pin .7s steps(10) both; }
 
 /* the gun bar: desktop = in flow under the carousel, sticky to the bottom edge */
@@ -777,6 +778,10 @@
 .vt-gun.red .vt-gun-lbl.live { background: #c0140f; }
 .vt-gun.cocked .vt-gun-lbl.live { animation: none; background: #c4581f; }
 
+@media (min-width: 641px) and (min-height: 501px) {
+  .saloon.phase-veto .saloon-front { padding-bottom: 24px; }
+}
+
 /* phones (portrait): a fixed thumb bar, gun in the middle poking up out of it */
 @media (max-width: 640px) {
   .saloon.phase-veto .saloon-front { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
@@ -787,9 +792,9 @@
     background: #160d08; box-shadow: 0 -4px 0 0 var(--ink), inset 0 2px 0 0 var(--wood3);
   }
   .vt-arrow { width: 64px; height: 64px; margin: 0; font-size: 22px; }
-  .vt-gun { --gw: 80px; align-self: stretch; width: 128px; height: 100%; }
-  .vt-gun-hit { height: 140px; } /* extends above the bar: the whole raised gun is the trigger */
-  .vt-gun-body { bottom: -22px; }
+  .vt-gun { --gw: 74px; align-self: stretch; width: 128px; height: 100%; }
+  .vt-gun-hit { height: 132px; } /* extends above the bar: the whole raised gun is the trigger */
+  .vt-gun-body { bottom: -36px; }
   .vt-gun-lbl { bottom: 6px; font-size: 12px; max-width: 150px; }
   .vt-gun-lbl.live { font-size: 17px; }
   .emo.ph-veto { --emo-bottom: calc(112px + env(safe-area-inset-bottom)); }

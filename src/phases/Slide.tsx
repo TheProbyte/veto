@@ -61,14 +61,16 @@ function geo(W: number, H: number, top = 0, bot = H): Geo {
   const yt = top + Math.max(6, h * 0.03);
   const sT = 1 / (1 + K * TMAX);
   const yH = (yt - sT * y0) / (1 - sT);
-  const hw0 = Math.min(W * 0.44, h * 0.95, 560);
+  // phones: the bar fills the width; wide screens: a narrower bar so the saloon around it shows
+  const hw0 = W < 700 ? Math.min(W * 0.44, h * 0.95, 560) : Math.min(W * 0.3, h * 0.8, 470);
   const s = (t: number) => 1 / (1 + K * t);
   const y = (t: number) => yH + (y0 - yH) * s(t);
   const tOf = (sy: number) => { const ss = (sy - yH) / (y0 - yH); return (1 / ss - 1) / K; };
   return { W, H, cx: W / 2, y0, yH, hw0, s, y, hw: (t) => hw0 * s(t), tOf };
 }
 const TW = TMAX + 0.3;   // the back wall stands this far down the bar
-const UR = 2.3;          // the room's floor spans ±UR bar-half-widths; side walls beyond
+/** the room's floor spans ±UR bar-half-widths; side walls beyond (left: the back bar, right: paneling) */
+const roomUR = (W: number) => (W < 700 ? 2.3 : 1.55);
 const laneSet = (n: number) => (n >= 3 ? [-0.56, 0, 0.56] : n === 2 ? [-0.42, 0.42] : [0]);
 
 const rgbCache = new Map<string, [number, number, number]>();
@@ -86,6 +88,7 @@ const RoomCanvas = memo(function RoomCanvas({ W, H, top, bot, mark, lanes }: { W
     const c = cv.getContext('2d'); if (!c) return;
     const g = geo(W, H, top, bot);
     const L = laneSet(lanes);
+    const UR = roomUR(W);
     const img = c.createImageData(cw, ch);
     const d = img.data;
     const put = (x: number, y: number, col: string, a = 1) => {
@@ -137,18 +140,36 @@ const RoomCanvas = memo(function RoomCanvas({ W, H, top, bot, mark, lanes }: { W
           }
           // shelves either side of the mirror
           if (au > 1.3 && au < UR - 0.08) for (const sv of [0.86, 1.24, 1.6]) if (v > sv - 0.035 && v < sv) col = v > sv - 0.012 ? PAL.wood4 : PAL.wood2;
-        } else if (py < yWall || (py < y0p && Math.abs(dx) > UR * g.hw(Math.max(0, g.tOf(sy))) / P)) {
-          // 2) side walls: wood paneling with a wainscot, depth from x
+        } else if (py < yWall || Math.abs(dx) > UR * g.hw(Math.max(-0.5, g.tOf(sy))) / P) {
+          // 2) side walls, in perspective: depth from x, height above the bar line from y
           const sd = Math.abs(dx) * P / (UR * g.hw0);
-          const t = Math.max(-0.5, (1 / Math.max(0.05, sd) - 1) / K);
-          const yf = g.y(Math.min(t, TW)) / P;
-          const hw = g.hw(Math.min(t, TW)) / P;
+          const t = Math.min(TW, Math.max(-0.5, (1 / Math.max(0.05, sd) - 1) / K));
+          const yf = g.y(t) / P, hw = g.hw(t) / P;
           const v = (yf - py) / hw;
-          if (v < 0.04) col = PAL.ink;
-          else if (v < 0.55) col = Math.floor(t * 9) % 3 === 0 ? PAL.wood1 : bayer(px, py) > 0.7 ? PAL.wood3 : PAL.wood2;
-          else if (v < 0.6) col = PAL.wood4;
-          else col = Math.floor(t * 14) % 2 ? '#2b1a10' : '#24160d';
-          if (v > 1.9) col = PAL.ink;
+          const left = dx < 0;
+          if (v > 2.3) col = Math.floor(t * 8) % 2 ? PAL.ink : PAL.wood0; // ceiling beams
+          else if (left) {
+            // the back bar: cabinet, brass lip, then bays alternating mirror / bottle shelves
+            const bay = Math.floor(t * 2.6 + 0.2), bf = (t * 2.6 + 0.2) % 1;
+            const post = bf < 0.08;
+            if (v < 0.42) col = post || Math.abs(v - 0.21) > 0.17 ? PAL.wood2 : bayer(px, py) > 0.8 ? PAL.wood4 : PAL.wood3;
+            else if (v < 0.5) col = v < 0.45 ? PAL.lamp3 : PAL.ink;
+            else if (post) col = v > 1.75 ? PAL.wood2 : PAL.wood3;
+            else if (v < 1.75) {
+              if (bay % 2 === 0) { // mirror
+                const sheen = ((t * 3 + v * 0.8) % 0.6 + 0.6) % 0.6;
+                col = bf > 0.92 || v < 0.56 || v > 1.68 ? PAL.lamp3 : sheen < 0.05 ? PAL.blue2 : bayer(px, py) > 0.5 ? PAL.blue1 : PAL.blue0;
+              } else { // shelves
+                col = [0.9, 1.3, 1.7].some((sv) => v > sv - 0.05 && v < sv) ? PAL.wood4 : '#24160d';
+              }
+            } else col = Math.floor(t * 18) % 2 ? PAL.red2 : '#3a0d0b';
+          } else {
+            // paneled wall: wainscot, dado rail, striped paper
+            if (v < 0.04) col = PAL.ink;
+            else if (v < 0.55) col = (t * 6) % 1 < 0.06 ? PAL.wood1 : bayer(px, py) > 0.75 ? PAL.wood3 : PAL.wood2;
+            else if (v < 0.62) col = PAL.wood4;
+            else col = Math.floor(t * 18) % 2 ? PAL.red2 : '#3a0d0b';
+          }
         } else {
           const t = g.tOf(sy);
           const hw = g.hw(Math.max(-0.4, t)) / P;
@@ -241,33 +262,38 @@ const RoomCanvas = memo(function RoomCanvas({ W, H, top, bot, mark, lanes }: { W
     c.putImageData(img, 0, 0);
 
     const R = (x: number, y: number, w: number, h: number, col: string) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), Math.max(1, Math.round(w)), Math.max(1, Math.round(h))); };
-    // bottles on the shelves + the back-bar top
-    const bs = hwW / 26; // bottle unit in canvas px
-    const shelfRows = [0.86, 1.24, 1.6].map((sv) => ({ y: yWall - sv * hwW + 1, from: 1.36, to: UR - 0.14 }));
-    shelfRows.push({ y: yWall - 0.5 * hwW, from: -1.1, to: 1.1 });
-    shelfRows.forEach((row, ri) => {
-      for (const side of ri === 3 ? [1] : [-1, 1]) {
-        let u = row.from;
-        let k = ri * 7 + (side > 0 ? 3 : 0);
-        while (u < row.to) {
-          const wU = 0.1 + rnd(k, ri, 31) * 0.08;
-          if (rnd(k, ri, 33) > 0.18) {
-            const xm = cxp + (ri === 3 ? u : side * u) * hwW;
-            const tall = (0.2 + rnd(k, ri, 34) * 0.14) * hwW;
-            const bw = Math.max(2, wU * hwW * 0.7);
-            const col = BOTTLES[Math.floor(rnd(k, ri, 35) * BOTTLES.length)];
-            const yb = row.y;
-            R(xm - bw / 2 - 1, yb - tall - 1, bw + 2, tall + 1, PAL.ink);
-            R(xm - bw / 2, yb - tall * 0.62, bw, tall * 0.62, col);
-            R(xm - Math.max(1, bw / 5), yb - tall, Math.max(1, bw / 2.5), tall * 0.4, col); // neck
-            R(xm - bw / 2 + 1, yb - tall * 0.55, 1, tall * 0.4, 'rgba(255,246,228,.55)'); // glint
-            if (bw > 4) R(xm - bw / 2, yb - tall * 0.42, bw, Math.max(1, tall * 0.14), PAL.parch2); // label
-          }
-          u += wU + 0.03 + bs * 0;
-          k++;
-        }
+    // bottles on the back bar's shelves (left wall, odd bays) + a few on the back-bar top
+    if (UR * g.hw0 < g.W / 2) {
+      let k = 0;
+      for (let t = TW - 0.02; t > -0.3; t -= 0.045) {
+        const bay = Math.floor(t * 2.6 + 0.2), bf = (t * 2.6 + 0.2) % 1;
+        k++;
+        if (bf < 0.14 || bf > 0.94) continue;
+        const hw = g.hw(t) / P, xw = cxp - UR * hw, yf = g.y(t) / P;
+        if (xw < 1) continue;
+        const shelves = bay % 2 ? [0.9, 1.3, 1.7] : [0.5];
+        shelves.forEach((sv, si) => {
+          if (rnd(k, si, 37) < 0.25) return;
+          const tall = (0.2 + rnd(k, si, 34) * 0.13) * hw, bw = Math.max(2, hw * 0.06);
+          const col = BOTTLES[Math.floor(rnd(k, si, 35) * BOTTLES.length)];
+          const xb = xw - bw * 0.2, yb = yf - (sv - 0.05) * hw;
+          R(xb - bw / 2 - 1, yb - tall - 1, bw + 2, tall + 1, PAL.ink);
+          R(xb - bw / 2, yb - tall * 0.62, bw, tall * 0.62, col);
+          R(xb - Math.max(1, bw / 5), yb - tall, Math.max(1, bw / 2.5), tall * 0.4, col);
+          R(xb - bw / 2, yb - tall * 0.55, 1, tall * 0.4, 'rgba(255,246,228,.55)');
+          if (bw > 4) R(xb - bw / 2, yb - tall * 0.42, bw, Math.max(1, tall * 0.14), PAL.parch2);
+        });
       }
-    });
+      // brass sconces with a warm halo on the paneled (right) wall
+      for (const t of [0.15, 0.7, 1.2]) {
+        const hw = g.hw(t) / P, xw = cxp + UR * hw, yl = g.y(t) / P - 1.15 * hw, sc = Math.max(1, hw * 0.025);
+        if (xw > cw - 2) continue;
+        const grd = c.createRadialGradient(xw, yl, 0, xw, yl, hw * 0.6);
+        grd.addColorStop(0, 'rgba(255,179,92,.35)'); grd.addColorStop(1, 'rgba(255,179,92,0)');
+        c.fillStyle = grd; c.fillRect(xw - hw * 0.6, yl - hw * 0.6, hw * 1.2, hw * 1.2);
+        R(xw - sc, yl, sc * 2, sc * 3, PAL.ink); R(xw - sc + 1, yl + 1, sc * 2 - 2, sc * 2, PAL.lamp0); R(xw - sc, yl + sc * 3, sc * 2, sc, PAL.lamp3);
+      }
+    }
     // hanging lamps: chain, brass shade, bright bulb
     for (const lu of lampsU) {
       const lx = cxp + lu * hwW, ly = yWall - 1.72 * hwW, sc = hwW / 14;
@@ -279,10 +305,10 @@ const RoomCanvas = memo(function RoomCanvas({ W, H, top, bot, mark, lanes }: { W
     }
     // stools along both sides of the bar (far ones first)
     for (const t of [1.0, 0.76, 0.52, 0.28, 0.04]) {
-      for (const side of [-1, 1]) {
-        const hw = g.hw(t) / P, sxm = cxp + side * hw * 1.32, sym = g.y(t) / P + hw * 0.1;
+      for (const side of W < 700 ? [-1, 1] : [1]) {
+        const hw = g.hw(t) / P, sxm = cxp + side * hw * (W < 700 ? 1.32 : 1.3), sym = g.y(t) / P + hw * 0.12;
         if (sxm < -hw || sxm > cw + hw) continue;
-        const sw = hw * 0.34, sh = Math.max(2, hw * 0.08), lg = hw * 0.42;
+        const sw = hw * 0.2, sh = Math.max(2, hw * 0.05), lg = hw * 0.3;
         R(sxm - sw * 0.35, sym + sh, Math.max(1, hw * 0.035), lg, PAL.ink);
         R(sxm + sw * 0.3, sym + sh, Math.max(1, hw * 0.035), lg, PAL.ink);
         R(sxm - sw * 0.05, sym + sh, Math.max(1, hw * 0.03), lg * 1.05, PAL.wood1);
@@ -347,23 +373,29 @@ const GW = 16, GH = 20;
 /** whiskey tumbler: see-through glass, amber whiskey with a sloshing surface (tilt -2..2), an ice cube, condensation */
 const drawGlass = (tilt: number): DrawFn => (c) => {
   const r = (x: number, y: number, w: number, h: number, col: string) => { c.fillStyle = col; c.fillRect(x, y, w, h); };
-  r(1, 18, 15, 2, 'rgba(0,0,0,.45)');                     // shadow
-  r(1, 1, 14, 18, PAL.ink);                               // outline
-  r(2, 2, 12, 16, 'rgba(159,182,196,.55)');               // glass body (see-through)
-  r(2, 15, 12, 3, 'rgba(207,224,234,.85)');               // thick base
+  r(2, 18, 13, 2, 'rgba(0,0,0,.45)');                     // shadow on the bar
+  // tapered tumbler: 14px wide at the rim, 12px at the heavy base
+  const L = (y: number) => (y < 9 ? 1 : 2), Rr = (y: number) => (y < 9 ? 15 : 14);
+  for (let y = 1; y < 19; y++) {
+    const l = L(y), rr = Rr(y);
+    r(l, y, 1, 1, PAL.ink); r(rr - 1, y, 1, 1, PAL.ink);  // side outlines
+    r(l + 1, y, rr - l - 2, 1, 'rgba(159,182,196,.42)');   // see-through glass
+  }
+  r(2, 18, 12, 1, PAL.ink);                               // bottom edge
+  r(3, 15, 10, 3, 'rgba(207,224,234,.85)');               // thick base
+  r(4, 16, 6, 1, 'rgba(255,246,228,.6)');
   // whiskey: surface tilts with the slosh
-  for (let x = 2; x < 14; x++) {
-    const sy = Math.round(8 + ((x - 7.5) / 6) * tilt);
+  for (let x = 3; x < 13; x++) {
+    const sy = Math.round(8 + ((x - 7.5) / 5) * tilt);
     r(x, sy, 1, 15 - sy, PAL.lamp3);
     r(x, sy, 1, 1, PAL.lamp1);                            // bright meniscus
     if ((x + tilt) % 4 === 0) r(x, sy - 1, 1, 1, 'rgba(255,246,228,.75)'); // foam fleck
   }
   r(4, 10, 3, 3, 'rgba(207,224,234,.8)'); r(4, 10, 1, 1, PAL.white); // ice cube
   r(9, 12, 3, 2, PAL.lamp2);                              // depth glow
-  r(3, 3, 1, 10, 'rgba(255,246,228,.8)'); r(12, 3, 1, 2, 'rgba(255,246,228,.6)'); // highlights
-  r(11, 9, 1, 1, PAL.white); r(13, 12, 1, 1, 'rgba(255,255,255,.7)'); r(2, 14, 1, 1, 'rgba(255,255,255,.6)'); // condensation beads
-  r(13, 2, 1, 13, 'rgba(109,132,146,.9)');                // shaded edge
-  r(2, 2, 12, 1, '#cfe0ea');                              // rim
+  r(3, 2, 1, 11, 'rgba(255,246,228,.8)'); r(12, 3, 1, 2, 'rgba(255,246,228,.55)'); // highlights
+  r(11, 9, 1, 1, PAL.white); r(13, 12, 1, 1, 'rgba(255,255,255,.7)'); r(3, 14, 1, 1, 'rgba(255,255,255,.6)'); // condensation beads
+  r(2, 0, 12, 1, PAL.ink); r(2, 1, 12, 1, '#cfe0ea'); r(3, 1, 3, 1, PAL.white); // rim
 };
 const GLASSES = [-2, -1, 0, 1, 2].map((k) => drawGlass(k));
 const glassSprite = (tilt: number) => GLASSES[Math.max(-2, Math.min(2, Math.round(tilt))) + 2];

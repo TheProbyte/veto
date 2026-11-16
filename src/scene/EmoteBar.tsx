@@ -1,29 +1,25 @@
-// Emote wheel + taunts + free-text speech (sends {t:'emote'} / {t:'say'}). Bottom-left, above whatever owns the bottom edge.
+// Emotes + taunts + free-text speech (sends {t:'emote'} / {t:'say'}). Phones: a bottom-left button + wheel.
+// Desktop (wide + mouse): the always-open ChatPanel. Always mounted (also runs the shot extras).
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { RoomProps } from '../props';
 import { EMOTES, SAY_MAX, TAUNTS, type EmoteId } from '../../shared/types';
 import { PixelSprite } from '../pixel/PixelCanvas';
-import { PAL } from '../pixel/palette';
-import type { DrawFn } from '../pixel/sprites';
 import { sfx } from '../sfx';
+import ChatPanel, { drawBubble, useChatLog, useDeskChat } from './ChatPanel';
 import { useShotExtras } from '../phases/ShotExtras';
 import '../phases/gameplay.css';
 
 const EMOTE_CD = 1200, SAY_CD = 2000;
 
-/** 13x11 pixel speech bubble with three dots */
-const drawBubble: DrawFn = (c) => {
-  c.fillStyle = PAL.ink;
-  c.fillRect(1, 0, 11, 1); c.fillRect(0, 1, 1, 6); c.fillRect(12, 1, 1, 6); c.fillRect(1, 7, 11, 1);
-  c.fillRect(2, 8, 1, 2); c.fillRect(3, 8, 1, 1); c.fillRect(1, 10, 1, 1);
-  c.fillStyle = PAL.parch; c.fillRect(1, 1, 11, 6); c.fillRect(2, 7, 2, 1); c.fillRect(2, 8, 1, 1);
-  c.fillStyle = PAL.parch2; c.fillRect(1, 6, 11, 1);
-  c.fillStyle = PAL.wood2; c.fillRect(3, 3, 2, 2); c.fillRect(6, 3, 2, 2); c.fillRect(9, 3, 2, 2);
-};
-
-export default function EmoteBar({ state, send, skew }: RoomProps) {
+export default function EmoteBar(rp: RoomProps) {
+  const { state, send, skew } = rp;
   useShotExtras(state, skew); // always mounted: catches the finale shot even if the phase flips with it
+  const log = useChatLog(rp); // kept here so the log survives collapsing the panel
+  const { desk, open: deskOpen } = useDeskChat();
+  const [focusKey, setFocusKey] = useState(0);
+  const deskRef = useRef(desk);
+  deskRef.current = desk;
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [cd, setCd] = useState<{ emote: number; say: number }>({ emote: 0, say: 0 });
@@ -47,7 +43,7 @@ export default function EmoteBar({ state, send, skew }: RoomProps) {
       const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
       if (e.key === 'Escape') { setOpen(false); return; }
       if (typing || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === 'e' || e.key === 'E') { e.preventDefault(); toggle(); }
+      if (e.key === 'e' || e.key === 'E') { e.preventDefault(); if (deskRef.current) setFocusKey(Date.now()); else toggle(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -81,13 +77,16 @@ export default function EmoteBar({ state, send, skew }: RoomProps) {
   };
   const say = (raw: string) => {
     const t = raw.replace(/\s+/g, ' ').trim().slice(0, SAY_MAX);
-    if (!t || Date.now() < cd.say) return;
+    if (!t || Date.now() < cd.say) return false;
     send({ t: 'say', text: t });
     setCd((c) => ({ ...c, say: Date.now() + SAY_CD }));
     setRingKey({ k: Date.now(), ms: SAY_CD });
     setText('');
     setOpen(false);
+    return true;
   };
+
+  if (desk) return <ChatPanel log={log} emote={emote} say={say} emoteCool={emoteCool} sayCool={sayCool} open={deskOpen} focusKey={focusKey} />;
 
   return createPortal(
     <div className={`emo ph-${phase}`} ref={rootRef}>
@@ -116,7 +115,7 @@ export default function EmoteBar({ state, send, skew }: RoomProps) {
           <div className="emo-taunts">
             {TAUNTS.map((t) => <button key={t} className="emo-t px-btn" disabled={sayCool} onClick={() => say(t)}>{t}</button>)}
           </div>
-          <div className="emo-cool">{emoteCool || sayCool ? 'catching your breath…' : ''}</div>
+          <div className="emo-cool">{emoteCool || sayCool ? 'Catch your breath…' : ''}</div>
         </div>
       )}
       <button

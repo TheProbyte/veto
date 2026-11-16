@@ -132,9 +132,9 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
             {s.sheriff && <small className="nh-rule-help">One Pardon, one Jail. The posse can vote 'em out.</small>}
           </div>
           <div className="nh-rule-row">
-            <span className="nh-rule-name">Barkeep explains</span>
+            <span className="nh-rule-name">Barkeep</span>
             <div className="nh-seg" role="group" aria-label="Barkeep explains each step">
-              {([[true, 'On'], [false, 'Off']] as const).map(([v, label]) => (
+              {([[true, 'Explains'], [false, 'Quiet']] as const).map(([v, label]) => (
                 <button key={label} type="button" className={s.explain === v ? 'on' : ''} aria-pressed={s.explain === v} onClick={() => { sfx.click(); set({ explain: v }); }}>{label}</button>
               ))}
             </div>

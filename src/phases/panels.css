@@ -1176,7 +1176,7 @@
 .nm-tab-dot { width: 8px; height: 8px; background: var(--nh-amber); box-shadow: 0 0 0 2px #120904; }
 
 /* the felt */
-.nm-felt { position: relative; margin: 4px; padding: 16px 14px 14px;
+.nm-felt { position: relative; margin: 4px; padding: 24px 14px 16px;
   background: repeating-conic-gradient(rgba(0,0,0,.12) 0 25%, transparent 0 50%) 0 0 / 4px 4px, radial-gradient(ellipse at 50% 0%, #2c6745 0%, #1f4c33 50%, #163a26 100%);
   box-shadow: 0 -4px 0 0 #6b3f1c, 0 4px 0 0 #6b3f1c, -4px 0 0 0 #6b3f1c, 4px 0 0 0 #6b3f1c,
     0 -8px 0 -2px #120904, 0 8px 0 -2px #120904, -8px 0 0 -2px #120904, 8px 0 0 -2px #120904,
@@ -1280,7 +1280,7 @@
   .nm-chip { flex: none; min-height: 40px; }
   .nm-tabs { gap: 4px; padding: 0 4px; }
   .nm-tab { flex: 1 1 0; justify-content: center; gap: 6px; padding: 8px 6px; font-size: 13px; }
-  .nm-felt { margin: 4px 0; padding: 14px 8px 10px; }
+  .nm-felt { margin: 4px 0; padding: 20px 8px 12px; }
   .nm-grid { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 14px 10px; }
   .nm-face { padding: 5px 5px 7px; gap: 4px; box-shadow: 0 -2px 0 0 #120904, 0 2px 0 0 #120904, -2px 0 0 0 #120904, 2px 0 0 0 #120904, inset 0 0 0 2px #ead7b3, inset 0 0 0 3px rgba(122,74,30,.5), 3px 4px 0 rgba(0,0,0,.4); }
   .nm-name { font-size: 13px; }
@@ -1321,7 +1321,7 @@
   .saloon .result.gp-result {
     margin: 0; padding: 0; min-height: calc(100dvh - 40px);
     display: grid; grid-template-columns: minmax(230px, 280px) minmax(290px, 330px) minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr); grid-template-areas: 'poster act side' 'poster sad side';
+    grid-template-rows: auto auto; grid-template-areas: 'poster act side' 'poster sad side';
     align-content: center; align-items: start; column-gap: 26px; row-gap: 14px;
   }
   .saloon .gp-result > :not(.result-backdrop) { max-width: none; }
@@ -1335,6 +1335,10 @@
   .saloon .gp-result > .result-actions { grid-area: act; width: 100%; gap: 6px; }
   .saloon .gp-result .btn-launch { display: grid; place-items: center; width: 100%; min-height: 62px; padding: 14px 8px 10px; font-size: 32px; }
   .saloon .gp-result > .sad { grid-area: sad; width: 100%; margin: 0; }
+  .saloon .gp-result .sad-seg .sad-b { padding-left: 4px; padding-right: 4px; }
+  .saloon .gp-result .sad-seg .sad-b:first-child { flex-grow: 1.6; }
+  .saloon .gp-result .sad-lbl { display: none; }
+  .saloon .gp-result .sad-ico { font-size: 16px; }
   .saloon .gp-result .rx-tabs { display: none; }
   .saloon .gp-result .rx-side { grid-area: side; display: block; align-self: center; columns: 2 230px; column-gap: 14px; }
   .saloon .gp-result .rx-panel { display: block; break-inside: avoid; margin: 0 0 14px; }

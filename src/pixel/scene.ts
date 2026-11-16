@@ -1,6 +1,7 @@
 import { PAL, hexRgb, rnd } from './palette';
 import { bayer, circle, ditherBands, ellipse, line, makeCanvas, px } from './dither';
 import type { Look } from '../../shared/types';
+import { peekPixelized, pixelize } from './pixelize';
 import { BUST_H, BUST_W, bustFor, poseKey, renderBust, shade, styleSig, type BustLook, type Pose } from './sprites';
 
 type Ctx = CanvasRenderingContext2D;
@@ -108,6 +109,64 @@ interface WallGeo {
   shelf: { x0: number; x1: number; y: number };
   /** every wall fixture's footprint (frames, sills, shelf, piano, pictures): nothing may overlap */
   decor?: Rect[];
+  /** the wanted poster's spot (big = room for the "LAST TIME" cover poster) + the bare wall under it */
+  poster?: PosterSpot;
+}
+interface PosterSpot extends Rect { big: boolean; under: ImageData }
+
+/** "LAST TIME" poster: parchment 18x35, two caption lines in a 3x5 font over a 12x18 cover */
+const POSTER = { w: 18, h: 35, art: { x: 3, y: 15, w: 12, h: 18 } };
+const FONT3: Record<string, string[]> = {
+  L: ['#..', '#..', '#..', '#..', '###'],
+  A: ['.#.', '#.#', '###', '#.#', '#.#'],
+  S: ['.##', '#..', '.#.', '..#', '##.'],
+  T: ['###', '.#.', '.#.', '.#.', '.#.'],
+  I: ['###', '.#.', '.#.', '.#.', '###'],
+  M: ['#.#', '###', '###', '#.#', '#.#'],
+  E: ['###', '#..', '##.', '#..', '###'],
+};
+function text3(c: Ctx, s: string, x: number, y: number, col: string) {
+  c.fillStyle = col;
+  for (const ch of s) {
+    const g = FONT3[ch];
+    if (g) g.forEach((row, yy) => { for (let xx = 0; xx < 3; xx++) if (row[xx] === '#') c.fillRect(x + xx, y + yy, 1, 1); });
+    x += 4;
+  }
+}
+/** parchment with burnt, dithered edges + a nail */
+function parchment(c: Ctx, x0: number, y0: number, w: number, h: number) {
+  c.fillStyle = PAL.parch2; c.fillRect(x0, y0, w, h);
+  for (let y = y0; y < y0 + h; y++) for (let xx = x0; xx < x0 + w; xx++) {
+    const e = Math.min(xx - x0, x0 + w - 1 - xx, y - y0, y0 + h - 1 - y);
+    if (e < 2 && bayer(xx, y) > 0.4) px(c, xx, y, PAL.parch3);
+  }
+}
+/** (re)paint the wanted poster in its spot: the generic one, or the last game's cover when `art` is given */
+function paintPoster(c: Ctx, sp: PosterSpot, art: HTMLCanvasElement | null) {
+  c.putImageData(sp.under, sp.x, sp.y);
+  if (art && sp.big) {
+    const { x, y, w, h } = sp;
+    parchment(c, x, y, w, h);
+    // torn corner + drop shadow on the wall
+    px(c, x + w - 1, y + h - 1, PAL.wood0); px(c, x + w - 2, y + h - 1, PAL.wood0); px(c, x + w - 1, y + h - 2, PAL.wood0);
+    const a = POSTER.art;
+    c.fillStyle = PAL.ink; c.fillRect(x + a.x - 1, y + a.y - 1, a.w + 2, a.h + 2);
+    c.drawImage(art, x + a.x, y + a.y, a.w, a.h);
+    // caption on top (like WANTED), so it still reads when a hat hides the bottom of the poster
+    text3(c, 'LAST', x + 2, y + 2, PAL.wood1);
+    text3(c, 'TIME', x + 2, y + 8, PAL.red2);
+    px(c, x + (w >> 1), y, PAL.metal3);
+    return;
+  }
+  // generic: 13x17, top-centred in the spot
+  const px0 = sp.x + ((sp.w - 13) >> 1), py0 = sp.y + (sp.big ? 4 : 0), pw2 = 13, ph = 17;
+  parchment(c, px0, py0, pw2, ph);
+  c.fillStyle = PAL.wood1; c.fillRect(px0 + 2, py0 + 2, pw2 - 4, 2);
+  c.fillStyle = PAL.wood2; c.fillRect(px0 + 4, py0 + 5, 5, 5);
+  c.fillStyle = PAL.wood1; c.fillRect(px0 + 5, py0 + 5, 3, 1);
+  c.fillStyle = PAL.parch3; c.fillRect(px0 + 2, py0 + 12, pw2 - 4, 1); c.fillRect(px0 + 3, py0 + 14, pw2 - 6, 1);
+  px(c, px0 + (pw2 >> 1), py0, PAL.metal3);
+  c.fillStyle = PAL.red1; c.fillRect(px0 + pw2 - 4, py0 + ph - 4, 2, 2);
 }
 
 const DOOR_OUT = (c: Ctx, d: Rect, dawn: boolean, sun = false) => {
@@ -332,23 +391,25 @@ function drawWall(c: Ctx, L: Layout, emis: Uint8Array, cool: Float32Array, geo: 
   if (W >= 150 && floor - 24 > winBot + 2 - (L.portrait ? 0 : 12) && !hits(pianoR, 0)) { drawPiano(c, pianoX, floor); geo.piano = { x: pianoX, floor }; used.push(pianoR); }
   else geo.piano = null;
 
-  // wanted poster: right of the shelf if there's wall there, else left of it
-  const py0 = Math.max(8, Math.round(tableTop * 0.16)), pw2 = 13, ph = 17;
-  const px0 = [Math.round(W * 0.7), Math.round((sx1 + (door && !dropRight ? door.x - 3 : winR - 4)) / 2 - pw2 / 2), Math.round(W * 0.25), Math.round((wl + ww + 4 + sx0) / 2 - pw2 / 2)]
-    .find((x) => !hits(box(x, py0, pw2, ph)));
-  if (px0 !== undefined) {
-    used.push(box(px0, py0, pw2, ph));
-    c.fillStyle = PAL.parch2; c.fillRect(px0, py0, pw2, ph);
-    for (let y = py0; y < py0 + ph; y++) for (let xx = px0; xx < px0 + pw2; xx++) {
-      const e = Math.min(xx - px0, px0 + pw2 - 1 - xx, y - py0, py0 + ph - 1 - y);
-      if (e < 2 && bayer(xx, y) > 0.4) px(c, xx, y, PAL.parch3);
-    }
-    c.fillStyle = PAL.wood1; c.fillRect(px0 + 2, py0 + 2, pw2 - 4, 2);
-    c.fillStyle = PAL.wood2; c.fillRect(px0 + 4, py0 + 5, 5, 5);
-    c.fillStyle = PAL.wood1; c.fillRect(px0 + 5, py0 + 5, 3, 1);
-    c.fillStyle = PAL.parch3; c.fillRect(px0 + 2, py0 + 12, pw2 - 4, 1); c.fillRect(px0 + 3, py0 + 14, pw2 - 6, 1);
-    px(c, px0 + (pw2 >> 1), py0, PAL.metal3);
-    c.fillStyle = PAL.red1; c.fillRect(px0 + pw2 - 4, py0 + ph - 4, 2, 2);
+  // wanted poster: right of the shelf if there's wall there, else left of it. Reserve the big
+  // "LAST TIME" poster (last game this table played) when it fits; the generic one is drawn in its
+  // spot until a cover arrives (SceneRenderer.setPoster repaints just that rect).
+  const spots = (pw: number) => [Math.round(W * 0.7), Math.round((sx1 + (door && !dropRight ? door.x - 3 : winR - 4)) / 2 - pw / 2), Math.round(W * 0.25), Math.round((wl + ww + 4 + sx0) / 2 - pw / 2)];
+  const bigY = Math.max(5, Math.round(tableTop * 0.1));
+  let pr: Rect | null = null, big = false;
+  if (bigY + POSTER.h <= rail + 2) {
+    const bx0 = spots(POSTER.w).find((x) => !hits(box(x, bigY, POSTER.w, POSTER.h)));
+    if (bx0 !== undefined) { pr = box(bx0, bigY, POSTER.w, POSTER.h); big = true; }
+  }
+  if (!pr) {
+    const py0 = Math.max(8, Math.round(tableTop * 0.16));
+    const sx = spots(13).find((x) => !hits(box(x, py0, 13, 17)));
+    if (sx !== undefined) pr = box(sx, py0, 13, 17);
+  }
+  if (pr) {
+    used.push(pr);
+    geo.poster = { ...pr, big, under: c.getImageData(pr.x, pr.y, pr.w, pr.h) };
+    paintPoster(c, geo.poster, null);
   }
   // framed picture (left)
   const fx = Math.round(W * 0.25), fy = Math.max(8, Math.round(tableTop * 0.2)), fw = 14, fh = 11;
@@ -458,6 +519,8 @@ export interface SceneData {
   shot?: { at: number; actor: string; kind: string }; // performance.now() based
   dimAll: number; // 1 normal, lower for roulette/result
   fx?: SceneFX;
+  /** appid of the game this table played last time (the "LAST TIME" wanted poster); 0/undefined = generic poster */
+  poster?: number;
 }
 
 /** emote durations (ms of scene time); keep in step with the HTML caption in Saloon (EMOTE_POP_MS) */
@@ -573,6 +636,9 @@ interface Gust { x: number; y: number; vx: number; vy: number; life: number }
 export class SceneRenderer {
   L: Layout;
   bg: HTMLCanvasElement;
+  bgc: Ctx;
+  /** appid the poster should show (-1 = not decided yet) */
+  posterWant = -1;
   table: HTMLCanvasElement;
   dawnWin: HTMLCanvasElement;
   emis: Uint8Array;
@@ -614,12 +680,22 @@ export class SceneRenderer {
     this.cool = new Float32Array(W * H);
     const [bg, bc] = makeCanvas(W, H);
     drawWall(bc, L, this.emis, this.cool, this.geo);
-    this.bg = bg;
+    this.bg = bg; this.bgc = bc;
     const [tb, tc] = makeCanvas(W, H);
     drawTable(tc, L);
     this.table = tb;
     this.fg = new Uint8Array(W * H);
     this.tableMask = alphaMask(tb);
+    // the table is lit by the lamp + the room's ambient only: no window / doorway spill (or the
+    // doorway's own emissive pixels where its foot dips behind the rim) lands on it. The floor
+    // strip at the very bottom keeps a faint share of the spill.
+    const floorY = L.cy + L.ry - 2;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!this.tableMask[i]) continue;
+      this.emis[i] = 0;
+      this.cool[i] = y >= floorY && Math.abs(x - L.cx) >= L.rx * Math.sqrt(Math.max(0, 1 - ((y - L.cy - 3) / (L.ry + 2)) ** 2)) ? this.cool[i] * 0.3 : 0;
+    }
     // dawn skies for the windows + doorway (drawn over the night ones at the result)
     const [dw, dc] = makeCanvas(W, H);
     this.geo.wins.forEach((w, wi) => {
@@ -663,6 +739,34 @@ export class SceneRenderer {
     return cv;
   }
 
+  /** show the last game's cover on the wanted poster (0 = the generic one). Repaints only the poster's rect of the cached wall. */
+  setPoster(appid: number) {
+    if (appid === this.posterWant) return;
+    this.posterWant = appid;
+    const sp = this.geo.poster;
+    if (!sp) return;
+    if (!appid || !sp.big) { paintPoster(this.bgc, sp, null); return; }
+    const { w, h } = POSTER.art;
+    const show = (cv: HTMLCanvasElement | null) => { if (this.posterWant === appid) paintPoster(this.bgc, sp, cv); };
+    const hit = peekPixelized(appid, 'box', w, h);
+    const done = (a: { cv: HTMLCanvasElement; src: string } | null | undefined) => {
+      if (!a) return show(null);
+      if (a.src === 'box') return show(a.cv);
+      // only the wide header art exists: centre-crop it instead of squashing it into the poster
+      const hw = Math.round(h * 460 / 215);
+      const hh = peekPixelized(appid, 'header', hw, h);
+      const crop = (b: { cv: HTMLCanvasElement } | null | undefined) => {
+        if (!b) return show(null);
+        const [cv, cc] = makeCanvas(w, h);
+        cc.drawImage(b.cv, Math.round((hw - w) / 2), 0, w, h, 0, 0, w, h);
+        show(cv);
+      };
+      if (hh !== undefined) crop(hh); else pixelize(appid, 'header', hw, h).then(crop, () => show(null));
+    };
+    if (hit !== undefined) done(hit);
+    else { paintPoster(this.bgc, sp, null); pixelize(appid, 'box', w, h).then(done, () => show(null)); }
+  }
+
   /** where the shooter's revolver barrel ends, in scene pixels */
   muzzle(g: SeatGeom) {
     return { x: Math.round(g.x - g.w / 2 + 36 * g.scale), y: Math.round(g.top + 26 * g.scale) };
@@ -704,6 +808,7 @@ export class SceneRenderer {
     const vt = this.vt;
     this.drain(t, D);
     const sec = vt / 1000;
+    this.setPoster(D.poster ?? 0);
     // shot age in scene time, stamped when first seen
     if (D.shot && D.shot.at !== this.shotSeen) {
       this.shotSeen = D.shot.at;

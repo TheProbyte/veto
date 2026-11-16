@@ -179,11 +179,8 @@ export default function Nominate({ state, me, send }: RoomProps) {
 
       {drafting ? <>
         <DraftHand state={state} me={me} send={send} />
-        {state.phase === 'nominate' && <div className="nh-nom-rules"><TableRules state={state} isHost={isHost} send={send} collapsible /></div>}
       </> : (
         <>
-          {state.phase === 'nominate' && <div className="nh-nom-rules"><TableRules state={state} isHost={isHost} send={send} collapsible /></div>}
-
           {deal && (
             <a className="nm-deal" href={`https://store.steampowered.com/app/${deal.appid}`} target="_blank" rel="noopener noreferrer"
               onClick={() => sfx.click()} aria-label={`Tonight's special: ${deal.name}, ${deal.discount}% off. Gift it on Steam`}>
@@ -237,6 +234,8 @@ export default function Nominate({ state, me, send }: RoomProps) {
       )}
 
       <Pitches state={state} me={me} send={send} />
+
+      {state.phase === 'nominate' && <div className="nh-nom-rules"><TableRules state={state} isHost={isHost} send={send} collapsible /></div>}
 
       <DockActions>
         <div className="dock-act dock-act-row">

@@ -106,7 +106,7 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
     winBy.length ? `Tossed in by ${winBy.map((id) => (id === me ? 'you' : nameOf(id))).join(', ')}` : 'Dealt by the house',
     slider ? `slid by ${slider === me ? 'you' : nameOf(slider)}` : '',
     dodged ? `dodged ${dodged} shot${dodged === 1 ? '' : 's'}` : '',
-    fired ? `${fired} fired` : '',
+    fired ? `${fired} shot${fired === 1 ? '' : 's'} fired` : '',
   ].filter(Boolean);
 
   // phones: everything past the first screen sits behind a small tab strip (CSS shows every panel on desktop)

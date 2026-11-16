@@ -147,6 +147,21 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
     starSeen.current = now;
   }, [shieldKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // desktop: the gun sits in flow under the carousel (sticky to the bottom edge). Scroll the stage so the box,
+  // its name and the raised gun are all on screen together instead of the gun covering the box.
+  const carRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const car = carRef.current;
+      if (!car || window.innerWidth <= 640 || window.innerHeight <= 500) return;
+      const front = car.closest('.saloon-front') as HTMLElement | null;
+      if (!front) return;
+      const need = car.getBoundingClientRect().bottom + 46 + 176 + 6 - window.innerHeight;
+      if (need > 4) front.scrollBy({ top: need, behavior: 'smooth' });
+    }, 120);
+    return () => clearTimeout(t);
+  }, [state.turnIdx, n, !!state.sheriff]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const shooterName = shooter?.name ?? 'Someone';
   const instr = n <= finaleN ? <span>Finale!</span>
     : hush ? (shooterId === me ? <span className="your-shot">You're up next</span> : <span><b>{shooterName}</b> is up next</span>)
@@ -164,7 +179,7 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
 
       {state.sheriff && <SheriffPanel state={state} me={me} send={send} skew={skew} on={on} finaleN={finaleN} />}
 
-      <div className={`carousel ${hush ? 'vt-hush' : ''}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onEnd} onPointerCancel={onEnd}>
+      <div ref={carRef} className={`carousel ${hush ? 'vt-hush' : ''}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onEnd} onPointerCancel={onEnd}>
         {alive.map((g, i) => {
           let d = i - ci;
           if (n > 2) { d = ((d % n) + n) % n; if (d > n / 2) d -= n; }
