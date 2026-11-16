@@ -1,5 +1,5 @@
 // Saddle Up: ready check under LAUNCH, then a synced 3-2-1 that opens the game for everyone who's ready.
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { RoomProps } from '../props';
 import type { Launch } from '../../shared/types';
@@ -21,7 +21,8 @@ const CHIP: Record<Status | 'wait', { icon: string; label: string }> = {
 let launchedFor = 0;
 let drummedFor = '';
 
-export default function SaddleUp({ state, me, send, skew }: RoomProps) {
+/** children: the host's other result buttons (Rematch / Another round), laid out in one row with Saddle up! */
+export default function SaddleUp({ state, me, send, skew, children }: RoomProps & { children?: ReactNode }) {
   const res = state.result;
   const launch = state.launch;
   const ready = launch?.ready ?? {};
@@ -63,11 +64,25 @@ export default function SaddleUp({ state, me, send, skew }: RoomProps) {
   const readyN = humans.filter((p) => ready[p.id] === 'ready').length;
   const set = (status: Status) => { sfx.click(); send({ t: 'ready', status }); };
 
+  const others = humans.filter((p) => p.id !== me);
+
   return (
     <div className="sad px-box">
       <div className="sad-head">
         <span className="gp-sec">Saddle up</span>
         <span className="sad-count">{readyN}/{humans.length} ready</span>
+        {others.length > 0 && (
+          <span className="sad-posse">
+            {others.map((p) => {
+              const st = (ready[p.id] as Status | undefined) ?? 'wait';
+              return (
+                <span key={p.id} className={`sad-pc ${st} ${p.connected ? '' : 'off'}`} title={`${p.name}: ${CHIP[st].label}`} role="img" aria-label={`${p.name}: ${CHIP[st].label}`}>
+                  <MiniBust p={p} className="sad-pc-bust" /><i aria-hidden>{CHIP[st].icon}</i>
+                </span>
+              );
+            })}
+          </span>
+        )}
       </div>
       <div className="sad-rows">
         {humans.map((p) => {
@@ -82,10 +97,10 @@ export default function SaddleUp({ state, me, send, skew }: RoomProps) {
         })}
       </div>
       {launch && meP && !meP.bot && (
-        <div className="sad-mine">
-          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'ready' ? 'on' : ''}`} aria-pressed={myStatus === 'ready'} onClick={() => set('ready')}>✓ Ready</button>
-          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'download' ? 'on' : ''}`} aria-pressed={myStatus === 'download'} onClick={() => set('download')}>⬇ Downloading</button>
-          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'buy' ? 'on' : ''} ${!owned && !myStatus ? 'hint' : ''}`} aria-pressed={myStatus === 'buy'} onClick={() => set('buy')}>💲 Need to buy</button>
+        <div className="sad-mine sad-seg" role="group" aria-label="Your status">
+          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'ready' ? 'on' : ''}`} aria-pressed={myStatus === 'ready'} aria-label="Ready" onClick={() => set('ready')}>✓ Ready</button>
+          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'download' ? 'on' : ''}`} aria-pressed={myStatus === 'download'} aria-label="Downloading" title="Downloading" onClick={() => set('download')}><i className="sad-ico" aria-hidden>⬇</i><span className="sad-lbl"> Downloading</span></button>
+          <button className={`px-btn px-btn-sm sad-b ${myStatus === 'buy' ? 'on' : ''} ${!owned && !myStatus ? 'hint' : ''}`} aria-pressed={myStatus === 'buy'} aria-label="Need to buy" title="Need to buy" onClick={() => set('buy')}><i className="sad-ico" aria-hidden>💲</i><span className="sad-lbl"> Need to buy</span></button>
         </div>
       )}
       {!owned && (
@@ -95,11 +110,20 @@ export default function SaddleUp({ state, me, send, skew }: RoomProps) {
           <a href={`${store}#game_area_purchase`} target="_blank" rel="noreferrer" title="Use 'Purchase as a gift' on the store page">Gift a copy</a>
         </div>
       )}
-      {launch && (amHost ? (
-        <button className="px-btn sad-go" disabled={counting && !stale && left > -2000} onClick={() => { sfx.spurs(); send({ t: 'saddleUp' }); }}>
-          Saddle up! <small>3-2-1, then Steam opens for everyone ready</small>
-        </button>
-      ) : <div className="wait-host sad-wait">When the posse's ready, the host calls "Saddle up!"</div>)}
+      {amHost ? (
+        <div className="sad-host">
+          {launch && (
+            <button className="px-btn sad-go" title="3-2-1, then Steam opens for everyone ready" disabled={counting && !stale && left > -2000} onClick={() => { sfx.spurs(); send({ t: 'saddleUp' }); }}>
+              Saddle up! <small>3-2-1, then Steam opens for everyone ready</small>
+            </button>
+          )}
+          {children}
+        </div>
+      ) : (
+        <div className="wait-host sad-wait">
+          {launch ? <>When the posse's ready, the host calls "Saddle up!" </> : null}The host can call a rematch or another round.
+        </div>
+      )}
 
       {show && !stale && createPortal(
         <div className="sad-cd" role="alert" aria-live="assertive">

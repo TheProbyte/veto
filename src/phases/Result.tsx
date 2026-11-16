@@ -20,6 +20,8 @@ import { useShotExtras } from './ShotExtras';
 import SaddleUp from './SaddleUp';
 import './gameplay.css';
 
+type Tab = 'badges' | 'stats' | 'record' | 'history';
+
 export default function Result({ state, me, send, skew, on }: RoomProps) {
   const res = state.result;
   useShotExtras(state, skew);
@@ -39,6 +41,15 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
     return () => ts.forEach(clearTimeout);
   }, []);
   const amHost = !!state.players.find((p) => p.id === me)?.host;
+  const [tab, setTab] = useState<Tab | null>(null);
+  // phones: a tapped section opens below the fold, so bring it into view
+  useEffect(() => {
+    if (!tab) return;
+    const el = document.getElementById(`rx-${tab}`);
+    if (!el || !matchMedia('(max-width: 640px)').matches) return;
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    requestAnimationFrame(() => el.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' }));
+  }, [tab]);
   const nameOf = (id: string) => state.players.find((p) => p.id === id)?.name ?? '???';
 
   const stats = useMemo(() => {
@@ -78,18 +89,28 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
   const hasRecord = !!rec && rec.rounds > 0;
   let badgeN = 0;
 
+  // phones: everything past the first screen sits behind a small tab strip (CSS shows every panel on desktop)
+  const tabs: { k: Tab; label: string; n?: number }[] = [];
+  if (badgeRows.length) tabs.push({ k: 'badges', label: 'Badges', n: badgeRows.reduce((a, r) => a + r.list.length, 0) });
+  if (stats.length || never || (duelMs !== undefined && duelMs >= 0)) tabs.push({ k: 'stats', label: 'Stats' });
+  if (hasRecord) tabs.push({ k: 'record', label: 'Record' });
+  if (hist.length) tabs.push({ k: 'history', label: 'History' });
+  const panel = (k: Tab) => ({ id: `rx-${k}`, className: `rx-panel ${tab === k ? 'open' : ''}` });
+
   return (
-    <div className="result gp-result">
+    <div className={`result gp-result ${tab ? 'rx-has-open' : ''}`}>
       <div className="result-backdrop" style={{ backgroundImage: `url(${heroArt(res.appid)})` }} />
       <div className="poster-wrap">
         <div className="poster px-poster-in" ref={posterRef}>
           {NAILS.map(([l, t], i) => <PixelSprite key={i} draw={drawNail} w={7} h={7} className={`px-nail ${nails > i ? 'on' : ''}`} style={{ left: l, top: t }} />)}
           <PixelPanel kind="paper" size={4} />
-          <div className="poster-wanted">WANTED</div>
-          <div className="poster-sub">— TONIGHT —</div>
-          <div className="poster-art"><PixelArt appid={res.appid} name={res.name} w={48} h={72} /></div>
-          <div className="poster-name">{res.name}</div>
-          <div className="poster-reward">REWARD: one good night with the posse</div>
+          <div className="poster-body">
+            <div className="poster-wanted">WANTED</div>
+            <div className="poster-sub">— TONIGHT —</div>
+            <div className="poster-art"><PixelArt appid={res.appid} name={res.name} w={48} h={72} /></div>
+            <div className="poster-name">{res.name}</div>
+            <div className="poster-reward">REWARD: one good night with the posse</div>
+          </div>
           {res.repeatCount >= 2 && (
             <div className="poster-repeat">You played this the last {res.repeatCount} times</div>
           )}
@@ -103,79 +124,95 @@ export default function Result({ state, me, send, skew, on }: RoomProps) {
         </a>
       </div>
 
-      <SaddleUp state={state} me={me} send={send} skew={skew} on={on} />
+      <SaddleUp state={state} me={me} send={send} skew={skew} on={on}>
+        {amHost && <>
+          <button className="btn-rematch px-btn" onClick={() => send({ t: 'rematch' })} title="Same games, same posse, straight back to the shootout">Rematch<span className="rx-long">: same games</span></button>
+          <button className="btn-again px-btn" onClick={() => send({ t: 'again' })}>Another round</button>
+        </>}
+      </SaddleUp>
 
-      {duelMs !== undefined && duelMs >= 0 && <div className="gp-duelwin">Won by quick-draw (<b>{duelMs} ms</b>)</div>}
-
-      {badgeRows.length > 0 && (
-        <div className="gp-badges px-box">
-          <div className="gp-sec">Badges</div>
-          {badgeRows.map(({ p, list }) => (
-            <div className="gp-badge-row" key={p.id}>
-              <b>{p.id === me ? 'You' : p.name}</b>
-              {list.map((b) => {
-                const k = badgeN++;
-                return (
-                  <span key={b} className="gp-badge" title={BADGES[b].desc} style={{ '--dl': `${1700 + k * 220}ms`, '--rot': `${(k * 37) % 7 - 3}deg` } as CSSProperties}>
-                    <i aria-hidden>{BADGES[b].icon}</i>{BADGES[b].label}
-                  </span>
-                );
-              })}
-            </div>
+      {tabs.length > 0 && (
+        <div className="rx-tabs" role="group" aria-label="More from this round">
+          {tabs.map(({ k, label, n }) => (
+            <button key={k} type="button" className={`rx-tab ${tab === k ? 'on' : ''}`} aria-expanded={tab === k} aria-controls={`rx-${k}`}
+              onClick={() => { sfx.click(); setTab((t) => (t === k ? null : k)); }}>
+              {label}{n ? <em>{n}</em> : null}<i aria-hidden>{tab === k ? '▴' : '▾'}</i>
+            </button>
           ))}
         </div>
       )}
 
-      {(stats.length > 0 || never) && (
-        <div className="stat-chips">
-          {stats.map((s) => <div className="chip px-box" key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
-          {never && (
-            <div className="chip px-box gp-never"><span>Never survives</span><b>{never.name}: nominated {never.noms}×, never won</b></div>
+      {badgeRows.length > 0 && (
+        <div {...panel('badges')}>
+          <div className="gp-badges px-box">
+            <div className="gp-sec">Badges</div>
+            {badgeRows.map(({ p, list }) => (
+              <div className="gp-badge-row" key={p.id}>
+                <b>{p.id === me ? 'You' : p.name}</b>
+                {list.map((b) => {
+                  const k = badgeN++;
+                  return (
+                    <span key={b} className="gp-badge" title={BADGES[b].desc} style={{ '--dl': `${1700 + k * 220}ms`, '--rot': `${(k * 37) % 7 - 3}deg` } as CSSProperties}>
+                      <i aria-hidden>{BADGES[b].icon}</i>{BADGES[b].label}
+                    </span>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(stats.length > 0 || never || (duelMs !== undefined && duelMs >= 0)) && (
+        <div {...panel('stats')}>
+          {duelMs !== undefined && duelMs >= 0 && <div className="gp-duelwin">Won by quick-draw (<b>{duelMs} ms</b>)</div>}
+          {(stats.length > 0 || never) && (
+            <div className="stat-chips">
+              {stats.map((s) => <div className="chip px-box" key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
+              {never && (
+                <div className="chip px-box gp-never"><span>Never survives</span><b>{never.name}: nominated {never.noms}×, never won</b></div>
+              )}
+            </div>
           )}
         </div>
       )}
 
-      {amHost ? (
-        <div className="gp-host">
-          <button className="btn-rematch px-btn" onClick={() => send({ t: 'rematch' })} title="Same games, same posse, straight back to the shootout">Rematch: same games</button>
-          <button className="btn-again px-btn" onClick={() => send({ t: 'again' })}>Another round</button>
-        </div>
-      ) : (
-        <div className="wait-host">The host can call a rematch or another round.</div>
-      )}
-
       {hasRecord && rec && (
-        <div className="gp-record px-box">
-          <div className="gp-sec">Posse record</div>
-          <div className="gp-record-top"><b>{rec.rounds}</b> round{rec.rounds === 1 ? '' : 's'} played at this table</div>
-          <div className="gp-record-grid">
-            {rec.wins?.length > 0 && (
-              <div>
-                <h4>TOP GAMES</h4>
-                <ol>{rec.wins.slice(0, 3).map((w) => <li key={w.appid}><span>{w.name}</span><em>{w.count} win{w.count === 1 ? '' : 's'}</em></li>)}</ol>
-              </div>
-            )}
-            {rec.vetoers?.length > 0 && (
-              <div>
-                <h4>BIGGEST VETOERS</h4>
-                <ol>{rec.vetoers.slice(0, 3).map((v) => <li key={v.pid}><span>{v.name}</span><em>{v.kills} kill{v.kills === 1 ? '' : 's'}</em></li>)}</ol>
-              </div>
-            )}
-            {longest && longest.best > 1 && (
-              <div className="gp-streak">Longest losing streak: <b>{longest.name}</b>, {longest.best} rounds without a win{longest.cur === longest.best ? ' (and counting)' : ''}</div>
-            )}
+        <div {...panel('record')}>
+          <div className="gp-record px-box">
+            <div className="gp-sec">Posse record</div>
+            <div className="gp-record-top"><b>{rec.rounds}</b> round{rec.rounds === 1 ? '' : 's'} played at this table</div>
+            <div className="gp-record-grid">
+              {rec.wins?.length > 0 && (
+                <div>
+                  <h4>TOP GAMES</h4>
+                  <ol>{rec.wins.slice(0, 3).map((w) => <li key={w.appid}><span>{w.name}</span><em>{w.count} win{w.count === 1 ? '' : 's'}</em></li>)}</ol>
+                </div>
+              )}
+              {rec.vetoers?.length > 0 && (
+                <div>
+                  <h4>BIGGEST VETOERS</h4>
+                  <ol>{rec.vetoers.slice(0, 3).map((v) => <li key={v.pid}><span>{v.name}</span><em>{v.kills} kill{v.kills === 1 ? '' : 's'}</em></li>)}</ol>
+                </div>
+              )}
+              {longest && longest.best > 1 && (
+                <div className="gp-streak">Longest losing streak: <b>{longest.name}</b>, {longest.best} rounds without a win{longest.cur === longest.best ? ' (and counting)' : ''}</div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {hist.length > 0 && (
-        <div className="history px-box">
-          <div className="history-label">Lately at this table</div>
-          <ol>
-            {hist.map((h) => (
-              <li key={h.t}><span>{h.name}</span><time>{new Date(h.t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time></li>
-            ))}
-          </ol>
+        <div {...panel('history')}>
+          <div className="history px-box">
+            <div className="history-label">Lately at this table</div>
+            <ol>
+              {hist.map((h) => (
+                <li key={h.t}><span>{h.name}</span><time>{new Date(h.t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time></li>
+              ))}
+            </ol>
+          </div>
         </div>
       )}
 
