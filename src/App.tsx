@@ -4,6 +4,7 @@ import Home from './phases/Home';
 import NameGate from './phases/NameGate';
 import Saloon from './scene/Saloon';
 import ContextMenu from './scene/ContextMenu';
+import LoadingScreen from './ui/LoadingScreen';
 import Lobby from './phases/Lobby';
 import Nominate from './phases/Nominate';
 import Veto from './phases/Veto';
@@ -32,7 +33,7 @@ function Room({ code }: { code: string }) {
   if (!name) {
     return <><ContextMenu /><NameGate code={code} onJoin={(n) => { try { localStorage.setItem('nah.name', n); } catch {} setName(n); }} /></>;
   }
-  if (!state) return <div className="loading">Pushing open the saloon doors…</div>;
+  if (!state) return <LoadingScreen label="Pushing open the saloon doors…" />;
   const p: RoomProps = { state, me, send, skew, on };
   const Phase = { lobby: Lobby, nominate: Nominate, veto: Veto, roulette: Roulette, duel: Duel, slide: Slide, vote: Vote, mini: Mini, result: Result }[state.phase];
   return (

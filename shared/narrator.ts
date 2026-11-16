@@ -14,6 +14,8 @@ export type NarrKey =
   | 'draft' | 'trade' | 'burn'
   | 'saddle' | 'straggler'
   | 'vote' | 'golf' | 'horse' | 'how_vote' | 'how_golf' | 'how_horse'
+  | 'vote_revolver' | 'vote_slide' | 'vote_golf' | 'vote_horse'
+  | 'horse_perfect' | 'horse_miss' | 'horse_ride' | 'golf_ace' | 'golf_water' | 'mini_win' | 'mini_close'
   | 'how_lobby' | 'how_nominate' | 'how_draft' | 'how_veto' | 'how_star' | 'how_slide' | 'how_cylinder' | 'how_duel' | 'how_result';
 
 export interface NarrLine { id: string; text: string; direction?: string }
@@ -186,6 +188,39 @@ export const NARRATOR: Record<NarrKey, { when: string; lines: NarrLine[] }> = {
   ] },
   horse: { when: 'Horse drop finale starts', lines: [
     { id: 'horse_1', text: 'Up on the roof, cowboys. Mind the horse.', direction: 'amused' },
+  ] },
+  vote_revolver: { when: 'Vote picked the revolver', lines: [
+    { id: 'vote_revolver_1', text: "Leavin' it to luck. Brave.", direction: 'dry' },
+  ] },
+  vote_slide: { when: 'Vote picked the whiskey slide', lines: [
+    { id: 'vote_slide_1', text: 'Whiskey it is. Steady hands, gentlemen.', direction: 'pleased' },
+  ] },
+  vote_golf: { when: 'Vote picked mini golf', lines: [
+    { id: 'vote_golf_1', text: 'Fetch the putters.', direction: 'amused' },
+  ] },
+  vote_horse: { when: 'Vote picked the horse drop', lines: [
+    { id: 'vote_horse_1', text: 'To the roof! Somebody warn the horses.', direction: 'excited' },
+  ] },
+  horse_perfect: { when: 'Someone lands a perfect horse drop (95+)', lines: [
+    { id: 'horse_perfect_1', text: "Now that's how you mount a horse!", direction: 'impressed' },
+  ] },
+  horse_miss: { when: 'Someone misses the horse', lines: [
+    { id: 'horse_miss_1', text: 'Oof. Right in the dirt.', direction: 'wincing' },
+  ] },
+  horse_ride: { when: 'Horse drop decided: the winner rides off', lines: [
+    { id: 'horse_ride_1', text: 'And off they ride!', direction: 'proud' },
+  ] },
+  golf_ace: { when: 'Someone gets a hole in one', lines: [
+    { id: 'golf_ace_1', text: 'Hole in one! Drinks are on you.', direction: 'delighted' },
+  ] },
+  golf_water: { when: 'A golf ball goes in the water (client-reported via miniMove is not enough: optional)', lines: [
+    { id: 'golf_water_1', text: "Splash. That's a stroke, partner.", direction: 'dry' },
+  ] },
+  mini_win: { when: 'A minigame (slide/golf/horse) is decided', lines: [
+    { id: 'mini_win_1', text: 'And that settles it.', direction: 'final' },
+  ] },
+  mini_close: { when: 'Minigame decided by a hair (top two scores very close)', lines: [
+    { id: 'mini_close_1', text: 'Close one. Real close.', direction: 'tense' },
   ] },
   how_vote: { when: 'EXPLAIN: finale vote', lines: [
     { id: 'how_vote_1', text: 'Pick how we settle it, and which game you play for. Lock it in.', direction: 'clear' },

@@ -82,8 +82,24 @@ export interface Settings {
   nominations: 'browse' | 'draft'; // browse the pool (default) or the card-hand draft (dealt 5 cards, play/burn/trade)
   sheriff: boolean;               // Sheriff role during the shootout (Pardon + Jail; posse can run them out of town)
   explain: boolean;               // the Barkeep explains each step out loud (how_* narration). Default on.
+  felt: number;                   // table felt theme, index into FELTS (host picks)
+  deck: number;                   // card-back theme, index into DECKS (host picks)
 }
-export const DEFAULT_SETTINGS: Settings = { turnSecs: 30, picks: 3, finale: 'slide', cylinderAt: 3, nominations: 'browse', sheriff: false, explain: true };
+export const FELTS = [
+  { label: 'Classic green', base: '#1f4a2c', light: '#2f6a3e', dark: '#12301c' },
+  { label: 'Royal blue', base: '#1d3558', light: '#2b4f80', dark: '#111f36' },
+  { label: 'Oxblood', base: '#4a1a1a', light: '#6b2626', dark: '#2c0e0e' },
+  { label: 'Purple velvet', base: '#3a2148', light: '#55306a', dark: '#22132b' },
+  { label: 'Midnight black', base: '#1c1c20', light: '#2c2c33', dark: '#0e0e11' },
+  { label: 'Desert tan', base: '#6b5534', light: '#8a6f45', dark: '#463620' },
+] as const;
+export const DECKS = [
+  { label: 'Saloon red', a: '#9e1b1b', b: '#e8d5b5' },
+  { label: 'Midnight blue', a: '#1e2c56', b: '#c9d4f0' },
+  { label: 'Gold filigree', a: '#5a3a12', b: '#ffcf5c' },
+  { label: 'Cactus', a: '#2c5a2a', b: '#e8d5b5' },
+] as const;
+export const DEFAULT_SETTINGS: Settings = { turnSecs: 30, picks: 3, finale: 'slide', cylinderAt: 3, nominations: 'browse', sheriff: false, explain: true, felt: 0, deck: 0 };
 
 /**
  * FINALE (in-game, not a setting): when the table is down to settings.cylinderAt games, everyone votes how to settle it
@@ -302,6 +318,7 @@ export interface PosseRecord {
   vetoers: { pid: string; name: string; kills: number }[];                       // all-time kills at this table, desc
   noms: { appid: number; name: string; noms: number; deaths: number; wins: number }[]; // nomination history ("never survives" = high noms, 0 wins)
   streaks: { pid: string; name: string; cur: number; best: number }[];           // rounds in a row without their nomination winning
+  bottles?: { pid: string; name: string; score: number }[];                      // lobby target practice: top 5 at this table
 }
 
 export interface HistoryEntry { appid: number; name: string; t: number }
@@ -383,7 +400,8 @@ export type Intent =
   | { t: 'golfDone'; strokes: number; ms: number } // mini golf: I holed out
   | { t: 'horseDone'; score: number; inputs: number[] } // horse drop: my landing score 0..100 + input timeline for replays
   | { t: 'miniMove'; data: number[] } // transient: my live state for others' ghosts (golf ball rest pos, etc.); relayed as RoomEvent 'mini'
-  | { t: 'skipExplain' }; // I've heard enough: when every connected human skips, the explanation hold ends // duel: champ fires; reaction = ms between DRAW appearing on their screen and the tap (client-measured); sent before DRAW = foul
+  | { t: 'skipExplain' } // I've heard enough: when every connected human skips, the explanation hold ends
+  | { t: 'bottles'; score: number }; // lobby target practice finished (0..99); keeps the table's top 5 // duel: champ fires; reaction = ms between DRAW appearing on their screen and the tap (client-measured); sent before DRAW = foul
 
 // server -> client
 export type ServerMsg =
@@ -407,6 +425,9 @@ export const headerArt = (appid: number) =>
   `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appid}/header.jpg`;
 export const heroArt = (appid: number) =>
   `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appid}/library_hero.jpg`;
+
+/** Steam screenshots of a game: GET /api/shots/<appid> → string[] of same-origin, CORS-enabled image URLs (cached). */
+export const shotsUrl = (appid: number) => `/api/shots/${appid}`;
 
 /** Same-origin, CORS-enabled proxy of Steam art (so canvases can read pixels for pixel-art processing). */
 export type ArtKind = 'box' | 'header' | 'hero' | 'capsule';
