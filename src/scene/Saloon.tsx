@@ -24,6 +24,19 @@ const EMOTE_SFX: Record<string, () => void> = {
   drink: () => { if (!playVoice('emote_drink', 'emote')) sfx.glass(); },
   angry: () => { sfx.steam(); playVoice('emote_angry', 'emote'); },
 };
+/** caption over the head (always) + an optional sound word that pops beside the face (delay ms) */
+const EMOTE_TXT: Record<string, { cap: string; word?: string; at?: number }> = {
+  tip: { cap: 'tips hat' },
+  spit: { cap: 'spits', word: 'PTOO!', at: 300 },
+  laugh: { cap: 'laughs', word: 'HA HA', at: 120 },
+  yeehaw: { cap: 'hollers', word: 'YEEHAW!', at: 200 },
+  clap: { cap: 'slow claps' },
+  shrug: { cap: 'shrugs' },
+  angry: { cap: 'fumes' },
+  drink: { cap: 'takes a drink', word: 'ahh…', at: 1400 },
+};
+/** how long the caption stays (the canvas animations run 1.6-2.1s) */
+const EMOTE_POP_MS = 2300;
 interface Toast { id: number; p: Player; text: string }
 interface Bubble { id: number; pid: string; text: string }
 
@@ -116,7 +129,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
       EMOTE_SFX[e.emote]?.();
       const id = Date.now() + Math.random();
       setPops((m) => ({ ...m, [e.pid]: { emote: e.emote, id } }));
-      window.setTimeout(() => setPops((m) => { if (m[e.pid]?.id !== id) return m; const n = { ...m }; delete n[e.pid]; return n; }), 2000);
+      window.setTimeout(() => setPops((m) => { if (m[e.pid]?.id !== id) return m; const n = { ...m }; delete n[e.pid]; return n; }), EMOTE_POP_MS);
     } else if (e.t === 'say') {
       const id = Date.now() + Math.random();
       setBubbles((m) => ({ ...m, [e.pid]: { id, pid: e.pid, text: String(e.text).slice(0, 120) } }));
@@ -345,16 +358,34 @@ function Seat({ p, me, L, seats, shooter, order, turnIdx, n, fresh, pop }: { p: 
         )}
         {p.host && <span className="seat-host" title="Host">HOST</span>}
       </div>
-      {pop && (
-        <div key={pop.id} className={`seat-pop emote-${pop.emote}`} aria-label={`${p.name}: ${EMOTES[pop.emote as keyof typeof EMOTES]?.label ?? pop.emote}`}>
-          <span className="seat-pop-icon">{EMOTES[pop.emote as keyof typeof EMOTES]?.icon}</span>
-          {pop.emote === 'laugh' && <span className="seat-ha">HA HA</span>}
-          {pop.emote === 'yeehaw' && <span className="seat-ha">YEEHAW!</span>}
-        </div>
-      )}
+      {pop && <EmotePop key={pop.id} emote={pop.emote} name={p.name} cx={g.x * P} high={rel >= 0 || !!g.back} flip={g.x * P > window.innerWidth * 0.5}
+        lift={pop.emote === 'tip' ? Math.round(13 * g.scale * P) : 0} />}
       {rel >= 0 && <div className={`seat-order ${rel === 0 ? 'now' : rel === 1 ? 'next' : ''}`}>{rel === 0 ? 'SHOOTING' : rel === 1 ? 'NEXT' : `#${rel + 1}`}</div>}
       {!p.connected && <div className="seat-away">stepped out</div>}
     </div>
+  );
+}
+
+/** caption + icon over the head (clamped to the viewport), and a bouncing sound word beside the face */
+function EmotePop({ emote, name, cx, high, flip, lift }: { emote: string; name: string; cx: number; high: boolean; flip: boolean; lift: number }) {
+  const t = EMOTE_TXT[emote];
+  const icon = EMOTES[emote as keyof typeof EMOTES]?.icon;
+  const vw = window.innerWidth;
+  return (
+    <>
+      <div className={`seat-pop emote-${emote} ${high ? 'high' : ''}`} role="status" aria-label={`${name} ${t?.cap ?? emote}`}
+        style={{ '--cx': `${Math.round(cx)}px`, '--rx': `${Math.round(vw - cx)}px`, '--lift': `${lift}px` } as CSSProperties}>
+        <div className="seat-pop-in">
+          <span className="seat-pop-icon" aria-hidden>{icon}</span>
+          <span className="seat-pop-cap" aria-hidden>{t?.cap ?? emote}</span>
+        </div>
+      </div>
+      {t?.word && (
+        <div className={`seat-word emote-${emote} ${flip ? 'flip' : ''}`} aria-hidden style={{ '--at': `${t.at ?? 0}ms` } as CSSProperties}>
+          {[...t.word].map((ch, i) => <i key={i} style={{ '--i': i } as CSSProperties}>{ch === ' ' ? '\u00a0' : ch}</i>)}
+        </div>
+      )}
+    </>
   );
 }
 

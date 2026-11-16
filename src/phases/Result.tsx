@@ -17,9 +17,10 @@ const drawNail: DrawFn = (c) => {
 const NAILS: [string, string][] = [['8px', '8px'], ['calc(100% - 22px)', '8px'], ['calc(50% - 7px)', '4px']];
 import { BUZZ, buzz } from '../scene/haptics';
 import { useShotExtras } from './ShotExtras';
+import SaddleUp from './SaddleUp';
 import './gameplay.css';
 
-export default function Result({ state, me, send, skew }: RoomProps) {
+export default function Result({ state, me, send, skew, on }: RoomProps) {
   const res = state.result;
   useShotExtras(state, skew);
   useEffect(() => { sfx.win(); buzz(BUZZ.win); }, []);
@@ -101,6 +102,8 @@ export default function Result({ state, me, send, skew }: RoomProps) {
           Don't own it? Store page
         </a>
       </div>
+
+      <SaddleUp state={state} me={me} send={send} skew={skew} on={on} />
 
       {duelMs !== undefined && duelMs >= 0 && <div className="gp-duelwin">Won by quick-draw (<b>{duelMs} ms</b>)</div>}
 

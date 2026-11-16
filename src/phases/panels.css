@@ -932,3 +932,193 @@
   .nh-rule-name { flex-basis: 100%; }
   .nh-rule-row { gap: 4px 8px; }
 }
+
+/* ================= table rules helper text ================= */
+.nh-rule-help { flex: 1 1 100%; padding-left: 96px; margin-top: -4px; font-family: var(--nh-px); font-size: 11.5px; line-height: 1.3; color: rgba(232,213,181,.6); }
+@media (max-width: 640px) { .nh-rule-help { padding-left: 0; margin-top: 0; } }
+.nh-btn-ghost { color: var(--nh-parch); text-shadow: none; font-family: var(--nh-px); font-weight: 700;
+  background: linear-gradient(180deg, #3a2414 0 4px, #24160b 4px calc(100% - 4px), #160d07 calc(100% - 4px));
+  box-shadow: 0 -2px 0 0 #120904, 0 2px 0 0 #120904, -2px 0 0 0 #120904, 2px 0 0 0 #120904, 0 6px 0 0 #0b0503, -2px 4px 0 0 #120904, 2px 4px 0 0 #120904, 0 8px 0 0 #120904; }
+.nh-btn-ghost:hover:not(:disabled) { box-shadow: 0 -2px 0 0 #120904, 0 2px 0 0 #120904, -2px 0 0 0 #120904, 2px 0 0 0 #120904, 0 6px 0 0 #0b0503, -2px 4px 0 0 #120904, 2px 4px 0 0 #120904, 0 8px 0 0 #120904; }
+
+/* ================= card-hand draft ================= */
+/* face-down card backs: others' hands + the deck */
+.dh-backs { position: relative; display: inline-block; flex: none; width: 22px; height: 14px; vertical-align: middle; }
+.dh-back { position: absolute; top: 0; left: calc(var(--i, 0) * 3px); width: 10px; height: 14px;
+  background: repeating-conic-gradient(#9e2a1e 0 25%, #6a130e 0 50%) 0 0 / 4px 4px; box-shadow: inset 0 0 0 1px #e8d5b5, 0 0 0 1px #120904; }
+.dh-back.is-ghost { background: none; box-shadow: inset 0 0 0 1px rgba(232,213,181,.25); }
+.dh-backs.is-big { width: 40px; height: 54px; }
+.dh-backs.is-big .dh-back { left: calc(var(--i, 0) * 2px); top: calc(6px - var(--i, 0) * 2px); width: 32px; height: 46px;
+  background: repeating-conic-gradient(#9e2a1e 0 25%, #6a130e 0 50%) 0 0 / 6px 6px; box-shadow: inset 0 0 0 2px #e8d5b5, inset 0 0 0 4px #6a130e, 0 0 0 2px #120904, 2px 2px 0 2px rgba(0,0,0,.4); }
+
+/* who holds what */
+.dh-table { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.dh-seat { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 8px 2px 4px; margin: 2px; font-family: var(--nh-px); font-size: 12px; color: rgba(232,213,181,.85);
+  background: rgba(0,0,0,.3); box-shadow: 0 -2px 0 0 #4a2c14, 0 2px 0 0 #4a2c14, -2px 0 0 0 #4a2c14, 2px 0 0 0 #4a2c14; }
+.dh-seat .nh-av { box-shadow: none; }
+.dh-seat-name { max-width: 10ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dh-seat b { font-family: 'Rye', serif; font-weight: 400; font-size: 13px; color: var(--nh-amber); min-width: 1ch; }
+.dh-seat.is-off { opacity: .5; }
+
+/* trades */
+.dh-offers { display: flex; flex-direction: column; gap: 10px; }
+.dh-trade { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin: 2px; color: #2a1a10;
+  background: repeating-conic-gradient(rgba(110,60,20,.1) 0 25%, transparent 0 50%) 0 0 / 4px 4px, #e3cca6;
+  box-shadow: 0 -2px 0 0 #8a5a2b, 0 2px 0 0 #8a5a2b, -2px 0 0 0 #8a5a2b, 2px 0 0 0 #8a5a2b, 5px 5px 0 rgba(0,0,0,.45);
+  animation: dh-trade-in .32s steps(4, end) both; }
+.dh-trade.is-active { box-shadow: 0 -2px 0 0 var(--nh-amber), 0 2px 0 0 var(--nh-amber), -2px 0 0 0 var(--nh-amber), 2px 0 0 0 var(--nh-amber), 0 0 0 4px #120904, 5px 5px 0 rgba(0,0,0,.45); }
+.dh-trade.is-out { color: var(--nh-parch); background: var(--nh-dither), #24160b; box-shadow: 0 -2px 0 0 #4a2c14, 0 2px 0 0 #4a2c14, -2px 0 0 0 #4a2c14, 2px 0 0 0 #4a2c14; }
+@keyframes dh-trade-in { from { transform: translateX(-24px) rotate(-2deg); opacity: 0; } }
+.dh-trade-art { position: relative; flex: none; width: 40px; aspect-ratio: 2 / 3; overflow: hidden; background: #160d08; box-shadow: 0 0 0 2px #2a1a10; transform: rotate(-4deg); }
+.dh-trade-art > .pxcover { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; }
+.dh-trade-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-family: var(--nh-px); font-size: 13px; line-height: 1.25; }
+.dh-trade-txt b { font-weight: 700; }
+.dh-trade-k { font-family: var(--nh-px); text-transform: uppercase; letter-spacing: .14em; font-size: 10px; color: #9e1b1b; }
+.dh-trade.is-out .dh-trade-k { color: var(--nh-amber); }
+.dh-trade-btns { display: flex; flex-wrap: wrap; gap: 0 4px; margin-top: 4px; }
+.dh-trade-btns .nh-btn { font-size: 13px; padding: 7px 10px; }
+.dh-offers.is-in { padding: 12px 14px 0; gap: 8px; }
+.dh-offers.is-in .dh-trade { animation-name: dh-trade-drop; }
+@keyframes dh-trade-drop { from { transform: translateY(-14px) rotate(1.5deg); opacity: 0; } }
+.dh-more { font-family: var(--nh-px); font-size: 11px; color: rgba(232,213,181,.6); text-align: center; }
+.dh-wait { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(232,213,181,.65); }
+
+/* my hand: a felt strip that sticks to the bottom of the scroller, just above the dock */
+.dh { position: sticky; bottom: -32px; z-index: 6; margin: 0 -22px -20px; display: flex; flex-direction: column;
+  background: repeating-conic-gradient(rgba(0,0,0,.14) 0 25%, transparent 0 50%) 0 0 / 4px 4px, #1b2f20;
+  box-shadow: 0 -4px 0 0 #120904, 0 -6px 0 0 #6b3f1c, 0 -10px 0 0 #120904, 0 -18px 24px rgba(0,0,0,.4); }
+.dh.is-give { background: repeating-conic-gradient(rgba(0,0,0,.14) 0 25%, transparent 0 50%) 0 0 / 4px 4px, #24361c; }
+.dh-fan { display: flex; align-items: flex-end; gap: 0; padding: 22px 16px 28px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scroll-padding: 0 16px; }
+.dh-fan::-webkit-scrollbar { display: none; }
+.dh-fan > :first-child { margin-left: auto; }
+.dh-fan > :last-child { margin-right: auto; }
+.dh-deck { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; margin-right: 30px; align-self: center; font-family: var(--nh-px); }
+.dh-deck-n { display: flex; flex-direction: column; align-items: center; line-height: 1; font-size: 9px; text-transform: uppercase; letter-spacing: .12em; color: rgba(232,213,181,.6); }
+.dh-deck-n b { font-family: 'Rye', serif; font-weight: 400; font-size: 15px; letter-spacing: 0; color: var(--nh-parch); }
+.dh-none { align-self: center; font-family: var(--nh-px); font-size: 13px; color: rgba(232,213,181,.5); padding: 30px 0; }
+
+.dh-card { --cw: 94px; position: relative; flex: none; width: var(--cw); padding: 0; margin: 0 0 0 -12px; border: 0; background: none; cursor: pointer; color: inherit; font: inherit;
+  scroll-snap-align: center; transform: translateY(var(--y, 0)) rotate(var(--r, 0deg)); transform-origin: 50% 130%; transition: transform .14s steps(3, end); -webkit-tap-highlight-color: transparent; }
+.dh-deck + .dh-card { margin-left: 0; }
+.dh-face { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 5px; text-align: center; color: #2a1a10;
+  background: repeating-conic-gradient(rgba(110,60,20,.08) 0 25%, transparent 0 50%) 0 0 / 4px 4px, #ead7b4;
+  box-shadow: 0 -2px 0 0 #120904, 0 2px 0 0 #120904, -2px 0 0 0 #120904, 2px 0 0 0 #120904, inset 0 0 0 2px #c9ad83, 4px 5px 0 rgba(0,0,0,.45); }
+.dh-pip { position: absolute; z-index: 2; top: 1px; left: 2px; padding: 0 2px; font-size: 11px; line-height: 1.1; color: #9e1b1b; background: #ead7b4; }
+.dh-card-art { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; background: #160d08; box-shadow: 0 0 0 2px #2a1a10; }
+.dh-card-art > .pxcover { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; }
+.dh-card-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.3em; font-family: var(--nh-px); font-weight: 700; font-size: 11.5px; line-height: 1.15; word-break: break-word; }
+.dh-card-meta { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 14px; font-family: var(--nh-px); font-size: 11px; }
+.dh-art-hrs, .dh-art-short { display: none; position: absolute; z-index: 1; bottom: 0; padding: 1px 3px 0; font-family: var(--nh-px); font-weight: 700; font-size: 9px; line-height: 1.1; }
+.dh-art-hrs { right: 0; color: #2a1a10; background: #ffd34d; }
+.dh-art-short { left: 0; color: #fff2d6; background: #9e1b1b; }
+.dh-card-meta b { font-family: 'Rye', serif; font-weight: 400; color: #7a1a14; }
+.dh-short { display: inline-flex; align-items: center; gap: 1px; padding: 0 2px; background: rgba(158,27,27,.15); }
+.dh-short .nh-av { box-shadow: none; }
+.dh-short small { font-size: 9px; }
+.dh-tag { position: absolute; z-index: 3; top: -10px; right: -6px; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 4px; font-family: var(--nh-px); font-size: 10px; color: #8fd0ff; background: #12324a; box-shadow: 0 0 0 2px #120904; }
+@media (hover: hover) {
+  .dh-card:hover:not(:disabled):not(.is-sel) { transform: translateY(calc(var(--y, 0px) - 10px)) rotate(var(--r, 0deg)); z-index: 2; }
+}
+.dh-card:focus-visible { outline: none; }
+.dh-card:focus-visible .dh-face { outline: 2px dashed var(--nh-parch); outline-offset: 4px; }
+.dh-card.is-sel { z-index: 3; transform: translateY(-16px) rotate(0deg); }
+.dh-card.is-sel .dh-face { box-shadow: 0 -2px 0 0 #120904, 0 2px 0 0 #120904, -2px 0 0 0 #120904, 2px 0 0 0 #120904, 0 0 0 4px var(--nh-amber), 0 0 0 6px #120904, inset 0 0 0 2px #c9ad83, 4px 8px 0 4px rgba(0,0,0,.4); }
+.dh-card.is-giving:not(.is-sel) .dh-face { animation: dh-give 1s steps(2) infinite; }
+@keyframes dh-give { 50% { box-shadow: 0 -2px 0 0 #120904, 0 2px 0 0 #120904, -2px 0 0 0 #120904, 2px 0 0 0 #120904, 0 0 0 4px #9fe07a, inset 0 0 0 2px #c9ad83, 4px 5px 0 rgba(0,0,0,.45); } }
+.dh-card.is-playing { opacity: .25; pointer-events: none; }
+
+/* burn: pixel flames lick up, the card chars and crumbles away */
+.dh-card.is-burning { cursor: default; z-index: 2; }
+.dh-card.is-burning .dh-face { animation: dh-char .95s steps(10, end) forwards; }
+@keyframes dh-char {
+  0% { filter: none; }
+  35% { filter: sepia(1) saturate(2.2) brightness(.85); clip-path: inset(0 0 0 0); }
+  55% { filter: sepia(1) brightness(.35); clip-path: polygon(0 12%, 18% 4%, 34% 14%, 52% 2%, 70% 12%, 86% 3%, 100% 10%, 100% 100%, 0 100%); }
+  80% { filter: brightness(.18); clip-path: polygon(0 52%, 14% 40%, 30% 56%, 48% 38%, 66% 54%, 82% 42%, 100% 50%, 100% 100%, 0 100%); transform: translateY(6px); }
+  100% { filter: brightness(.1); clip-path: polygon(0 100%, 20% 96%, 40% 100%, 60% 95%, 80% 100%, 100% 97%, 100% 100%, 0 100%); transform: translateY(12px); opacity: .4; }
+}
+.dh-fire { position: absolute; inset: 0; z-index: 4; pointer-events: none; overflow: visible; }
+.dh-fire::before { content: ''; position: absolute; left: -4px; right: -4px; bottom: 0; height: 0;
+  background: linear-gradient(0deg, #fff2a8 0 12%, #ffd34d 12% 30%, #ff8a3d 30% 55%, #c0392b 55% 78%, rgba(90,20,10,.0) 78%);
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 6px, rgba(0,0,0,.55) 6px 8px, #000 8px 12px, transparent 12px 14px);
+  mask: repeating-linear-gradient(90deg, #000 0 6px, rgba(0,0,0,.55) 6px 8px, #000 8px 12px, transparent 12px 14px);
+  animation: dh-flame-rise .95s steps(8, end) forwards, dh-flicker .14s steps(2) infinite; }
+@keyframes dh-flame-rise { 0% { height: 0; } 30% { height: 70%; } 60% { height: 115%; } 85% { height: 70%; opacity: 1; } 100% { height: 10%; opacity: 0; } }
+@keyframes dh-flicker { 50% { transform: scaleY(1.08) translateX(2px); } }
+.dh-fire i { position: absolute; bottom: 20%; width: 4px; height: 4px; background: #ffd34d; box-shadow: 0 0 0 1px #c0392b; opacity: 0; animation: dh-ember .7s steps(5, end) infinite; }
+.dh-fire i:nth-child(1) { left: 12%; animation-delay: .05s; }
+.dh-fire i:nth-child(2) { left: 30%; animation-delay: .25s; background: #ff8a3d; }
+.dh-fire i:nth-child(3) { left: 48%; animation-delay: .12s; }
+.dh-fire i:nth-child(4) { left: 64%; animation-delay: .35s; background: #fff2a8; }
+.dh-fire i:nth-child(5) { left: 80%; animation-delay: .18s; }
+.dh-fire i:nth-child(6) { left: 92%; animation-delay: .42s; background: #ff8a3d; }
+@keyframes dh-ember { 0% { opacity: 1; transform: translate(0, 0); } 100% { opacity: 0; transform: translate(6px, -70px); } }
+
+/* the action bar under the fan */
+.dh-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 6px; min-height: 58px; padding: 2px 12px 10px; font-family: var(--nh-px); }
+.dh-bar-txt { font-size: 13px; color: rgba(232,213,181,.85); text-align: center; }
+.dh-bar-txt b { color: var(--nh-parch); }
+.dh-bar.is-idle { gap: 4px 14px; }
+.dh-stat { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: rgba(232,213,181,.6); }
+.dh-stat b { font-family: 'Rye', serif; font-weight: 400; font-size: 15px; letter-spacing: 0; color: var(--nh-amber); margin-left: 4px; }
+.dh-bar.is-offer, .dh-bar.is-give { gap: 2px 8px; }
+.dh-targets { display: flex; gap: 6px; max-width: 100%; overflow-x: auto; scrollbar-width: none; padding: 4px; }
+.dh-targets::-webkit-scrollbar { display: none; }
+.dh-target { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 2px 10px 2px 4px; margin: 2px; border: 0; border-radius: 0; cursor: pointer;
+  font-family: var(--nh-px); font-size: 13px; font-weight: 700; color: var(--nh-parch); background: #2a1a10;
+  box-shadow: 0 -2px 0 0 var(--nh-amber), 0 2px 0 0 var(--nh-amber), -2px 0 0 0 var(--nh-amber), 2px 0 0 0 var(--nh-amber); }
+.dh-target:hover { background: #3a2414; }
+.dh-target:active { transform: translateY(2px); }
+.dh-target:focus-visible { outline: 2px dashed var(--nh-parch); outline-offset: 3px; }
+.dh-target .nh-av { box-shadow: none; }
+
+@media (max-width: 640px), (max-height: 520px) {
+  /* phones: a compact, swipeable hand: hours + short count ride on the art, so the card is art + name */
+  .dh { margin: 0 -14px -16px; bottom: -16px; }
+  .dh-fan { gap: 8px; padding: 14px 14px 10px; scroll-padding: 0 14px; }
+  .dh-card { --cw: 58px; margin-left: 0; transform: translateY(calc(var(--y, 0px) * .4)) rotate(calc(var(--r, 0deg) * .5)); transform-origin: 50% 100%; }
+  .dh-face { padding: 3px 3px 2px; gap: 2px; }
+  .dh-card-name { font-size: 9px; min-height: 2.3em; line-height: 1.15; }
+  .dh-card-meta { display: none; }
+  .dh-art-hrs, .dh-art-short { display: block; }
+  .dh-pip { font-size: 8px; top: 0; left: 1px; }
+  .dh-tag { top: -8px; right: -4px; font-size: 8.5px; }
+  .dh-deck { margin-right: 6px; }
+  .dh-deck-n b { font-size: 13px; }
+  .dh-backs.is-big { width: 28px; height: 38px; }
+  .dh-backs.is-big .dh-back { width: 22px; height: 32px; background-size: 4px 4px; }
+  .dh-card.is-sel { transform: translateY(-10px) rotate(0deg); }
+  .dh-bar { min-height: 48px; padding: 0 8px 6px; gap: 0 4px; }
+  .dh-bar.is-idle { min-height: 34px; }
+  .dh-bar > .nh-btn { flex: 1 1 0; min-width: 0; min-height: 40px; padding: 6px 4px; font-size: 14px; margin: 3px 3px 7px; }
+  .dh-bar.is-offer .nh-btn, .dh-bar.is-give .nh-btn { flex: 0 0 auto; padding: 6px 12px; }
+  .dh-bar-txt { font-size: 12px; flex: 1 1 100%; }
+  .dh-bar.is-idle .dh-bar-txt { flex: 1 1 auto; font-size: 11.5px; }
+  .dh-bar.is-offer .dh-targets { flex: 1 1 0; min-width: 0; }
+  .dh-target { min-height: 40px; }
+  .dh-trade { padding: 6px 8px; gap: 8px; }
+  .dh-trade-btns .nh-btn { min-height: 40px; font-size: 12.5px; padding: 6px 8px; }
+  .dh-offers.is-in { padding: 10px 10px 0; gap: 6px; }
+  .dh-offers.is-in .dh-trade { padding: 5px 8px 3px; }
+  .dh-offers.is-in .dh-trade-k { display: none; }
+  .dh-offers.is-in .dh-trade-art { width: 30px; }
+  .dh-offers.is-in .dh-trade-txt { font-size: 12px; }
+  .dh-offers.is-in .dh-trade-btns { margin-top: 2px; flex-wrap: nowrap; }
+  .dh-offers.is-in .dh-trade-btns .nh-btn { min-height: 36px; margin: 2px 2px 7px; }
+  .dh-offers.is-in .dh-trade-btns .nh-btn { font-family: var(--nh-px); font-weight: 700; font-size: 12px; line-height: 1.1; white-space: normal; }
+  .dh-offers.is-in .dh-trade-btns .nh-btn:first-child { flex: 1 1 auto; min-width: 0; }
+  .dh-seat { flex: none; min-height: 28px; font-size: 11px; }
+  .dh-table { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: -6px -14px 0; padding: 2px 14px; }
+  .dh-table::-webkit-scrollbar { display: none; }
+}
+@media (max-width: 340px), (max-height: 600px) and (max-width: 640px) {
+  .dh-card { --cw: 52px; }
+  .dh-fan { gap: 6px; padding-top: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dh-card { transition: none; }
+  .dh-trade { animation: none; }
+  .dh-card.is-giving:not(.is-sel) .dh-face { animation: none; box-shadow: 0 -2px 0 0 #120904, 0 2px 0 0 #120904, -2px 0 0 0 #120904, 2px 0 0 0 #120904, 0 0 0 4px #9fe07a, inset 0 0 0 2px #c9ad83; }
+  .dh-card.is-burning .dh-face, .dh-fire::before, .dh-fire i { animation: none; }
+}

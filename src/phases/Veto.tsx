@@ -9,9 +9,10 @@ import { sfx } from '../sfx';
 import TinStar from '../scene/TinStar';
 import { BUZZ, buzz } from '../scene/haptics';
 import { useShotExtras } from './ShotExtras';
+import SheriffPanel from './SheriffPanel';
 import './gameplay.css';
 
-export default function Veto({ state, me, send, skew }: RoomProps) {
+export default function Veto({ state, me, send, skew, on }: RoomProps) {
   const alive = state.board.filter((g) => g.alive);
   const dead = state.board.filter((g) => !g.alive);
   const n = alive.length;
@@ -25,10 +26,12 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
   const nameOf = (id?: string) => state.players.find((p) => p.id === id)?.name ?? '???';
   const settings = state.settings ?? DEFAULT_SETTINGS;
   const turnMs = Math.max(5, settings.turnSecs || 30) * 1000;
-  // how many games survive the shootout: 'last' = 1, 'duel' = 2, 'cylinder' = cylinderAt
+  // how many games survive the shootout: 'last' = 1, 'duel' = 2, 'cylinder' / 'slide' = cylinderAt
   const finaleN = settings.finale === 'last' ? 1 : settings.finale === 'duel' ? 2 : (settings.cylinderAt ?? 3);
-  const finaleTail = settings.finale === 'last' ? 'last one standing wins' : settings.finale === 'duel' ? 'then a quick-draw duel decides' : 'then the cylinder decides';
-  const finaleNow = settings.finale === 'last' ? 'last one standing' : settings.finale === 'duel' ? 'the quick-draw decides' : 'the cylinder decides';
+  const finaleTail = settings.finale === 'last' ? 'last one standing wins' : settings.finale === 'duel' ? 'then a quick-draw duel decides'
+    : settings.finale === 'slide' ? 'then a whiskey slide decides' : 'then the cylinder decides';
+  const finaleNow = settings.finale === 'last' ? 'last one standing' : settings.finale === 'duel' ? 'the quick-draw decides'
+    : settings.finale === 'slide' ? 'the whiskey slide decides' : 'the cylinder decides';
   /** the tin star is private: you only ever know about your own */
   const starred = (g?: { shieldedBy?: string[] }) => !!g?.shieldedBy?.includes(me);
   const revengeOn = myTurn && mine?.revengeOn ? mine.revengeOn : undefined;
@@ -119,6 +122,8 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
         {revengeOn && <div className="gp-revenge-tag">REVENGE on {nameOf(revengeOn)}</div>}
         {state.turnDeadline > 0 && <Fuse deadline={state.turnDeadline} skew={skew} mine={myTurn} turnMs={turnMs} />}
       </div>
+
+      {state.sheriff && <SheriffPanel state={state} me={me} send={send} skew={skew} on={on} finaleN={finaleN} />}
 
       <div className="carousel" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onEnd} onPointerCancel={onEnd}>
         {alive.map((g, i) => {

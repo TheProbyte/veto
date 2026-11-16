@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { BadgeId, BoardGame, Intent, Phase, Player, PoolGame, PosseRecord, ProfileStats, RoomEvent, RoomState, ServerMsg, Settings, ShotEvent } from '../shared/types';
-import { DEFAULT_SETTINGS, EMOTES, LOOK_COUNTS, SAY_MAX, lookUnlocked, randomLook, type EmoteId, type Look } from '../shared/types';
+import type { BadgeId, BoardGame, Intent, Launch, Phase, Player, PoolGame, PosseRecord, ProfileStats, RoomEvent, RoomState, ServerMsg, Settings, ShotEvent } from '../shared/types';
+import { DEFAULT_SETTINGS, DRAFT_BURNS, DRAFT_HAND, EMOTES, LOOK_COUNTS, SAY_MAX, lookUnlocked, randomLook, type EmoteId, type Look } from '../shared/types';
+import { SLIDE_ANIM_MS, SLIDE_INTRO_MS, SLIDE_RESULT_MS, SLIDE_TURN_MS, slideDist, slideMark, slideOutcome } from './slide';
 import { pickLine, type NarrKey } from '../shared/narrator';
 import { lastWords } from './lastwords';
 import { ownedGames, playerSummary, resolveSteamId, storeBits, type Env, type OwnedGame } from './steam';
@@ -13,9 +14,11 @@ const NARR_HIGH = 6;
 const NARR_PRI: Partial<Record<NarrKey, number>> = {
   kill: 1, crack: 2, misfire: 2, fuse_low: 2, first_blood: 3, spree: 4, slowmo: 5,
   draw: 6, cylinder: 6, rematch: 6, ricochet: 7, revenge: 8, duel: 7, duel_foul: 8, duel_win: 8, result: 9, repeat: 9,
+  slide: 7, slide_fall: 7, slide_close: 7, slide_win: 8, sheriff: 6, pardon: 7, jail: 6, ousted: 8,
+  draft: 6, trade: 4, burn: 3, saddle: 9, straggler: 7,
 };
 // phase-change cues always cut in (even over an equal/higher line still ringing)
-const CUES = new Set<NarrKey>(['draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat']);
+const CUES = new Set<NarrKey>(['draw', 'rematch', 'cylinder', 'duel', 'duel_win', 'duel_foul', 'result', 'repeat', 'slide', 'slide_win', 'saddle', 'ousted', 'draft']);
 const BOT_NAMES = ['Dusty Pete', 'One-Eye Jack', 'Calamity Sue', 'Tumbleweed Tim', 'Sagebrush Sal', 'Two-Bit Earl', 'Whiskey Nell', 'Slim Pickens', 'Rattlesnake Ray', 'Biscuit Bill'];
 const FAKE_LIB: [number, string][] = [[730, 'Counter-Strike 2'], [252490, 'Rust'], [892970, 'Valheim'], [1966720, 'Lethal Company'],
   [548430, 'Deep Rock Galactic'], [105600, 'Terraria'], [413150, 'Stardew Valley'], [632360, 'Risk of Rain 2'], [739630, 'Phasmophobia'],
@@ -42,7 +45,7 @@ class Bad extends Error {}
 /** Timed server work (bots, fuse warnings, delayed narration). All driven by the single DO alarm. */
 interface Job {
   at: number;
-  k: 'bnom' | 'baim' | 'bfire' | 'bstar' | 'bbang' | 'bemote' | 'fuse' | 'narr';
+  k: 'bnom' | 'baim' | 'bfire' | 'bstar' | 'bbang' | 'bemote' | 'fuse' | 'narr' | 'bslide' | 'boffer' | 'bpardon' | 'bjail' | 'bready';
   ph: Phase; // dropped as soon as the room leaves this phase
   pid?: string;
   seq?: number; // turn sequence (veto turn jobs)
@@ -62,8 +65,13 @@ interface X {
   fireMs: Record<string, number[]>; // human: ms from turn start to fire, this round
   misfires: string[];
   finaleAt: number; // veto: when to roll into the finale (after the last stamp lands)
+  slideAt: number; // slide: when to judge the round (after the last glass stops)
+  hands: Record<string, number[]>; // draft: PRIVATE hands (only ever sent to their owner)
+  deck: number[]; // draft: remaining deck, top first
+  offerSeq: number;
+  sheriffRot: number; // sheriff rotation counter
 }
-const freshX = (): X => ({ jobs: [], seq: 0, turnStart: 0, fireMs: {}, misfires: [], finaleAt: 0 });
+const freshX = (): X => ({ jobs: [], seq: 0, turnStart: 0, fireMs: {}, misfires: [], finaleAt: 0, slideAt: 0, hands: {}, deck: [], offerSeq: 0, sheriffRot: 0 });
 const emptyRecord = (): PosseRecord => ({ rounds: 0, wins: [], vetoers: [], noms: [], streaks: [] });
 
 function fresh(code: string): RoomState {
@@ -138,15 +146,20 @@ export class Room extends DurableObject<Env> {
   /** how many games remain when the shooting stops */
   threshold() {
     const st = this.s.settings;
-    return st.finale === 'cylinder' ? st.cylinderAt : st.finale === 'duel' ? 2 : 1;
+    return st.finale === 'cylinder' || st.finale === 'slide' ? st.cylinderAt : st.finale === 'duel' ? 2 : 1;
   }
 
   /** persist=false for cosmetic/transient updates (aim moves, partial pool loads) to save storage writes */
   broadcast(persist = true) {
-    const s = this.s;
+    const s = this.s, x = this.x;
     s.now = Date.now();
+    if (s.draft) {
+      s.draft.hand = [];
+      s.draft.handCounts = Object.fromEntries(Object.entries(x.hands).map(([k, h]) => [k, h.length]));
+      s.draft.deck = x.deck.length;
+    }
     this.schedule();
-    if (persist) this.ctx.storage.put('s', { ...s, _x: this.x });
+    if (persist) this.ctx.storage.put('s', { ...s, _x: x });
     // tin stars are private: everyone gets a redacted board; star owners get their own ids back
     const owners = new Set<string>();
     const strip = (g: BoardGame): BoardGame => {
@@ -155,18 +168,21 @@ export class Room extends DurableObject<Env> {
       return r;
     };
     for (const g of s.board) g.shieldedBy?.forEach((o) => owners.add(o));
-    const base = JSON.stringify({ ...s, board: s.board.map(strip) }); // serialize once, not once per player
+    // draft hands are private too: serialize the draft (minus hand) once and splice each player's own hand in at the end
+    const base = JSON.stringify({ ...s, board: s.board.map(strip), draft: undefined }); // serialize once, not once per player
+    const draftHead = s.draft ? JSON.stringify({ ...s.draft, hand: undefined }).slice(0, -1) + ',"hand":' : '';
+    const withDraft = (json: string, pid: string) => (draftHead ? `${json.slice(0, -1)},"draft":${draftHead}${JSON.stringify(x.hands[pid] ?? [])}}}` : json);
     const variants = new Map<string, string>();
     for (const ws of this.ctx.getWebSockets()) {
       const pid = this.pidOf(ws);
       if (!pid) continue;
-      let json = base;
-      if (owners.has(pid)) {
-        json = variants.get(pid) ?? '';
-        if (!json) {
-          json = JSON.stringify({ ...s, board: s.board.map((g) => (g.shieldedBy?.includes(pid) ? { ...strip(g), shieldedBy: [pid] } : strip(g))) });
-          variants.set(pid, json);
-        }
+      let json = variants.get(pid) ?? '';
+      if (!json) {
+        json = owners.has(pid)
+          ? JSON.stringify({ ...s, draft: undefined, board: s.board.map((g) => (g.shieldedBy?.includes(pid) ? { ...strip(g), shieldedBy: [pid] } : strip(g))) })
+          : base;
+        json = withDraft(json, pid);
+        variants.set(pid, json);
       }
       try { ws.send(`{"t":"state","you":${JSON.stringify(pid)},"state":${json}}`); } catch {}
     }
@@ -207,6 +223,10 @@ export class Room extends DurableObject<Env> {
       ts.push(s.roulette.startedAt + s.roulette.duration + 1500);
     } else if (s.phase === 'duel' && s.duel) {
       ts.push(s.duel.decidedAt ? s.duel.decidedAt + 3000 : s.duel.drawAt + 4000);
+    } else if (s.phase === 'slide' && s.slide) {
+      const sl = s.slide;
+      const t = sl.decidedAt ? sl.decidedAt + SLIDE_RESULT_MS : x.slideAt || sl.turnDeadline;
+      if (t) ts.push(t);
     }
     const at = ts.length ? Math.min(...ts) : 0;
     if (at === this.alarmAt) return;
@@ -242,6 +262,10 @@ export class Room extends DurableObject<Env> {
       // don't make everyone wait on an empty chair
       if (this.s.phase === 'veto' && this.s.turnOrder[this.s.turnIdx] === pid && this.s.turnDeadline) {
         this.s.turnDeadline = Math.min(this.s.turnDeadline, Date.now() + 4000);
+      }
+      const sl = this.s.slide;
+      if (this.s.phase === 'slide' && sl && !sl.decidedAt && sl.turn < sl.order.length && sl.champs[sl.order[sl.turn]] === pid && sl.turnDeadline) {
+        sl.turnDeadline = Math.min(sl.turnDeadline, Math.max(Date.now(), sl.turnDeadline - SLIDE_TURN_MS) + 4000);
       }
       this.narr('leave');
       this.broadcast();
@@ -312,6 +336,7 @@ export class Room extends DurableObject<Env> {
     }
     p.name = name;
     p.connected = true;
+    if (this.s.draft && this.s.phase === 'nominate' && !this.x.hands[pid]) this.dealTo(pid);
     ws.serializeAttachment({ pid });
     this.loadStats(pid);
     this.broadcast();
@@ -368,7 +393,7 @@ export class Room extends DurableObject<Env> {
           st.picks = clamp(v, 1, 5);
         }
         if (n.finale !== undefined) {
-          if (n.finale !== 'cylinder' && n.finale !== 'duel' && n.finale !== 'last') throw new Bad('Unknown finale.');
+          if (n.finale !== 'slide' && n.finale !== 'cylinder' && n.finale !== 'duel' && n.finale !== 'last') throw new Bad('Unknown finale.');
           st.finale = n.finale;
         }
         if (n.cylinderAt !== undefined) {
@@ -376,7 +401,20 @@ export class Room extends DurableObject<Env> {
           if (v !== 2 && v !== 3) throw new Bad('Cylinder spins at 2 or 3.');
           st.cylinderAt = v;
         }
+        if (n.nominations !== undefined) {
+          if (n.nominations !== 'browse' && n.nominations !== 'draft') throw new Bad('Browse or draft, partner.');
+          st.nominations = n.nominations;
+        }
+        if (n.sheriff !== undefined) {
+          if (typeof n.sheriff !== 'boolean') throw new Bad('Sheriff on or off.');
+          st.sheriff = n.sheriff;
+        }
+        const flip = st.nominations !== s.settings.nominations;
         s.settings = st;
+        if (flip && s.phase === 'nominate') {
+          if (st.nominations === 'draft') this.dealDraft();
+          else this.clearDraft();
+        }
         this.broadcast();
         return;
       }
@@ -426,18 +464,142 @@ export class Room extends DurableObject<Env> {
         if (!this.isHost(pid)) throw new Bad('Only the host deals.');
         if (!s.players.some((p) => p.steam && !p.steam.private)) throw new Bad('Nobody has a public library linked yet.');
         s.phase = 'nominate';
-        this.narr('deal');
-        this.scheduleBotNoms();
+        this.openNominations();
         this.broadcast();
         return;
       }
       case 'nominate': {
         if (s.phase !== 'nominate') throw new Bad('Not tossing games right now.');
         const b = s.board.find((x) => x.appid === i.appid);
+        const pitched = s.pitches.some((x) => x.appid === i.appid);
         if (b?.by.includes(pid)) {
           b.by = b.by.filter((x) => x !== pid);
           if (!b.by.length) s.board = s.board.filter((x) => x !== b);
-        } else this.addNom(pid, i.appid);
+          // pulling a played card back puts it in your hand again
+          if (s.draft && !pitched && b.tier !== 'pitch') (this.x.hands[pid] ??= []).push(b.appid);
+        } else {
+          if (s.draft && !pitched) throw new Bad('Play a card from your hand.');
+          this.addNom(pid, i.appid);
+        }
+        this.broadcast();
+        return;
+      }
+      case 'draftPlay': {
+        const d = this.draftFor(pid);
+        const appid = Number(i.appid);
+        if (!d.includes(appid)) throw new Bad("That card ain't in your hand.");
+        this.addNom(pid, appid); // throws at the pick limit before the card leaves the hand
+        this.dropCard(pid, appid);
+        this.broadcast();
+        return;
+      }
+      case 'draftBurn': {
+        const d = this.draftFor(pid);
+        const appid = Number(i.appid);
+        if (!d.includes(appid)) throw new Bad("That card ain't in your hand.");
+        const used = s.draft!.burns[pid] ?? 0;
+        if (used >= DRAFT_BURNS) throw new Bad(DRAFT_BURNS === 1 ? 'You already burned a card.' : `Only ${DRAFT_BURNS} burns apiece.`);
+        s.draft!.burns[pid] = used + 1;
+        this.dropCard(pid, appid);
+        this.draw(pid);
+        this.narr('burn');
+        this.broadcast();
+        return;
+      }
+      case 'draftOffer': {
+        const d = this.draftFor(pid);
+        const appid = Number(i.appid);
+        const to = String(i.to ?? '');
+        if (!d.includes(appid)) throw new Bad("That card ain't in your hand.");
+        if (to === pid || !this.x.hands[to] || !s.players.some((p) => p.id === to)) throw new Bad('Nobody to trade with there.');
+        const offers = s.draft!.offers;
+        if (offers.some((o) => o.from === pid && o.give === appid)) throw new Bad('Already offered that card.');
+        if (offers.filter((o) => o.from === pid).length >= 3) throw new Bad('Three offers on the table already.');
+        const o = { id: ++this.x.offerSeq, from: pid, to, give: appid, at: Date.now() };
+        offers.push(o);
+        if (s.players.find((p) => p.id === to)?.bot) this.job({ at: Date.now() + rnd(2000, 5000), k: 'boffer', ph: 'nominate', pid: to, n: o.id });
+        this.broadcast();
+        return;
+      }
+      case 'draftAccept': {
+        const d = this.draftFor(pid);
+        this.acceptOffer(pid, Number(i.offer), Number(i.give), d);
+        this.broadcast();
+        return;
+      }
+      case 'draftDecline': {
+        this.draftFor(pid);
+        const offers = s.draft!.offers;
+        const o = offers.find((x) => x.id === Number(i.offer));
+        if (!o) throw new Bad('That offer is gone.');
+        if (o.to !== pid && o.from !== pid) throw new Bad("That ain't your deal.");
+        s.draft!.offers = offers.filter((x) => x !== o);
+        this.broadcast();
+        return;
+      }
+      case 'pardon': {
+        const sh = this.sheriffPowers(pid);
+        if (sh.pardonUsed) throw new Bad('You already used your pardon.');
+        if (this.alive().length <= this.threshold()) throw new Bad('Too late for pardons. The finale decides now.');
+        const g = s.board.find((x) => x.appid === Number(i.appid));
+        if (!g || g.alive) throw new Bad('Only the dead need pardons.');
+        this.pardon(sh, g);
+        this.broadcast();
+        return;
+      }
+      case 'jail': {
+        const sh = this.sheriffPowers(pid);
+        if (sh.jailUsed) throw new Bad('The cell is already spoken for.');
+        const t = String(i.pid ?? '');
+        if (t === pid || !s.turnOrder.includes(t)) throw new Bad("Can't jail that one.");
+        if (sh.jailed === t) throw new Bad('Already behind bars.');
+        this.jail(sh, t);
+        this.broadcast();
+        return;
+      }
+      case 'oust': {
+        const sh = s.sheriff;
+        if (s.phase !== 'veto' || !sh) throw new Bad('No Sheriff to run out of town.');
+        if (sh.ousted) throw new Bad('Already run out of town.');
+        const p = this.me(pid);
+        if (p.bot || pid === sh.pid) throw new Bad("You can't vote on yourself, Sheriff.");
+        sh.votes = sh.votes.includes(pid) ? sh.votes.filter((v) => v !== pid) : [...sh.votes, pid];
+        this.checkOust();
+        this.broadcast();
+        return;
+      }
+      case 'slide': {
+        const sl = s.slide;
+        if (s.phase !== 'slide' || !sl || sl.decidedAt || this.x.slideAt || sl.turn >= sl.order.length) throw new Bad('No glass to slide right now.');
+        if (sl.champs[sl.order[sl.turn]] !== pid) throw new Bad("Not your glass, partner.");
+        if (Date.now() < sl.turnDeadline - SLIDE_TURN_MS - 250) throw new Bad('Steady... wait for it.');
+        const power = Number(i.power);
+        if (!Number.isFinite(power)) throw new Bad('Bad slide.');
+        this.slideGlass(power);
+        this.broadcast();
+        return;
+      }
+      case 'ready': {
+        if (s.phase !== 'result' || !s.launch) throw new Bad('Nothing to saddle up for yet.');
+        const p = this.me(pid);
+        if (p.bot) return;
+        if (i.status !== 'ready' && i.status !== 'buy' && i.status !== 'download') throw new Bad('Bad status.');
+        if (s.launch.ready[pid] === i.status) return;
+        s.launch.ready[pid] = i.status;
+        this.broadcast();
+        return;
+      }
+      case 'saddleUp': {
+        const l = s.launch;
+        if (s.phase !== 'result' || !l) throw new Bad('Nothing to saddle up for yet.');
+        if (!this.isHost(pid)) throw new Bad('Only the host calls saddle up.');
+        const now = Date.now();
+        if (l.launchAt && now < l.launchAt + 2000) throw new Bad('Already saddlin’ up.');
+        l.launchAt = now + 4000;
+        this.narr('saddle');
+        if (s.players.some((p) => !p.bot && p.connected && l.ready[p.id] !== 'ready')) {
+          this.job({ at: now + 3000, k: 'narr', ph: 'result', key: 'straggler' });
+        }
         this.broadcast();
         return;
       }
@@ -486,6 +648,7 @@ export class Room extends DurableObject<Env> {
         if (!this.isHost(pid)) throw new Bad('Only the host calls the draw.');
         const added = this.autofill();
         if (!s.board.length) throw new Bad('Nothing on the table to shoot at.');
+        this.clearDraft();
         if (added) {
           this.narr('house');
           this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' });
@@ -542,10 +705,10 @@ export class Room extends DurableObject<Env> {
         if (!this.isHost(pid)) throw new Bad('Only the host can deal again.');
         s.phase = 'nominate';
         s.board = []; s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.result = undefined; s.duel = undefined;
+        s.slide = undefined; s.sheriff = undefined; s.launch = undefined; this.x.slideAt = 0;
         s.turnOrder = []; s.turnIdx = 0; s.turnDeadline = 0; s.aim = undefined;
         for (const p of s.players) p.revengeOn = undefined;
-        this.narr('deal');
-        this.scheduleBotNoms();
+        this.openNominations();
         this.broadcast();
         return;
       }
@@ -568,6 +731,144 @@ export class Room extends DurableObject<Env> {
     else s.board.push({ appid: g.appid, name: g.name, tier: g.tier, by: [pid], alive: true });
   }
 
+  // ---------- draft ----------
+  openNominations() {
+    if (this.s.settings.nominations === 'draft') { this.dealDraft(); this.narr('draft'); }
+    else { this.clearDraft(); this.narr('deal'); }
+    this.scheduleBotNoms();
+  }
+
+  dealDraft() {
+    const s = this.s, x = this.x;
+    const onBoard = new Set(s.board.map((b) => b.appid));
+    const grp = (tier: PoolGame['tier'], coop: boolean) => shuffle(s.pool.filter((g) => g.tier === tier && (g.coop !== false) === coop && !onBoard.has(g.appid)).map((g) => g.appid));
+    x.deck = [...grp('all', true), ...grp('all', false), ...grp('almost', true), ...grp('almost', false)];
+    x.hands = {};
+    s.draft = { hand: [], handCounts: {}, burns: {}, deck: 0, offers: [] };
+    // deal round-robin so a small pool still spreads evenly
+    const seats = s.players.filter((p) => p.connected).map((p) => (x.hands[p.id] = []));
+    for (let k = 0; k < DRAFT_HAND; k++) for (const h of seats) { const a = this.top(); if (a !== undefined) h.push(a); }
+  }
+
+  dealTo(pid: string) {
+    const h = (this.x.hands[pid] = this.x.hands[pid] ?? []);
+    while (h.length < DRAFT_HAND && this.draw(pid)) { /* deal */ }
+  }
+
+  /** top of the deck into pid's hand (skipping anything that ended up on the board); false if the deck is empty */
+  draw(pid: string): boolean {
+    const a = this.top();
+    if (a === undefined) return false;
+    (this.x.hands[pid] ??= []).push(a);
+    return true;
+  }
+  top(): number | undefined {
+    const x = this.x;
+    while (x.deck.length) {
+      const a = x.deck.shift()!;
+      if (!this.s.board.some((b) => b.appid === a)) return a;
+    }
+    return undefined;
+  }
+
+  clearDraft() {
+    this.s.draft = undefined;
+    this.x.hands = {};
+    this.x.deck = [];
+  }
+
+  /** my hand, or throws if no draft is running */
+  draftFor(pid: string): number[] {
+    if (this.s.phase !== 'nominate' || !this.s.draft) throw new Bad('No cards on the table.');
+    this.me(pid);
+    return this.x.hands[pid] ?? [];
+  }
+
+  /** remove a card from a hand and any open offers of it */
+  dropCard(pid: string, appid: number) {
+    const h = this.x.hands[pid];
+    if (h) this.x.hands[pid] = h.filter((a) => a !== appid);
+    if (this.s.draft) this.s.draft.offers = this.s.draft.offers.filter((o) => !(o.from === pid && o.give === appid));
+  }
+
+  acceptOffer(pid: string, id: number, give: number, mine: number[]) {
+    const s = this.s, x = this.x;
+    const offers = s.draft!.offers;
+    const o = offers.find((q) => q.id === id);
+    if (!o) throw new Bad('That offer is gone.');
+    if (o.to !== pid) throw new Bad("That offer ain't for you.");
+    if (!mine.includes(give)) throw new Bad("That card ain't in your hand.");
+    const theirs = x.hands[o.from] ?? [];
+    if (!theirs.includes(o.give)) { s.draft!.offers = offers.filter((q) => q !== o); throw new Bad('They already parted with that card.'); }
+    x.hands[o.from] = [...theirs.filter((a) => a !== o.give), give];
+    x.hands[pid] = [...mine.filter((a) => a !== give), o.give];
+    s.draft!.offers = offers.filter((q) => q.give !== o.give && q.give !== give);
+    this.narr('trade');
+  }
+
+  // ---------- sheriff ----------
+  appointSheriff() {
+    const s = this.s;
+    s.sheriff = undefined;
+    if (!s.settings.sheriff) return;
+    const cands = s.players.filter((p) => p.connected && s.turnOrder.includes(p.id)).sort((a, b) => a.seat - b.seat);
+    if (!cands.length) return;
+    const sh = cands[this.x.sheriffRot++ % cands.length];
+    s.sheriff = { pid: sh.id, pardonUsed: false, jailUsed: false, votes: [], ousted: false };
+    const now = Date.now();
+    this.job({ at: now + 5200, k: 'narr', ph: 'veto', key: 'sheriff' });
+    if (sh.bot && Math.random() < 0.3) this.job({ at: now + rnd(6000, 20000), k: 'bjail', ph: 'veto', pid: sh.id });
+  }
+
+  sheriffPowers(pid: string) {
+    const sh = this.s.sheriff;
+    if (this.s.phase !== 'veto' || !sh) throw new Bad('No Sheriff in this town.');
+    if (sh.pid !== pid) throw new Bad("You ain't the Sheriff.");
+    if (sh.ousted) throw new Bad('You were run out of town. No badge, no powers.');
+    return sh;
+  }
+
+  pardon(sh: NonNullable<RoomState['sheriff']>, g: BoardGame) {
+    sh.pardonUsed = true;
+    g.alive = true; g.killedBy = undefined; g.lastWords = undefined; g.cracks = 0;
+    this.narr('pardon');
+  }
+
+  jail(sh: NonNullable<RoomState['sheriff']>, t: string) {
+    sh.jailUsed = true;
+    sh.jailed = t;
+    this.narr('jail');
+  }
+
+  checkOust() {
+    const s = this.s, sh = s.sheriff;
+    if (!sh || sh.ousted) return;
+    const voters = s.players.filter((p) => !p.bot && p.connected && p.id !== sh.pid).map((p) => p.id);
+    sh.votes = sh.votes.filter((v) => voters.includes(v));
+    if (!voters.length || sh.votes.length < Math.floor(voters.length / 2) + 1) return;
+    sh.ousted = true;
+    sh.jailed = undefined; // their powers (and an unserved sentence) go with the badge
+    this.narr('ousted');
+    if (s.turnOrder[s.turnIdx] === sh.pid && this.alive().length > this.threshold() && s.turnDeadline) {
+      this.skipBlocked(true);
+      this.armTurn(0);
+    }
+  }
+
+  /** move the turn off players who must sit out (jailed once, ousted Sheriff always). Bounded: never loops forever. */
+  skipBlocked(step: boolean) {
+    const s = this.s, n = s.turnOrder.length;
+    if (!n) return;
+    let idx = step ? (s.turnIdx + 1) % n : s.turnIdx % n;
+    for (let k = 0; k < n; k++) {
+      const id = s.turnOrder[idx], sh = s.sheriff;
+      if (sh?.ousted && id === sh.pid) { idx = (idx + 1) % n; continue; }
+      if (sh?.jailed === id) { sh.jailed = undefined; idx = (idx + 1) % n; continue; }
+      break;
+    }
+    s.turnIdx = idx;
+  }
+
   pinStar(p: Player, g: BoardGame) {
     // private: stacking is allowed and reveals nothing; each star blocks one shot, first in first out
     g.shieldedBy = [...(g.shieldedBy ?? []), p.id];
@@ -585,7 +886,7 @@ export class Room extends DurableObject<Env> {
       if (k < s.turnIdx) s.turnIdx--;
       if (!s.turnOrder.length && s.phase === 'veto') s.turnOrder = s.players.filter((p) => p.connected).map((p) => p.id);
       s.turnIdx = s.turnOrder.length ? s.turnIdx % s.turnOrder.length : 0;
-      if (wasShooter && s.phase === 'veto' && s.turnDeadline && this.alive().length > this.threshold()) this.armTurn(0);
+      if (wasShooter && s.phase === 'veto' && s.turnDeadline && this.alive().length > this.threshold()) { this.skipBlocked(false); this.armTurn(0); }
     }
     for (const g of s.board) {
       if (g.by.includes(id)) {
@@ -599,6 +900,20 @@ export class Room extends DurableObject<Env> {
     }
     for (const p of s.players) if (p.revengeOn === id) p.revengeOn = undefined;
     for (const pt of s.pitches) delete pt.votes[id];
+    if (s.draft) {
+      const h = this.x.hands[id];
+      delete this.x.hands[id];
+      if (h) this.x.deck.push(...h); // their cards go back under the deck
+      s.draft.offers = s.draft.offers.filter((o) => o.from !== id && o.to !== id);
+      delete s.draft.burns[id];
+    }
+    if (s.sheriff) {
+      s.sheriff.votes = s.sheriff.votes.filter((v) => v !== id);
+      if (s.sheriff.jailed === id) s.sheriff.jailed = undefined;
+      if (s.sheriff.pid === id) s.sheriff = undefined;
+      else this.checkOust();
+    }
+    if (s.launch) delete s.launch.ready[id];
     this.x.jobs = this.x.jobs.filter((j) => j.pid !== id);
     this.libs.delete(id);
     this.ctx.storage.delete(`lib:${id}`);
@@ -661,6 +976,14 @@ export class Room extends DurableObject<Env> {
       case 'bnom': {
         if (s.phase !== 'nominate') return false;
         if (s.board.filter((x) => x.by.includes(b.id)).length >= s.settings.picks) return false;
+        if (s.draft) {
+          const h = this.x.hands[b.id];
+          if (!h?.length) return false;
+          const a = pick(h);
+          this.addNom(b.id, a);
+          this.dropCard(b.id, a);
+          return true;
+        }
         const opts = s.pool.slice(0, 20).filter((g) => !s.board.some((x) => x.appid === g.appid && x.by.includes(b.id)));
         if (!opts.length) return false;
         this.addNom(b.id, pick(opts).appid);
@@ -692,6 +1015,47 @@ export class Room extends DurableObject<Env> {
         this.bang(b.id, j.n ?? 400);
         return true;
       }
+      case 'bslide': {
+        const sl = s.slide;
+        if (s.phase !== 'slide' || !sl || sl.decidedAt || this.x.slideAt || sl.turn >= sl.order.length) return false;
+        if (j.seq !== sl.round * 100 + sl.turn || sl.champs[sl.order[sl.turn]] !== b.id) return false;
+        // aim for the mark with a shaky hand (sum of 3 uniforms ~ gaussian, sd ~0.05)
+        const noise = (Math.random() + Math.random() + Math.random() - 1.5) * 0.1;
+        this.slideGlass(clamp(sl.mark / 1.18 + noise, 0, 1));
+        return true;
+      }
+      case 'boffer': {
+        const d = s.draft;
+        const o = d?.offers.find((q) => q.id === j.n && q.to === b.id);
+        if (!d || !o) return false;
+        const h = this.x.hands[b.id] ?? [];
+        if (h.length && Math.random() < 0.5) {
+          try { this.acceptOffer(b.id, o.id, pick(h), h); } catch { d.offers = d.offers.filter((q) => q !== o); }
+        } else d.offers = d.offers.filter((q) => q !== o);
+        return true;
+      }
+      case 'bpardon': {
+        const sh = s.sheriff;
+        if (s.phase !== 'veto' || !sh || sh.pid !== b.id || sh.ousted || sh.pardonUsed) return false;
+        if (this.alive().length <= this.threshold()) return false;
+        const dead = s.board.filter((g) => !g.alive);
+        if (!dead.length) return false;
+        this.pardon(sh, pick(dead));
+        return true;
+      }
+      case 'bjail': {
+        const sh = s.sheriff;
+        if (s.phase !== 'veto' || !sh || sh.pid !== b.id || sh.ousted || sh.jailUsed) return false;
+        const humans = s.turnOrder.filter((id) => id !== b.id && !s.players.find((p) => p.id === id)?.bot);
+        if (!humans.length) return false;
+        this.jail(sh, pick(humans));
+        return true;
+      }
+      case 'bready': {
+        if (s.phase !== 'result' || !s.launch) return false;
+        s.launch.ready[b.id] = 'ready';
+        return true;
+      }
     }
     return false;
   }
@@ -709,11 +1073,13 @@ export class Room extends DurableObject<Env> {
     for (const p of s.players) { p.shieldUsed = false; p.revengeOn = undefined; p.badges = undefined; }
     s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; g.cracks = 0; g.lastWords = undefined; });
     s.shots = []; s.lastShot = undefined; s.roulette = undefined; s.duel = undefined; s.result = undefined;
-    x.fireMs = {}; x.misfires = []; x.finaleAt = 0;
+    s.slide = undefined; s.launch = undefined; s.draft = undefined;
+    x.fireMs = {}; x.misfires = []; x.finaleAt = 0; x.slideAt = 0;
     s.turnOrder = shuffle(s.players.filter((p) => p.connected).map((p) => p.id));
     if (!s.turnOrder.length) s.turnOrder = [pid];
     s.turnIdx = 0;
     s.phase = 'veto';
+    this.appointSheriff();
     if (s.board.length <= this.threshold()) {
       this.enterFinale();
       return;
@@ -794,7 +1160,12 @@ export class Room extends DurableObject<Env> {
     }
     s.lastShot = ev;
     s.shots.push(ev);
-    if (s.turnOrder.length) s.turnIdx = (s.turnIdx + 1) % s.turnOrder.length;
+    this.skipBlocked(true);
+    const sh = s.sheriff;
+    if (sh && !sh.ousted && !sh.pardonUsed && g.killedBy === actor && !g.alive && s.shots.filter(isKill).length === 3
+      && s.players.find((p) => p.id === sh.pid)?.bot && Math.random() < 0.35) {
+      this.job({ at: Date.now() + rnd(2500, 5000), k: 'bpardon', ph: 'veto', pid: sh.pid });
+    }
     if (this.alive().length <= this.threshold()) {
       s.turnDeadline = 0; // alarm rolls into the finale after the stamp lands
       this.x.finaleAt = Date.now() + SHOT_PAUSE + 600;
@@ -811,6 +1182,7 @@ export class Room extends DurableObject<Env> {
     const alive = this.alive();
     if (alive.length <= 1) return this.finish((alive[0] ?? s.board[0]).appid);
     if (s.settings.finale === 'duel' && alive.length === 2 && this.startDuel(alive[0], alive[1])) return;
+    if (s.settings.finale === 'slide' && alive.length <= 3 && this.startSlide(alive)) return;
     this.startRoulette(alive);
   }
 
@@ -821,6 +1193,89 @@ export class Room extends DurableObject<Env> {
     s.roulette = { chambers: shuffle(chambers), target: Math.floor(Math.random() * 6), startedAt: Date.now() + 400, duration: SPIN_MS };
     s.phase = 'roulette';
     this.narr('cylinder');
+  }
+
+  // ---------- whiskey slide ----------
+  startSlide(games: BoardGame[]): boolean {
+    const s = this.s;
+    const humans = this.humansOnline();
+    const pool = s.players.filter((p) => p.connected && (!p.bot || humans)).map((p) => p.id);
+    if (!pool.length) return false;
+    const champs: (string | undefined)[] = games.map(() => undefined);
+    const used = new Set<string>();
+    // 1) each game's (latest) nominator, distinct  2) a free player  3) doubling up: a nominator, else anyone
+    games.forEach((g, k) => {
+      const c = [...g.by].reverse().find((id) => !used.has(id) && pool.includes(id));
+      if (c) { champs[k] = c; used.add(c); }
+    });
+    games.forEach((g, k) => {
+      if (champs[k]) return;
+      const free = pool.filter((id) => !used.has(id));
+      const c = free.length ? pick(free) : ([...g.by].reverse().find((id) => pool.includes(id)) ?? pick(pool));
+      champs[k] = c; used.add(c);
+    });
+    const now = Date.now();
+    s.slide = {
+      games: games.map((g) => g.appid), champs: champs as string[], order: shuffle(games.map((_, k) => k)),
+      turn: 0, turnDeadline: now + SLIDE_INTRO_MS + SLIDE_TURN_MS, mark: slideMark(), throws: [], round: 1,
+    };
+    this.x.slideAt = 0;
+    s.phase = 'slide';
+    this.narr('slide');
+    this.botSlide();
+    return true;
+  }
+
+  /** queue the current slider's release if it's a bot */
+  botSlide() {
+    const sl = this.s.slide;
+    if (!sl || sl.turn >= sl.order.length) return;
+    const c = sl.champs[sl.order[sl.turn]];
+    if (!this.s.players.find((p) => p.id === c)?.bot) return;
+    this.job({ at: sl.turnDeadline - SLIDE_TURN_MS + rnd(2000, 4500), k: 'bslide', ph: 'slide', pid: c, seq: sl.round * 100 + sl.turn });
+  }
+
+  slideGlass(power: number) {
+    const sl = this.s.slide!;
+    const now = Date.now();
+    power = clamp(power, 0, 1);
+    const dist = slideDist(power);
+    const fell = dist > 1.0;
+    sl.throws.push({ game: sl.games[sl.order[sl.turn]], power: Math.round(power * 1e4) / 1e4, dist: Math.round(dist * 1e4) / 1e4, fell, at: now });
+    if (fell) this.job({ at: now + SLIDE_ANIM_MS - 400, k: 'narr', ph: 'slide', key: 'slide_fall' });
+    else if (Math.abs(dist - sl.mark) < 0.02) this.job({ at: now + SLIDE_ANIM_MS - 300, k: 'narr', ph: 'slide', key: 'slide_close' });
+    sl.turn++;
+    if (sl.turn < sl.order.length) {
+      sl.turnDeadline = now + SLIDE_ANIM_MS + SLIDE_TURN_MS;
+      this.botSlide();
+    } else {
+      sl.turnDeadline = 0;
+      this.x.slideAt = now + SLIDE_ANIM_MS; // judge once the last glass stops
+    }
+  }
+
+  /** everyone has slid and the last glass has stopped: crown a winner or re-slide the tied (or all, if everyone fell) */
+  decideSlide() {
+    const sl = this.s.slide;
+    this.x.slideAt = 0;
+    if (!sl || sl.decidedAt) return;
+    const ids = sl.order.map((k) => sl.games[k]);
+    const r = slideOutcome(sl.throws, ids, sl.mark);
+    const now = Date.now();
+    if ('winner' in r) {
+      sl.winner = r.winner;
+      sl.decidedAt = now;
+      this.narr('slide_win');
+      return;
+    }
+    sl.round++;
+    sl.throws = sl.throws.filter((t) => !r.tied.includes(t.game));
+    sl.order = shuffle(r.tied.map((a) => sl.games.indexOf(a)));
+    sl.turn = 0;
+    sl.mark = slideMark();
+    sl.turnDeadline = now + SLIDE_INTRO_MS + SLIDE_TURN_MS;
+    this.narr('slide');
+    this.botSlide();
   }
 
   // ---------- duel ----------
@@ -891,6 +1346,7 @@ export class Room extends DurableObject<Env> {
       if (e.revenge) avengers.add(e.actor);
     }
     const duelist = s.duel?.winner === appid ? s.duel.champs[s.duel.games.indexOf(appid)] : undefined;
+    const slider = s.slide?.winner === appid ? s.slide.champs[s.slide.games.indexOf(appid)] : undefined; // counts as a duel won (no badge)
     const badges: Record<string, BadgeId[]> = {};
     const give = (pid: string, b: BadgeId) => { if (s.players.some((p) => p.id === pid)) (badges[pid] ??= []).includes(b) || badges[pid].push(b); };
     const maxKills = Math.max(0, ...Object.values(kills));
@@ -950,6 +1406,9 @@ export class Room extends DurableObject<Env> {
     s.history = s.history.slice(-20);
     s.phase = 'result';
     s.turnDeadline = 0;
+    s.sheriff = undefined;
+    s.launch = { ready: {} } satisfies Launch;
+    for (const b of s.players.filter((p) => p.bot)) this.job({ at: Date.now() + rnd(1000, 3000), k: 'bready', ph: 'result', pid: b.id });
     this.narr(repeat > 0 ? 'repeat' : 'result');
     if (ns && Math.random() < 0.5) this.job({ at: Date.now() + 4500, k: 'narr', ph: 'result', key: 'never_survive' });
 
@@ -964,7 +1423,7 @@ export class Room extends DurableObject<Env> {
         kills: kills[p.id] ?? 0,
         wins: winner?.by.includes(p.id) ? 1 : 0,
         saves: saves[p.id] ?? 0,
-        duelsWon: duelist === p.id ? 1 : 0,
+        duelsWon: duelist === p.id || slider === p.id ? 1 : 0,
         shotAt: s.board.filter((g) => g.by.includes(p.id) && !g.alive && g.killedBy).length,
       });
     }
@@ -1014,6 +1473,16 @@ export class Room extends DurableObject<Env> {
       const d = s.duel;
       if (!d.decidedAt && now >= d.drawAt + 4000 - 50) { this.decideDuel(); persist = true; }
       if (d.decidedAt && d.winner && now >= d.decidedAt + 3000 - 50) { this.finish(d.winner); persist = true; }
+    } else if (s.phase === 'slide' && s.slide) {
+      const sl = s.slide;
+      if (sl.decidedAt) {
+        if (sl.winner !== undefined && now >= sl.decidedAt + SLIDE_RESULT_MS - 50) { this.finish(sl.winner); persist = true; }
+      } else if (x.slideAt) {
+        if (now >= x.slideAt - 50) { this.decideSlide(); persist = true; }
+      } else if (sl.turn < sl.order.length && sl.turnDeadline && now >= sl.turnDeadline - 50) {
+        this.slideGlass(0.45 + Math.random() * 0.5); // fuse ran out: the glass slips at a random push
+        persist = true;
+      }
     }
     return persist;
   }

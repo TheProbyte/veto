@@ -108,16 +108,24 @@ export interface BustOpts {
   pose?: Pose;
   /** practice bot: a little gear on the hat */
   bot?: boolean;
+  /** hat tumbling in the air: quarter turns (0..3) */
+  hatRot?: number;
 }
 
-export type PoseArm = 'cards' | 'cards2' | 'cards3' | 'glass' | 'glassUp' | 'clap' | 'clapOpen' | 'shrug';
+export type PoseArm = 'cards' | 'cards2' | 'cards3' | 'glass' | 'glassUp' | 'clap' | 'clapOpen' | 'shrug' | 'shrugIn'
+  | 'toast' | 'drink' | 'fists' | 'fists2' | 'fling';
 export interface Pose {
   arm?: PoseArm;
   eyes?: -1 | 0 | 1; // glance left / right
-  mouth?: 'open' | 'grin';
-  brow?: 'angry' | 'up';
+  lids?: 'happy' | 'shut' | 'wide';
+  mouth?: 'open' | 'grin' | 'wide' | 'o' | 'grit' | 'wavy';
+  brow?: 'angry' | 'up' | 'quiz';
+  /** flushed red face */
+  red?: boolean;
+  /** head (+ hat) offset in bust px: thrown back = negative hy, bow / tilt = positive */
+  hx?: number; hy?: number;
 }
-export const poseKey = (p?: Pose) => (p ? `${p.arm ?? ''}${p.eyes ?? ''}${p.mouth ?? ''}${p.brow ?? ''}` : '');
+export const poseKey = (p?: Pose) => (p ? `${p.arm ?? ''}${p.eyes ?? ''}${p.lids ?? ''}${p.mouth ?? ''}${p.brow ?? ''}${p.red ? 'r' : ''}${p.hx ?? ''},${p.hy ?? ''}` : '');
 
 /** Draws a bust into a fresh offscreen canvas. Rim light computed from the silhouette. */
 export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
@@ -128,15 +136,19 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   const [cv, c] = makeCanvas(W, H);
   c.translate(0, pad);
   const X = (v: number) => Math.round(v * s);
+  let g = c; // R / E draw here (the hat goes to its own layer when it tumbles)
   const R = (x: number, y: number, w: number, h: number, col: string) => {
-    c.fillStyle = col;
-    c.fillRect(X(x), X(y), Math.max(1, X(x + w) - X(x)), Math.max(1, X(y + h) - X(y)));
+    g.fillStyle = col;
+    g.fillRect(X(x), X(y), Math.max(1, X(x + w) - X(x)), Math.max(1, X(y + h) - X(y)));
   };
-  const E = (cx: number, cy: number, rx: number, ry: number, col: string) => ellipse(c, X(cx), X(cy), Math.max(1, X(rx)), Math.max(1, X(ry)), col);
-  const [sk0, sk1, sk2] = L.skin;
+  const E = (cx: number, cy: number, rx: number, ry: number, col: string) => ellipse(g, X(cx), X(cy), Math.max(1, X(rx)), Math.max(1, X(ry)), col);
+  const pose = o.gun ? undefined : o.pose;
+  const [sk0, sk1, sk2] = pose?.red ? L.skin.map((k, i) => mixHex(k, ['#7a1810', '#c4382a', '#e8604a'][i], 0.55)) as [string, string, string] : L.skin;
   const noHat = L.hat === 5;
   const hairTop = noHat || L.hat === 7 || L.hat === 8; // hair shows (visor / cactus sit on it)
-  const pose = o.gun ? undefined : o.pose;
+  // at least one canvas pixel for any non-zero bust offset, so small busts still move
+  const off = (v?: number) => (v ? Math.sign(v) * Math.max(1, Math.round(Math.abs(v) * s)) : 0);
+  const headX = off(pose?.hx), headY = off(pose?.hy);
 
   // --- coat / shoulders
   for (let y = 29; y < 56; y++) {
@@ -200,7 +212,9 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
     R(19, 28, 4, 1, PAL.parch);
   }
 
-  // --- head
+  // --- head (offset as a whole with the hat for laughs, bows, tilts)
+  c.save();
+  c.translate(headX, headY);
   E(24, 17, 10, 10, sk1);
   E(24, 25, 7, 3, sk1);
   const brimShadow = noHat || L.hat === 8 ? 12 : L.hat === 9 ? 13 : L.hat === 4 || L.hat === 7 ? 16 : 19;
@@ -214,7 +228,14 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   // eyes + brows
   const patch = L.facial === 6;
   const ex = pose?.eyes ?? 0;
-  if (!o.blink) {
+  const lids = pose?.lids;
+  if (lids === 'happy') { // ^ ^
+    for (const ex0 of patch ? [19] : [19, 27]) { R(ex0, 17, 1, 1, PAL.ink); R(ex0 + 1, 16, 1, 1, PAL.ink); R(ex0 + 2, 17, 1, 1, PAL.ink); }
+  } else if (lids === 'shut') {
+    R(19, 17, 3, 1, PAL.ink); if (!patch) R(27, 17, 3, 1, PAL.ink);
+  } else if (lids === 'wide' && !o.blink) {
+    for (const ex0 of patch ? [19] : [19, 27]) { R(ex0, 15, 3, 3, PAL.white); R(ex0 + 1, 16, 1, 1, PAL.ink); }
+  } else if (!o.blink) {
     R(19, 16, 3, 1, PAL.ink); if (!patch) R(27, 16, 3, 1, PAL.ink);
     const gx = ex ? (ex > 0 ? 2 : 0) : o.rimRight ? 2 : 0;
     R(19 + gx, 16, 1, 1, L.glint);
@@ -224,7 +245,8 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   }
   if (noHat || L.hat === 4 || L.hat === 8) { R(19, 14, 3, 1, L.hair); R(27, 14, 3, 1, L.hair); }
   if (pose?.brow === 'angry') { R(19, 14, 2, 1, PAL.ink); R(21, 15, 1, 1, PAL.ink); R(28, 14, 2, 1, PAL.ink); R(27, 15, 1, 1, PAL.ink); }
-  else if (pose?.brow === 'up') { R(19, 13, 3, 1, L.hair); R(27, 13, 3, 1, L.hair); }
+  else if (pose?.brow === 'up') { R(19, 13, 3, 1, L.hair); R(27, 13, 3, 1, L.hair); R(19, 13, 3, 1, shade(L.hair, 0.7)); R(27, 13, 3, 1, shade(L.hair, 0.7)); }
+  else if (pose?.brow === 'quiz') { R(19, 14, 3, 1, shade(L.hair, 0.7)); R(27, 12, 3, 1, shade(L.hair, 0.7)); R(30, 13, 1, 1, shade(L.hair, 0.7)); }
   // facial hair (LOOK_LABELS.face order)
   switch (L.facial) {
     case 1: // stubble
@@ -263,8 +285,13 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
     default:
       R(22, 24, 5, 1, sk0);
   }
-  if (pose?.mouth === 'open') { R(22, 23, 5, 3, PAL.ink); R(23, 25, 3, 1, PAL.red1); R(22, 23, 5, 1, PAL.white); }
-  else if (pose?.mouth === 'grin') { R(21, 24, 7, 1, PAL.ink); R(22, 23, 5, 1, PAL.white); }
+  const mo = pose?.mouth;
+  if (mo === 'open') { R(22, 23, 5, 3, PAL.ink); R(23, 25, 3, 1, PAL.red1); R(22, 23, 5, 1, PAL.white); }
+  else if (mo === 'grin') { R(21, 24, 7, 1, PAL.ink); R(22, 23, 5, 1, PAL.white); }
+  else if (mo === 'wide') { R(20, 22, 9, 6, PAL.ink); R(21, 22, 7, 1, PAL.white); R(22, 25, 5, 2, PAL.red1); R(23, 26, 3, 1, '#e8604a'); }
+  else if (mo === 'o') { R(23, 23, 3, 3, PAL.ink); R(24, 24, 1, 1, PAL.red1); R(21, 22, 1, 2, sk2); R(27, 22, 1, 2, sk2); }
+  else if (mo === 'grit') { R(20, 23, 9, 3, PAL.ink); R(21, 24, 7, 1, PAL.white); R(23, 24, 1, 1, PAL.ink); R(26, 24, 1, 1, PAL.ink); }
+  else if (mo === 'wavy') { for (let i = 0; i < 7; i++) R(21 + i, 24 + (i % 2), 1, 1, PAL.ink); }
   if (L.hat !== 9 && !hairTop) { R(14, 12, 2, 6, L.hair); R(32, 12, 2, 6, L.hair); }
   if (hairTop && !noHat) { // visor / cactus: hair under it
     E(24, 10, 11, 6, L.hair);
@@ -276,8 +303,10 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   // --- hat (offset for drop / tip animations)
   const hdy = noHat ? 0 : Math.round((o.hatDy ?? 0) * s), hdx = noHat ? 0 : Math.round((o.hatDx ?? 0) * s);
   let shineAt: [number, number][] = [];
-  c.save();
-  c.translate(hdx, hdy);
+  const rot = noHat ? 0 : (o.hatRot ?? 0) & 3;
+  let hatCv: HTMLCanvasElement | null = null;
+  if (rot) { const [hc0, hc1] = makeCanvas(W, H); hc1.translate(0, pad); hatCv = hc0; g = hc1; }
+  else { c.save(); c.translate(hdx, hdy); }
   const hc = L.hatCol;
   const hd = shade(hc, 0.6);
   const hl = shade(hc, 1.45);
@@ -382,14 +411,30 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
     R(29, by - 1, 3, 3, PAL.metal3); R(30, by - 2, 1, 5, PAL.metal3); R(28, by, 5, 1, PAL.metal3);
     R(30, by, 1, 1, PAL.ink); R(29, by - 1, 1, 1, PAL.white);
   }
-  c.restore();
+  if (hatCv) {
+    // tumble: quarter turns about the crown's middle (exact on the pixel grid)
+    g = c;
+    const pcx = X(24), pcy = X(7);
+    c.save();
+    c.imageSmoothingEnabled = false;
+    c.translate(pcx + hdx, pcy + hdy);
+    c.rotate((rot * Math.PI) / 2);
+    c.drawImage(hatCv, -pcx, -pcy - pad);
+    c.restore();
+  } else c.restore();
+  c.restore(); // head offset
   if (o.bot && noHat) { R(29, 7, 3, 3, PAL.metal3); R(30, 6, 1, 5, PAL.metal3); R(28, 8, 5, 1, PAL.metal3); R(30, 8, 1, 1, PAL.ink); R(29, 7, 1, 1, PAL.white); }
   // idle / emote arms
   if (pose?.arm) drawArms(pose.arm, L, R, sk1, sk2);
-  // hand at the brim (hat tip)
+  // hand at the brim (hat tip / catching the hat): the sleeve runs down to the shoulder
   if (o.hand) {
-    const hy = 10 + (o.hatDy ?? 0);
-    R(33, hy, 5, 4, sk1); R(33, hy, 5, 1, sk2); R(34, hy + 4, 3, 6, L.coat); R(37, hy + 1, 1, 3, sk0);
+    c.save(); c.translate(headX, 0);
+    const hy = 9 + (o.hatDy ?? 0) + (pose?.hy ?? 0);
+    const sleeve = L.coatPat === 'vest' ? '#cfc2a4' : L.coatPat === 'poncho' ? '#8a3a1c' : L.coat;
+    const top = hy + 4, len = Math.max(4, 33 - top);
+    R(33, top, 6, len, PAL.ink); R(34, top, 4, len, sleeve); R(34, top, 1, len, shade(sleeve, 1.4));
+    R(32, hy - 1, 7, 6, PAL.ink); R(33, hy, 5, 4, sk1); R(33, hy, 5, 1, sk2); R(37, hy + 1, 1, 3, sk0);
+    c.restore();
   }
   // revolver, held up by the shooter
   if (o.gun) {
@@ -443,6 +488,9 @@ function card(R: RectFn, x: number, y: number, red: boolean) { R(x - 1, y - 1, 5
 function drawArms(arm: PoseArm, L: BustLook, R: RectFn, sk1: string, sk2: string) {
   const sleeve = L.coatPat === 'vest' ? '#cfc2a4' : L.coatPat === 'poncho' ? '#8a3a1c' : L.coat;
   const forearm = (x: number, y: number, h = 6) => R(x, y, 5, h, sleeve);
+  // outlined sleeve so an arm reads against a coat of the same colour
+  const limb = (x: number, y: number, w: number, h: number) => { R(x - 1, y - 1, w + 2, h + 2, PAL.ink); R(x, y, w, h, sleeve); R(x, y, w, 1, shade(sleeve, 1.45)); };
+  const hand = (x: number, y: number, w: number, h: number) => { R(x - 1, y - 1, w + 2, h + 2, PAL.ink); R(x, y, w, h, sk1); R(x, y, w, 1, sk2); };
   switch (arm) {
     case 'cards': case 'cards2': case 'cards3': {
       forearm(13, 36); forearm(30, 36);
@@ -452,25 +500,63 @@ function drawArms(arm: PoseArm, L: BustLook, R: RectFn, sk1: string, sk2: string
       else { card(R, 26, 28, true); card(R, 28, 27, false); card(R, 30, 28, true); }
       break;
     }
-    case 'glass': forearm(29, 37); fist(R, 29, 33, sk1, sk2); glass(R, 30, 28); break;
+    case 'glass': limb(31, 34, 5, 6); hand(30, 31, 6, 4); glass(R, 31, 25); break;
     case 'glassUp': forearm(28, 28, 10); glass(R, 24, 20, true); fist(R, 27, 24, sk1, sk2); break;
-    case 'clap': forearm(16, 36); forearm(27, 36); R(20, 30, 4, 6, sk1); R(24, 30, 4, 6, sk1); R(23, 30, 2, 6, sk2); break;
-    case 'clapOpen': forearm(13, 36); forearm(30, 36); R(15, 30, 4, 6, sk1); R(29, 30, 4, 6, sk1); R(18, 31, 1, 4, sk2); R(29, 31, 1, 4, sk2); break;
-    case 'shrug':
-      R(13, 26, 6, 4, L.coat); R(29, 26, 6, 4, L.coat);
-      R(7, 32, 8, 4, sleeve); R(33, 32, 8, 4, sleeve);
-      R(4, 30, 4, 3, sk1); R(40, 30, 4, 3, sk1); R(4, 30, 4, 1, sk2); R(40, 30, 4, 1, sk2);
+    case 'toast': // glass raised high beside the head: "cheers"
+      limb(36, 20, 5, 16); hand(35, 17, 7, 5); glass(R, 36, 9); break;
+    case 'drink': // glass tipped up at the lips
+      limb(31, 26, 5, 12); hand(29, 22, 6, 5);
+      R(21, 15, 9, 8, PAL.ink); R(22, 16, 7, 6, PAL.metal4); R(22, 16, 3, 3, PAL.lamp2); R(22, 16, 2, 1, PAL.lamp1); R(28, 16, 1, 5, PAL.white);
+      break;
+    case 'clap': // palms together in front of the chin
+      limb(12, 31, 8, 6); limb(28, 31, 8, 6);
+      hand(19, 23, 5, 9); hand(24, 23, 5, 9); R(23, 23, 1, 9, shade(sk1, 0.6)); R(24, 23, 1, 9, sk2);
+      break;
+    case 'clapOpen': // wound up: hands wide apart, palms facing
+      limb(8, 31, 5, 8); limb(35, 31, 5, 8);
+      hand(8, 22, 5, 9); hand(35, 22, 5, 9); R(12, 23, 1, 7, sk2); R(35, 23, 1, 7, sk2);
+      break;
+    case 'shrugIn': // anticipation: palms turned up at the chest
+      limb(12, 33, 7, 5); limb(29, 33, 7, 5);
+      hand(15, 30, 6, 3); hand(27, 30, 6, 3);
+      break;
+    case 'shrug': // shoulders up to the ears, elbows out, forearms up, palms open to the sides
+      R(11, 22, 9, 8, PAL.ink); R(28, 22, 9, 8, PAL.ink);
+      R(12, 23, 8, 7, L.coat); R(28, 23, 8, 7, L.coat); R(12, 23, 8, 1, shade(L.coat, 1.4)); R(28, 23, 8, 1, shade(L.coat, 1.4));
+      limb(4, 28, 10, 4); limb(34, 28, 10, 4);
+      limb(3, 19, 4, 11); limb(41, 19, 4, 11);
+      hand(1, 14, 6, 5); hand(41, 14, 6, 5);
+      R(1, 12, 1, 2, sk1); R(3, 11, 1, 3, sk1); R(5, 12, 1, 2, sk1); // fingers
+      R(42, 12, 1, 2, sk1); R(44, 11, 1, 3, sk1); R(46, 12, 1, 2, sk1);
+      R(7, 16, 1, 2, sk1); R(40, 16, 1, 2, sk1); // thumbs
+      break;
+    case 'fists': case 'fists2': { // shaking fists beside the head
+      const d = arm === 'fists2' ? -2 : 0;
+      limb(5, 27 + d, 6, 12); limb(37, 27 - d, 6, 12);
+      hand(4, 20 + d, 8, 7); hand(36, 20 - d, 8, 7);
+      for (const fx of [5, 7, 9]) R(fx, 22 + d, 1, 1, shade(sk1, 0.6));
+      for (const fx of [38, 40, 42]) R(fx, 22 - d, 1, 1, shade(sk1, 0.6));
+      break;
+    }
+    case 'fling': // throwing arm straight up (the hat's already gone)
+      limb(37, 6, 5, 28); hand(36, 1, 7, 5); R(36, -1, 1, 2, sk1); R(38, -2, 1, 3, sk1); R(40, -2, 1, 3, sk1); R(42, -1, 1, 2, sk1);
       break;
   }
 }
 function glass(R: RectFn, x: number, y: number, tilt = false) {
-  if (tilt) { R(x, y, 5, 4, PAL.metal4); R(x + 1, y + 1, 3, 2, PAL.lamp2); R(x, y, 1, 1, PAL.white); return; }
-  R(x, y, 5, 6, PAL.metal4); R(x + 1, y + 2, 3, 3, PAL.lamp2); R(x + 1, y + 2, 3, 1, PAL.lamp1); R(x, y, 1, 4, PAL.white);
+  if (!tilt) { R(x - 1, y - 1, 7, 9, PAL.ink); R(x, y, 5, 7, PAL.metal4); R(x + 1, y + 3, 3, 3, PAL.lamp2); R(x + 1, y + 3, 3, 1, PAL.lamp1); R(x, y, 1, 5, PAL.white); return; }
+  R(x, y, 5, 4, PAL.metal4); R(x + 1, y + 1, 3, 2, PAL.lamp2); R(x, y, 1, 1, PAL.white);
 }
 
 function inHead(x: number, y: number) {
   const dx = (x - 24) / 10.5, dy = (y - 17.5) / 11;
   return dx * dx + dy * dy <= 1.05 || (y > 22 && y < 29 && Math.abs(x - 24) < 8.5);
+}
+
+function mixHex(a: string, b: string, t: number) {
+  const [r, g, bb] = mix(hexRgb(a), hexRgb(b), t);
+  const f = (v: number) => Math.round(v).toString(16).padStart(2, '0');
+  return `#${f(r)}${f(g)}${f(bb)}`;
 }
 
 function mix(a: number[], b: number[], t: number): [number, number, number] {

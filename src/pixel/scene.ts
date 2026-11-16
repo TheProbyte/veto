@@ -458,39 +458,111 @@ export interface SceneData {
   fx?: SceneFX;
 }
 
-/** emote durations (ms of scene time) */
-const EMO_MS: Record<string, number> = { tip: 1300, spit: 1700, laugh: 2000, yeehaw: 1500, clap: 1400, shrug: 1500, angry: 1900, drink: 1900 };
+/** emote durations (ms of scene time); keep in step with the HTML caption in Saloon (EMOTE_POP_MS) */
+const EMO_MS: Record<string, number> = { tip: 1700, spit: 1900, laugh: 1900, yeehaw: 1800, clap: 1600, shrug: 1800, angry: 1900, drink: 2100 };
 const IDLE_MS: Record<string, number> = { cards: 1900, sip: 2000, hat: 1100, look: 1700 };
 const IDLE_KINDS = ['cards', 'sip', 'hat', 'look'] as const;
+/** slow clap contact times (ms): sfx.clap() lands its claps on these */
+const CLAPS = [250, 670, 1090];
+const CLAP_HOLD = 150;
+const YEE = { up: 220, catch: 1100, h: 24 };
 
 interface Anim { kind: string; v: number; emote: boolean }
-interface Pose2 { pose?: Pose; hatDy?: number; hand?: boolean; pad?: number; jx?: number; jy?: number; blink?: boolean }
+interface Pose2 { pose?: Pose; hatDy?: number; hatRot?: number; hand?: boolean; pad?: number; jx?: number; jy?: number; blink?: boolean }
 
-/** what a bust looks like `age` ms into an emote / idle animation */
+/** what a bust looks like `age` ms into an emote / idle animation. Key poses are held >= 150ms
+ * (phones draw at 10fps), with a wind-up before and an overshoot / settle after. */
 function animPose(a: Anim, age: number): Pose2 {
   const f = (ms: number) => Math.floor(age / ms);
   switch (a.kind) {
-    case 'tip': return { hatDy: age < 180 ? -2 : age < 950 ? -4 : age < 1150 ? -2 : 0, hand: age < 1150, pose: { mouth: 'grin' } };
+    case 'tip': // hand to the brim, hat lifted high, a little bow; then back on
+      if (age < 180) return { hand: true, hatDy: -1, pad: 18, pose: { mouth: 'grin' } };
+      if (age < 320) return { hand: true, hatDy: -7, pad: 18, pose: { mouth: 'grin', brow: 'up' } };
+      if (age < 1150) return { hand: true, hatDy: -10, pad: 18, pose: { mouth: 'grin', lids: 'happy', hy: 2 } };
+      if (age < 1400) return { hand: true, hatDy: -4, pad: 18, pose: { mouth: 'grin', hy: 1 } };
+      return { hatDy: 0, hand: age < 1550, pad: 18, pose: { mouth: 'grin' } };
     case 'hat': return { hatDy: age < 150 ? -2 : age < 700 ? -3 : age < 850 ? -1 : 0, hand: age < 900 };
-    case 'spit': return { pose: { mouth: age > 180 && age < 480 ? 'open' : undefined, eyes: 1 }, jx: age > 200 && age < 320 ? 1 : 0 };
-    case 'laugh': return { pose: { mouth: 'open' }, blink: true, jx: f(90) % 2 ? 1 : -1, jy: f(180) % 2 };
-    case 'yeehaw': {
-      // hat flies up and is caught (bust px, negative = up)
-      const T = 900, h = 26;
-      const dy = age < T ? -Math.round(h * 4 * (age / T) * (1 - age / T)) : age < 1050 ? 1 : 0;
-      return { hatDy: dy, pad: 30, pose: { mouth: age < 1100 ? 'open' : 'grin', brow: 'up' } };
+    case 'spit': // cheeks puffed and lean back, PTOO forward, watch it land, smug
+      if (age < 300) return { pose: { mouth: 'o', hy: -1, lids: 'wide' }, jy: -1 };
+      if (age < 460) return { pose: { mouth: 'open', hx: 2, hy: 1, eyes: 1 }, jx: 1 };
+      if (age < 950) return { pose: { mouth: 'o', hx: 1, eyes: 1 } };
+      return { pose: { mouth: 'grin', eyes: 1, brow: 'up' } };
+    case 'laugh': // head thrown back, belly shake
+      if (age < 150) return { pose: { mouth: 'grin', lids: 'happy', hy: 1 }, jy: 1 };
+      if (age < 1700) return f(150) % 2
+        ? { pose: { mouth: 'wide', lids: 'happy', hy: -3 }, jx: 1, jy: -1 }
+        : { pose: { mouth: 'open', lids: 'happy', hy: -1 }, jx: -1, jy: 1 };
+      return { pose: { mouth: 'grin', lids: 'happy' } };
+    case 'yeehaw': { // grab the brim, crouch, fling it spinning sky-high, catch it, slap it back on
+      const pose: Pose = { mouth: 'wide', brow: 'up' };
+      if (age < YEE.up) return { hand: true, hatDy: -1, pad: 44, jy: 1, pose: { mouth: 'grin', brow: 'up' } };
+      if (age < YEE.catch) {
+        const k = (age - YEE.up) / (YEE.catch - YEE.up);
+        const dy = -2 * Math.round((YEE.h * 4 * k * (1 - k)) / 2) - 4;
+        return { hatDy: dy, hatRot: f(90) % 4, pad: 44, jy: age < YEE.up + 150 ? -1 : 0, pose: { ...pose, arm: 'fling' } };
+      }
+      if (age < 1300) return { hand: true, hatDy: -6, pad: 44, pose };
+      if (age < 1450) return { hand: true, hatDy: -2, pad: 44, jy: 1, pose };
+      return { hatDy: 0, pad: 44, pose: { mouth: 'grin', brow: 'up' } };
     }
-    case 'clap': return { pose: { arm: f(210) % 2 ? 'clapOpen' : 'clap', mouth: 'grin' } };
-    case 'shrug': return { pose: { arm: 'shrug', brow: 'up' }, jy: age > 120 && age < 1300 ? -1 : 0 };
-    case 'angry': return { pose: { brow: 'angry' }, jx: f(70) % 2 ? 1 : 0 };
-    case 'drink': case 'sip': {
-      const up = age > 400 && age < (a.kind === 'sip' ? 1500 : 1400);
+    case 'clap': { // slow clap: wind-up, then palms meet on each clap sound
+      const on = CLAPS.some((t0) => age >= t0 && age < t0 + CLAP_HOLD);
+      const first = CLAPS.some((t0) => age >= t0 && age < t0 + 80);
+      return { pose: { arm: on ? 'clap' : 'clapOpen', mouth: 'grin', brow: age > 600 ? 'up' : undefined }, jy: first ? 1 : 0 };
+    }
+    case 'shrug': // palms in, then shoulders to the ears + palms out + head tilt, hold, relax
+      if (age < 180) return { pose: { arm: 'shrugIn', mouth: 'wavy' }, jy: 1 };
+      if (age < 320) return { pose: { arm: 'shrug', mouth: 'wavy', brow: 'quiz', hx: -1, hy: 1 }, jy: -2 };
+      if (age < 1500) return { pose: { arm: 'shrug', mouth: 'wavy', brow: 'quiz', hx: -1, hy: 1, eyes: f(500) % 2 ? 1 : -1 }, jy: -1 };
+      return { pose: { arm: 'shrugIn', mouth: 'wavy' } };
+    case 'angry': // red, gritted teeth, shaking fists
+      if (age < 150) return { pose: { brow: 'angry', mouth: 'grit', red: true }, jy: 1 };
+      if (age < 1700) return { pose: { brow: 'angry', mouth: 'grit', red: true, arm: f(100) % 2 ? 'fists' : 'fists2' }, jx: f(70) % 2 ? 1 : -1 };
+      return { pose: { brow: 'angry', mouth: 'grit', red: true } };
+    case 'drink': // pick up, raise it high, knock it back, "ahh"
+      if (age < 300) return { pose: { arm: 'glass', eyes: -1 } };
+      if (age < 650) return { pose: { arm: 'toast', mouth: 'grin', brow: 'up' }, jy: age < 420 ? -1 : 0 };
+      if (age < 1400) return { pose: { arm: 'drink', lids: 'shut', hy: -2 } };
+      return { pose: { arm: 'glass', mouth: 'open', lids: 'happy' }, jy: age < 1550 ? 1 : 0 };
+    case 'sip': {
+      const up = age > 400 && age < 1500;
       return { pose: { arm: up ? 'glassUp' : 'glass', eyes: up ? undefined : -1 }, blink: up && age > 700 };
     }
     case 'cards': return { pose: { arm: (['cards', 'cards2', 'cards3', 'cards2'] as const)[f(160) % 4] } };
     case 'look': return { pose: { eyes: age < 800 ? -1 : 1 } };
   }
   return {};
+}
+
+/* tiny pixel glyphs for emote FX ('#' = on) */
+const GL = {
+  star7: ['...#...', '...#...', '..###..', '#######', '..###..', '...#...', '...#...'],
+  star5: ['..#..', '.###.', '#####', '.###.', '..#..'],
+  star3: ['.#.', '###', '.#.'],
+  q: ['.###.', '#...#', '....#', '..##.', '..#..', '.....', '..#..'],
+  vein5: ['.#.#.', '##.##', '.....', '##.##', '.#.#.'],
+  vein7: ['..#.#..', '..#.#..', '###.###', '.......', '###.###', '..#.#..', '..#.#..'],
+  rayL: ['#..', '.#.', '..#'],
+  rayR: ['..#', '.#.', '#..'],
+};
+/** a glyph at scale k, centred on (x, y), with a 1-cell ink outline */
+function glyph(c: Ctx, rows: string[], x: number, y: number, col: string, k = 1, ink: string | null = PAL.ink) {
+  const h = rows.length, w = rows[0].length;
+  const x0 = Math.round(x - (w * k) / 2), y0 = Math.round(y - (h * k) / 2);
+  for (const pass of ink ? [0, 1] : [1]) {
+    c.fillStyle = pass ? col : ink!;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      if (rows[j][i] !== '#') continue;
+      if (pass) c.fillRect(x0 + i * k, y0 + j * k, k, k);
+      else c.fillRect(x0 + (i - 1) * k, y0 + (j - 1) * k, k * 3, k * 3);
+    }
+  }
+}
+function puff(c: Ctx, x: number, y: number, r: number, fade: number, light = '#c9bba6', dark = '#8a7e70') {
+  for (let yy = -r; yy <= r; yy++) for (let xx = -r; xx <= r; xx++) {
+    const v = 1 - Math.hypot(xx, yy) / (r + 0.5);
+    if (v > 0 && v * fade * 1.6 > bayer(x + xx, y + yy)) px(c, x + xx, y + yy, v > 0.45 ? light : dark);
+  }
 }
 
 interface Drop { x: number; y: number; v: number; len: number }
@@ -520,6 +592,8 @@ export class SceneRenderer {
   gust: Gust[] = [];
   doorV = -1e9; doorLeave = false;
   anims = new Map<string, Anim>();
+  /** when the current shooter's turn started (scene time): a little draw hop + hammer glint */
+  turn = { id: '', v: -1e9 };
   nextIdle = new Map<string, number>();
   cat = { x: 0, dir: 1, state: 'walk' as 'walk' | 'sit' | 'bolt' | 'gone', until: 4000, v: 0 };
 
@@ -567,13 +641,13 @@ export class SceneRenderer {
   sprite(p: ScenePlayer, g: SeatGeom, blink: boolean, lit: boolean, rimRight: boolean, gun = 0, ps: Pose2 = {}) {
     const dimQ = Math.round((1.08 - 0.32 * g.depth) * 4) / 4;
     const sig = styleSig(p);
-    const key = `${p.id}|${sig}|${g.scale.toFixed(3)}|${+blink}|${+lit}|${+rimRight}|${dimQ}|${+!p.connected}|${gun}|${+!!p.bot}|${poseKey(ps.pose)}|${ps.hatDy ?? 0}|${+!!ps.hand}|${ps.pad ?? 0}`;
+    const key = `${p.id}|${sig}|${g.scale.toFixed(3)}|${+blink}|${+lit}|${+rimRight}|${dimQ}|${+!p.connected}|${gun}|${+!!p.bot}|${poseKey(ps.pose)}|${ps.hatDy ?? 0}|${ps.hatRot ?? 0}|${+!!ps.hand}|${ps.pad ?? 0}`;
     let cv = this.sprites.get(key);
     if (!cv) {
       let look = this.looks.get(p.id + sig);
       if (!look) { look = bustFor(p); this.looks.set(p.id + sig, look); }
-      cv = renderBust(look, { scale: g.scale, blink, lit, rimRight, dim: lit ? 0.95 : dimQ, ghost: !p.connected, gun, bot: p.bot, pose: ps.pose, hatDy: ps.hatDy, hand: ps.hand, padTop: ps.pad });
-      if (this.sprites.size > 160) this.sprites.clear();
+      cv = renderBust(look, { scale: g.scale, blink, lit, rimRight, dim: lit ? 0.95 : dimQ, ghost: !p.connected, gun, bot: p.bot, pose: ps.pose, hatDy: ps.hatDy, hatRot: ps.hatRot, hand: ps.hand, padTop: ps.pad });
+      if (this.sprites.size > 220) this.sprites.clear();
       this.sprites.set(key, cv);
     }
     return cv;
@@ -591,7 +665,8 @@ export class SceneRenderer {
     const evs = q.splice(0, q.length);
     for (const e of evs) {
       if (t - e.at > 3000) continue;
-      if (e.k === 'emote') this.anims.set(e.pid, { kind: e.emote, v: this.vt, emote: true });
+      // back-dated to when it arrived (the sound already started then), so clap contacts land on the claps
+      if (e.k === 'emote') this.anims.set(e.pid, { kind: e.emote, v: this.vt - Math.max(0, Math.min(400, t - e.at)), emote: true });
       else if (e.k === 'bolt') { this.bolt = { v: this.vt, big: e.big }; this.nextBolt = this.vt + 9000 + Math.random() * 12000; }
       else if (e.k === 'doors') { this.doorV = this.vt; this.doorLeave = e.leave; this.spawnGust(e.leave ? 34 : 18); }
       else if (e.k === 'slowmo') this.slowUntil = t + 1500;
@@ -669,6 +744,8 @@ export class SceneRenderer {
     const seats = D.players.map((p) => p.seat);
     const geoms = D.players.map((p) => ({ p, g: seatGeom(L, p.seat, seats) })).sort((a, b) => b.g.depth - a.g.depth);
     const shooterG = geoms.find((x) => x.p.id === D.shooter);
+    if ((D.shooter ?? '') !== this.turn.id) this.turn = { id: D.shooter ?? '', v: vt };
+    const turnAge = vt - this.turn.v;
 
     // lamp swing (pendulum), biased toward the shooter
     const target = shooterG ? Math.max(-0.35, Math.min(0.35, Math.atan2(shooterG.g.x - cx, L.tableTop * 1.6))) : 0;
@@ -693,7 +770,7 @@ export class SceneRenderer {
     } else for (const [id, cur] of this.anims) if (vt - cur.v > (EMO_MS[cur.kind] ?? 1500)) this.anims.delete(id);
 
     // players
-    const overlays: { p: ScenePlayer; g: SeatGeom; a: Anim; age: number }[] = [];
+    const overlays: { g: SeatGeom; a: Anim; age: number; ox: number; oy: number; ps: Pose2 }[] = [];
     for (const { p, g } of geoms) {
       const ph = (p.id.charCodeAt(0) || 0) * 0.37 + p.seat;
       const bob = !this.reduce && Math.sin(sec * 1.6 + ph) > 0.2 ? 1 : 0;
@@ -703,19 +780,28 @@ export class SceneRenderer {
       const gun = (lit || (isActor && shotAge < 1500)) && !this.reduce ? (isActor && shotAge < 220 && D.shot!.kind !== 'ricochet' ? 2 : 1) : lit ? 1 : 0;
       // everyone else flinches for a moment on each shot
       let jx = 0, jy = 0;
-      if (!isActor && shotAge < 260 && !this.reduce) {
+      const flinch = !isActor && shotAge < 260 && !this.reduce;
+      if (flinch) {
         const k = shotAge < 90 ? 2 : 1;
         jx = (rnd(p.seat, Math.floor(shotAge / 70), 5) > 0.5 ? 1 : -1) * k; jy = shotAge < 130 ? 1 : 0;
       }
+      // your turn: the revolver comes up with a little hop
+      if (lit && turnAge < 300 && !this.reduce) jy -= turnAge < 150 ? 2 : 1;
       const an = this.anims.get(p.id);
-      let ps: Pose2 = {};
-      if (an && !gun) {
+      // a flinch: eyes go wide (unless an emote owns the face)
+      let ps: Pose2 = flinch && !an && !gun ? { pose: { lids: 'wide' } } : {};
+      if (an) {
         const age = vt - an.v;
-        ps = animPose(an, this.reduce ? Math.min(age, 600) : age);
-        if (this.reduce) { ps.jx = 0; ps.jy = 0; if (an.kind === 'yeehaw') ps.hatDy = -3; }
-        if (ps.blink) blink = true;
-        jx += ps.jx ?? 0; jy += ps.jy ?? 0;
-        overlays.push({ p, g, a: an, age });
+        // reduced motion: freeze on the key pose
+        const pa = animPose(an, this.reduce ? Math.min(age, an.kind === 'clap' ? CLAPS[1] + 20 : 600) : age);
+        if (this.reduce) { pa.jx = 0; pa.jy = 0; pa.hatRot = 0; }
+        // the shooter's hands are on the revolver: no pose, but the props / effects still play
+        if (!gun) {
+          ps = pa;
+          if (ps.blink) blink = true;
+          jx += ps.jx ?? 0; jy += ps.jy ?? 0;
+        }
+        if (an.emote) overlays.push({ g, a: an, age, ox: jx, oy: bob + jy, ps });
       }
       const cv = this.sprite(p, g, blink, lit, g.x < lx, gun, ps);
       const pad = Math.round((ps.pad ?? 0) * g.scale);
@@ -858,8 +944,14 @@ export class SceneRenderer {
       }
     }
 
+    // ---- hammer glint as the shooter's revolver comes up
+    if (shooterG && turnAge > 80 && turnAge < 560 && !this.reduce) {
+      const mz = this.muzzle(shooterG.g);
+      glyph(c, Math.floor(turnAge / 120) % 2 ? GL.star5 : GL.star7, mz.x + 1, mz.y - 2, '#fff3b8', shooterG.g.scale >= 1.02 ? 2 : 1);
+    }
+
     // ---- emote props that leave the bust: spit arc + spittoon, steam puffs
-    for (const o of overlays) this.drawEmoteFx(c, o.g, o.a, o.age);
+    for (const o of overlays) this.drawEmoteFx(c, o.g, o.a, o.age, o.ox, o.oy, o.ps);
   }
 
   private drawWeather(c: Ctx, vt: number, dt: number, boltK: number, storm: boolean) {
@@ -1019,35 +1111,136 @@ export class SceneRenderer {
     else { c.fillRect(tx, y - 6, 1, 3); px(c, tx + (f ? -d : 0), y - 7, C0); }
   }
 
-  private drawEmoteFx(c: Ctx, g: SeatGeom, a: Anim, age: number) {
+  /** emote props + effects, drawn after the lighting pass so they stay bright and readable */
+  private drawEmoteFx(c: Ctx, g: SeatGeom, a: Anim, age: number, ox: number, oy: number, ps: Pose2) {
     const s = g.scale;
-    const left = g.x - g.w / 2;
-    if (a.kind === 'spit') {
-      // spittoon on the table edge beside the player; the spit arcs into it
-      const tx = Math.round(g.x + g.w * 0.62), ty = Math.round(g.edge + 3);
-      if (age < 1600) {
-        c.fillStyle = PAL.ink; c.fillRect(tx - 4, ty - 5, 9, 7);
-        c.fillStyle = '#a87c18'; c.fillRect(tx - 3, ty - 4, 7, 5);
-        c.fillStyle = '#d4a52a'; c.fillRect(tx - 3, ty - 4, 7, 1); c.fillRect(tx - 2, ty - 2, 1, 2);
-        c.fillStyle = '#6b4a0c'; c.fillRect(tx - 4, ty - 6, 9, 1);
-        c.fillStyle = PAL.ink; c.fillRect(tx - 2, ty - 6, 5, 1);
+    const k = s >= 1.02 ? 2 : 1; // glyph scale: big busts get chunkier effects
+    const bl = Math.round(g.x - Math.round(BUST_W * s) / 2) + ox;
+    const B = (bx: number, by: number) => ({ x: Math.round(bl + bx * s), y: Math.round(g.top + oy + by * s) });
+    const tw = Math.floor(age / 120) % 2; // twinkle phase
+    const hx = ps.pose?.hx ?? 0, hy = ps.pose?.hy ?? 0;
+    switch (a.kind) {
+      case 'tip': {
+        if (age > 200 && age < 1250) {
+          const p = B(42 + hx, (ps.hatDy ?? 0) + 2 + hy);
+          glyph(c, tw ? GL.star7 : GL.star5, p.x, p.y, '#fff3b8', k);
+          px(c, p.x, p.y, PAL.white, 1, 1);
+          if (age > 420) { const q = B(6, (ps.hatDy ?? 0) - 2 + hy); glyph(c, tw ? GL.star3 : GL.star5, q.x, q.y, '#ffd36b', k); }
+        }
+        break;
       }
-      if (age > 220 && age < 700) {
-        const k = (age - 220) / 480;
-        const mx = left + 25 * s, my = g.top + 24 * s;
-        const x = Math.round(mx + (tx - mx) * k), y = Math.round(my + (ty - 6 - my) * k - Math.sin(k * Math.PI) * 10 * s);
-        px(c, x, y, '#cfe6f0'); px(c, x - 1, y, '#8fb0c0');
+      case 'spit': {
+        // brass spittoon on the table edge to the player's right
+        const tx = Math.round(g.x + g.w * 0.5), ty = Math.round(g.edge + 2) - (age < 120 ? 3 : age < 200 ? -1 : 0);
+        if (age < 1850) {
+          c.fillStyle = PAL.ink; c.fillRect(tx - 6, ty - 7, 13, 10); c.fillRect(tx - 5, ty - 8, 11, 1);
+          c.fillStyle = '#8a6214'; c.fillRect(tx - 5, ty - 6, 11, 8);
+          c.fillStyle = '#c99a2a'; c.fillRect(tx - 5, ty - 6, 11, 2); c.fillRect(tx - 4, ty - 3, 2, 4);
+          c.fillStyle = '#ffe08a'; c.fillRect(tx - 3, ty - 3, 1, 2); c.fillRect(tx - 4, ty - 6, 3, 1);
+          c.fillStyle = '#5a3e0a'; c.fillRect(tx - 3, ty - 6, 7, 1); // mouth of the bowl
+          c.fillStyle = '#3a2808'; c.fillRect(tx - 2, ty - 5, 5, 1);
+        }
+        const m = B(29 + 2, 24 + 1);
+        if (age >= 300 && age < 850) {
+          const u = (age - 300) / 550;
+          const pt = (q: number) => ({ x: Math.round(m.x + (tx - m.x) * q), y: Math.round(m.y + (ty - 7 - m.y) * q - Math.sin(q * Math.PI) * (8 + 10 * s)) });
+          for (const [dq, col] of [[0.16, '#5f8090'], [0.08, '#8fb0c0'], [0, '#e8f6ff']] as const) {
+            const q = Math.max(0, u - dq); const p = pt(q);
+            const z = dq ? k : k + 1; // the gob itself a size up from its trail
+            c.fillStyle = PAL.ink; c.fillRect(p.x - 1, p.y - 1, z + 2, z + 2);
+            c.fillStyle = col; c.fillRect(p.x, p.y, z, z);
+          }
+        }
+        if (age >= 850 && age < 1250) {
+          const u = (age - 850) / 400;
+          for (const d of [-1, 1]) for (const sp of [1, 2]) {
+            const x = Math.round(tx + d * sp * (2 + u * 5)), y = Math.round(ty - 8 - Math.sin(u * Math.PI) * (3 + sp * 2));
+            px(c, x, y, '#cfe6f0', k, k);
+          }
+          glyph(c, tw ? GL.star5 : GL.star7, tx + 7, ty - 10, '#fff3b8', k); // ding!
+        }
+        break;
       }
-      if (age > 700 && age < 900) { px(c, tx - 1, ty - 8, '#cfe6f0'); px(c, tx + 2, ty - 9, '#cfe6f0'); }
-    } else if (a.kind === 'angry' && age < 1800) {
-      for (const side of [-1, 1]) for (let k = 0; k < 3; k++) {
-        const ph = ((age / 600) + k / 3) % 1;
-        const ex = Math.round(g.x + side * (11 + ph * 6) * s), ey = Math.round(g.top + (20 - ph * 14) * s);
-        const r = 1 + Math.round(ph * 2);
-        for (let yy = -r; yy <= r; yy++) for (let xx = -r; xx <= r; xx++) if (Math.hypot(xx, yy) <= r && (1 - ph) * 1.4 > bayer(ex + xx, ey + yy)) px(c, ex + xx, ey + yy, ph < 0.5 ? PAL.parch : '#9a9088');
+      case 'laugh': {
+        if (age > 150 && age < 1700) {
+          const u = (age % 300) / 300;
+          for (const [ex, d] of [[16, -1], [32, 1]] as const) {
+            const p = B(ex + hx, 16 + hy);
+            px(c, p.x + d * Math.round(1 + u * 4), p.y + Math.round(u * u * 4), '#8fd0ff', k, k);
+          }
+        }
+        break;
+      }
+      case 'yeehaw': {
+        // dust kicked up off the shoulders when the hat goes, and again on the catch
+        for (const [t0, n] of [[YEE.up, 1], [YEE.catch, 0.6]] as const) {
+          if (age < t0 || age > t0 + 520) continue;
+          const u = (age - t0) / 520;
+          for (const d of [-1, 1]) for (let i = 0; i < 2; i++) {
+            const p = B(24 + d * (20 + u * 10 + i * 5), 34 - u * 6 - i * 3);
+            puff(c, p.x, p.y, Math.max(1, Math.round((1 + u * 2.5) * Math.max(1, s) * n)) + i, 1 - u, '#d8c4a0', '#9a8466');
+          }
+        }
+        // speed lines under the rising hat
+        if (age > YEE.up && age < YEE.up + 380) {
+          const top = B(24, (ps.hatDy ?? 0) + 14);
+          for (const dx of [-6, 0, 6]) { c.fillStyle = '#e8d5b5'; c.fillRect(top.x + Math.round(dx * s), top.y, 1, 3 + k * 2); }
+        }
+        break;
+      }
+      case 'clap': {
+        for (const t0 of CLAPS) {
+          if (age < t0 || age >= t0 + CLAP_HOLD) continue;
+          const big = age < t0 + 80;
+          const col = big ? PAL.white : '#fff3b8';
+          // impact rays fanning up and out from where the palms meet + ticks at the sides (the face stays clear)
+          const d0 = big ? 9 : 8;
+          const l = B(24 - d0, 22), r = B(24 + d0, 22);
+          glyph(c, GL.rayL, l.x, l.y, col, k); glyph(c, GL.rayR, r.x, r.y, col, k);
+          for (const d of [-1, 1]) {
+            const q = B(24 + d * (big ? 11 : 10), 28);
+            c.fillStyle = PAL.ink; c.fillRect(q.x - 1, q.y - 1, k + 2, 4 * k + 2);
+            c.fillStyle = col; c.fillRect(q.x, q.y, k, 4 * k);
+          }
+          if (big) { const p = B(24, 36); glyph(c, GL.star3, p.x, p.y, PAL.white, k); }
+        }
+        break;
+      }
+      case 'shrug': {
+        // question marks floating up from around the head
+        // (they stay beside the head: the caption owns the space above it)
+        const spots: [number, number, number][] = [[250, 2, 6], [480, 46, 4], [760, 6, 3], [1000, 42, 1]];
+        for (const [t0, bx, by] of spots) {
+          const u = (age - t0) / 700;
+          if (u < 0 || u > 1) continue;
+          if (u > 0.75 && tw) continue; // flicker out
+          const p = B(bx, by);
+          glyph(c, GL.q, p.x, p.y - Math.round(u * 7 * Math.max(1, s)), PAL.parch, k);
+        }
+        break;
+      }
+      case 'angry': {
+        if (age < 1800) {
+          for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
+            const ph = ((age / 500) + i / 3) % 1;
+            const p = B(24 + side * (12 + ph * 8) + hx, 17 - ph * 16);
+            puff(c, p.x, p.y, Math.max(1, Math.round((1 + ph * 2.2) * Math.max(1, s))), (1 - ph) * 1.3, '#f4ece0', '#a89c90');
+          }
+          // pulsing vein mark by the temple
+          const p = B(37, 3);
+          glyph(c, f2(age, 160) ? GL.vein7 : GL.vein5, p.x, p.y, '#ff3a2a', k);
+        }
+        break;
+      }
+      case 'drink': {
+        if (age >= 300 && age < 650 && tw) { const p = B(41, 7); glyph(c, GL.star5, p.x, p.y, '#fff3b8', k); }
+        if (age >= 1400 && age < 2000) { const p = B(37, 25); glyph(c, tw ? GL.star7 : GL.star3, p.x, p.y, '#fff3b8', k); }
+        break;
       }
     }
   }
 }
+
+const f2 = (age: number, ms: number) => Math.floor(age / ms) % 2 === 1;
 
 export function rgbOf(hex: string) { return hexRgb(hex); }

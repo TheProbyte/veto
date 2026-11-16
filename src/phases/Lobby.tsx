@@ -26,14 +26,20 @@ function Status({ p }: { p: Player }) {
 }
 
 const FINALES: { v: Settings['finale']; label: string; short: string }[] = [
+  { v: 'slide', label: 'Whiskey slide', short: 'Whiskey slide' },
   { v: 'cylinder', label: 'Revolver roulette', short: 'Roulette' },
   { v: 'duel', label: 'Quick-draw duel', short: 'Duel' },
   { v: 'last', label: 'Last one standing', short: 'Last one standing' },
 ];
 export const settingsOf = (state: Pick<RoomState, 'settings'>): Settings => ({ ...DEFAULT_SETTINGS, ...(state.settings || {}) });
+const finaleAt = (f: Settings['finale']) => f === 'slide' || f === 'cylinder';
 export function rulesSummary(s: Settings) {
-  const fin = s.finale === 'cylinder' ? `Roulette at ${s.cylinderAt}` : FINALES.find((f) => f.v === s.finale)?.short ?? 'Roulette';
-  return `${s.turnSecs}s turns · ${s.picks} pick${s.picks === 1 ? '' : 's'} · ${fin}`;
+  const short = FINALES.find((f) => f.v === s.finale)?.short ?? 'Whiskey slide';
+  const fin = finaleAt(s.finale) ? `${short} at ${s.cylinderAt}` : short;
+  const parts = [`${s.turnSecs}s`, `${s.picks} pick${s.picks === 1 ? '' : 's'}`, fin];
+  if (s.nominations === 'draft') parts.push('Card draft');
+  if (s.sheriff) parts.push('Sheriff');
+  return parts.join(' · ');
 }
 
 /** Host-editable table rules (lobby + nominate before the deal). Non-hosts get a one-line summary. */
@@ -52,7 +58,7 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
   };
   useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
   // follow the server unless I have an edit in flight
-  const sk = `${server.turnSecs}|${server.picks}|${server.finale}|${server.cylinderAt}`;
+  const sk = `${server.turnSecs}|${server.picks}|${server.finale}|${server.cylinderAt}|${server.nominations}|${server.sheriff}`;
   useEffect(() => { if (!pend.current) setDraft(server); }, [sk]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (patch: Partial<Settings>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -96,16 +102,34 @@ export function TableRules({ state, isHost: host, send, collapsible }: { state: 
               ))}
             </div>
           </div>
-          {s.finale === 'cylinder' && (
+          {finaleAt(s.finale) && (
             <div className="nh-rule-row">
-              <span className="nh-rule-name">Spin at</span>
-              <div className="nh-seg" role="group" aria-label="Spin the cylinder when this many games are left">
+              <span className="nh-rule-name">Finale at</span>
+              <div className="nh-seg" role="group" aria-label="Start the finale when this many games are left">
                 {([3, 2] as const).map((n) => (
                   <button key={n} type="button" className={s.cylinderAt === n ? 'on' : ''} aria-pressed={s.cylinderAt === n} onClick={() => { sfx.click(); set({ cylinderAt: n }); }}>{n} left</button>
                 ))}
               </div>
             </div>
           )}
+          <div className="nh-rule-row nh-rule-wide">
+            <span className="nh-rule-name">Nominations</span>
+            <div className="nh-seg nh-seg-wrap" role="group" aria-label="How games get nominated">
+              {([['browse', 'Browse the pool'], ['draft', 'Card draft']] as const).map(([v, label]) => (
+                <button key={v} type="button" className={s.nominations === v ? 'on' : ''} aria-pressed={s.nominations === v} onClick={() => { sfx.click(); set({ nominations: v }); }}>{label}</button>
+              ))}
+            </div>
+            <small className="nh-rule-help">{s.nominations === 'draft' ? "Everyone's dealt 5 cards: play, burn or trade them" : 'Everyone picks freely from the shared pool'}</small>
+          </div>
+          <div className="nh-rule-row nh-rule-wide">
+            <span className="nh-rule-name">Sheriff</span>
+            <div className="nh-seg" role="group" aria-label="Sheriff role">
+              {([[false, 'Off'], [true, 'On']] as const).map(([v, label]) => (
+                <button key={label} type="button" className={s.sheriff === v ? 'on' : ''} aria-pressed={s.sheriff === v} onClick={() => { sfx.click(); set({ sheriff: v }); }}>{label}</button>
+              ))}
+            </div>
+            <small className="nh-rule-help">{s.sheriff ? "One player gets a badge: one Pardon, one Jail. The posse can vote 'em out." : 'No law in this town'}</small>
+          </div>
         </div>
       )}
     </section>

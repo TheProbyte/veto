@@ -4,6 +4,7 @@ import type { RoomProps } from '../props';
 import { sfx } from '../sfx';
 import { Avatar, settingsOf, TableRules } from './Lobby';
 import Pitches from './Pitches';
+import DraftHand from './DraftHand';
 import Cover from '../scene/Cover';
 import { DockActions, launchCard, play } from '../scene/Dock';
 import './panels.css';
@@ -138,14 +139,15 @@ export default function Nominate({ state, me, send }: RoomProps) {
   };
 
   const empty = !state.poolLoading && state.pool.length === 0;
+  const drafting = settingsOf(state).nominations === 'draft' && !!state.draft;
 
   return (
     <div className="nh-panel nh-wood nh-nom">
       <i className="nh-nail tl" /><i className="nh-nail tr" /><i className="nh-nail bl" /><i className="nh-nail br" />
       <header className="nh-head nh-nom-head">
         <div>
-          <h2 className="nh-h">Toss your games on the table</h2>
-          <div className="nh-sub">Pick up to {MAX_NOMS}. Tap again to take one back.</div>
+          <h2 className="nh-h">{drafting ? 'Play your hand' : 'Toss your games on the table'}</h2>
+          <div className="nh-sub">{drafting ? `Play up to ${MAX_NOMS}. Burn a dud, trade the rest.` : `Pick up to ${MAX_NOMS}. Tap again to take one back.`}</div>
         </div>
         <div className={`nh-tally ${myCount >= MAX_NOMS ? 'is-full' : ''}`} aria-label="Your nominations">
           {Array.from({ length: MAX_NOMS }, (_, i) => <i key={i} className={i < myCount ? 'on' : ''} />)}
@@ -153,8 +155,13 @@ export default function Nominate({ state, me, send }: RoomProps) {
         </div>
       </header>
 
-      {state.phase === 'nominate' && <div className="nh-nom-rules"><TableRules state={state} isHost={isHost} send={send} collapsible /></div>}
+      {state.phase === 'nominate' && !drafting && <div className="nh-nom-rules"><TableRules state={state} isHost={isHost} send={send} collapsible /></div>}
 
+      {drafting ? <>
+        <DraftHand state={state} me={me} send={send} />
+        {state.phase === 'nominate' && <div className="nh-nom-rules"><TableRules state={state} isHost={isHost} send={send} collapsible /></div>}
+      </> : (
+        <>
       {deal && (
         <a className="nh-deal" href={`https://store.steampowered.com/app/${deal.appid}`} target="_blank" rel="noopener noreferrer"
           onClick={() => sfx.click()} aria-label={`Deal of the night: ${deal.name}, ${deal.discount}% off. Gift it on Steam`}>
@@ -203,6 +210,9 @@ export default function Nominate({ state, me, send }: RoomProps) {
             </section>
           )}
         </div>
+      )}
+
+        </>
       )}
 
       <Pitches state={state} me={me} send={send} />

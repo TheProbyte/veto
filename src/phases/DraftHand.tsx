@@ -1,0 +1,303 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { DRAFT_BURNS, DRAFT_HAND, type Draft, type Player, type PoolGame } from '../../shared/types';
+import type { RoomProps } from '../props';
+import { sfx } from '../sfx';
+import Cover from '../scene/Cover';
+import { launchCard, play } from '../scene/Dock';
+import { Avatar, settingsOf } from './Lobby';
+import './panels.css';
+
+const reduced = () => { try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+const SUITS = ['♠', '♥', '♦', '♣'];
+const BURN_MS = 950;
+
+function hrs(h: number) { return h >= 1000 ? `${(h / 1000).toFixed(1)}k` : `${Math.round(h)}`; }
+
+/** a little stack of face-down cards (others' hands, the deck) */
+export function CardBacks({ n, max = 5, big }: { n: number; max?: number; big?: boolean }) {
+  const shown = Math.max(0, Math.min(max, n));
+  return (
+    <span className={`dh-backs ${big ? 'is-big' : ''} ${n === 0 ? 'is-empty' : ''}`} aria-hidden>
+      {shown === 0 ? <i className="dh-back is-ghost" /> : Array.from({ length: shown }, (_, i) => <i key={i} className="dh-back" style={{ '--i': i } as CSSProperties} />)}
+    </span>
+  );
+}
+
+type Mode = null | { k: 'offer' } | { k: 'give'; offer: number };
+
+/** Card-hand draft (settings.nominations === 'draft'): my private hand + trades. */
+export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' | 'me' | 'send'>) {
+  const draft = state.draft as Draft;
+  const hand = draft.hand || [];
+  const byId = useMemo(() => new Map(state.players.map((p) => [p.id, p])), [state.players]);
+  const poolBy = useMemo(() => new Map(state.pool.map((g) => [g.appid, g])), [state.pool]);
+  const pitchBy = useMemo(() => new Map((state.pitches || []).map((p) => [p.appid, p.name])), [state.pitches]);
+  const nameOf = (appid: number) => poolBy.get(appid)?.name ?? pitchBy.get(appid) ?? state.board.find((b) => b.appid === appid)?.name ?? 'A mystery game';
+  const who = (id: string) => (id === me ? 'You' : byId.get(id)?.name ?? 'Somebody');
+  const picks = settingsOf(state).picks;
+  const myCount = state.board.filter((b) => b.by.includes(me)).length;
+  const burnsLeft = Math.max(0, DRAFT_BURNS - (draft.burns?.[me] ?? 0));
+  const offers = draft.offers || [];
+  const incoming = offers.filter((o) => o.to === me);
+  const outgoing = offers.filter((o) => o.from === me);
+  const others = state.players.filter((p) => p.id !== me);
+  const targets = others.filter((p) => p.connected || p.bot);
+  const full = myCount >= picks;
+
+  const [sel, setSel] = useState<number | null>(null);
+  const [mode, setMode] = useState<Mode>(null);
+  const [burning, setBurning] = useState<{ appid: number; idx: number }[]>([]);
+  const [playing, setPlaying] = useState<Set<number>>(() => new Set());
+  const timers = useRef<number[]>([]);
+  const hiss = useRef(false);
+  useEffect(() => () => { timers.current.forEach(clearTimeout); if (hiss.current) sfx.fuse(false); }, []);
+  const later = (fn: () => void, ms: number) => { timers.current.push(window.setTimeout(fn, ms)); };
+
+  // reconcile local UI with the server: a selected card that left my hand, an offer that's gone
+  const handKey = hand.join(',');
+  useEffect(() => {
+    if (sel != null && !hand.includes(sel)) setSel(null);
+  }, [handKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const offerKey = offers.map((o) => o.id).join(',');
+  useEffect(() => {
+    if (mode?.k === 'give' && !offers.some((o) => o.id === mode.offer && o.to === me)) setMode(null);
+  }, [offerKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (mode?.k === 'offer' && sel == null) setMode(null); }, [sel, mode]);
+
+  /* ---- new cards slide in from the deck ---- */
+  const deckRef = useRef<HTMLDivElement>(null);
+  const cardEls = useRef(new Map<number, HTMLElement>());
+  const prevHand = useRef<number[] | null>(null);
+  useLayoutEffect(() => {
+    const prev = prevHand.current;
+    prevHand.current = hand;
+    const fresh = hand.filter((a) => !(prev || []).includes(a));
+    if (!fresh.length) return;
+    const many = fresh.length > 1;
+    if (many) { if (!play('cardRiffle')) sfx.whoosh(); } else if (!play('cardSlide')) sfx.whoosh();
+    if (reduced()) return;
+    const deck = deckRef.current?.getBoundingClientRect();
+    fresh.forEach((appid, i) => {
+      const el = cardEls.current.get(appid);
+      if (!el || !deck) return;
+      const r = el.getBoundingClientRect();
+      const dx = deck.left + deck.width / 2 - (r.left + r.width / 2);
+      const dy = deck.top + deck.height / 2 - (r.top + r.height / 2);
+      el.animate([
+        { transform: `translate(${dx}px, ${dy}px) scale(.55) rotate(-14deg)`, opacity: 0 },
+        { opacity: 1, offset: 0.25 },
+        { transform: `translate(${dx * 0.3}px, ${dy * 0.3 - 18}px) scale(.9) rotate(4deg)`, offset: 0.65 },
+        { transform: 'none' },
+      ], { duration: 420, delay: many ? i * 110 : 0, easing: 'cubic-bezier(.3,.1,.4,1)', fill: 'backwards' });
+      if (many && i > 0) later(() => play('cardSlide'), i * 110);
+    });
+  }, [handKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---- actions ---- */
+  const pick = (appid: number) => {
+    sfx.unlock(); sfx.click();
+    if (mode?.k === 'offer') setMode(null);
+    setSel((s) => (s === appid ? null : appid));
+  };
+  const doPlay = (appid: number) => {
+    if (full) return;
+    sfx.unlock();
+    const el = cardEls.current.get(appid);
+    launchCard(appid, el?.querySelector('.dh-card-art') ?? el ?? null);
+    play('swish');
+    setPlaying((s) => new Set(s).add(appid));
+    later(() => setPlaying((s) => { const n = new Set(s); n.delete(appid); return n; }), 2000);
+    setSel(null);
+    send({ t: 'draftPlay', appid });
+  };
+  const doBurn = (appid: number) => {
+    if (burnsLeft <= 0) return;
+    sfx.unlock();
+    sfx.fuse(true); hiss.current = true; // a short fuse hiss while it burns
+    later(() => { sfx.fuse(false); hiss.current = false; }, BURN_MS - 200);
+    setSel(null);
+    if (!reduced()) {
+      const idx = hand.indexOf(appid);
+      setBurning((b) => [...b.filter((x) => x.appid !== appid), { appid, idx }]);
+      later(() => setBurning((b) => b.filter((x) => x.appid !== appid)), BURN_MS);
+    }
+    send({ t: 'draftBurn', appid });
+  };
+  const doOffer = (to: string) => {
+    if (sel == null) return;
+    sfx.unlock(); if (!play('cardSlide')) sfx.whoosh();
+    send({ t: 'draftOffer', to, appid: sel });
+    setMode(null); setSel(null);
+  };
+  const doGive = (offer: number) => {
+    if (sel == null) return;
+    sfx.unlock(); if (!play('cardSlap')) sfx.stamp();
+    send({ t: 'draftAccept', offer, give: sel });
+    setMode(null); setSel(null);
+  };
+  const decline = (offer: number) => {
+    sfx.unlock(); sfx.click();
+    if (mode?.k === 'give' && mode.offer === offer) setMode(null);
+    send({ t: 'draftDecline', offer });
+  };
+
+  /* ---- the cards shown: my hand, plus burning ghosts the server already took away ---- */
+  const slots: { appid: number; burn: boolean }[] = hand.map((appid) => ({ appid, burn: burning.some((b) => b.appid === appid) }));
+  for (const b of burning) {
+    if (hand.includes(b.appid)) continue;
+    slots.splice(Math.max(0, Math.min(slots.length, b.idx)), 0, { appid: b.appid, burn: true });
+  }
+  const n = slots.length;
+  const giving = mode?.k === 'give' ? offers.find((o) => o.id === mode.offer) : undefined;
+  const onOffer = new Map(outgoing.map((o) => [o.give, o.to]));
+
+  const card = ({ appid, burn }: { appid: number; burn: boolean }, i: number) => {
+    const g: PoolGame | undefined = poolBy.get(appid);
+    const name = nameOf(appid);
+    const missing = (g?.missing || []).map((id) => byId.get(id)).filter(Boolean) as Player[];
+    const c = i - (n - 1) / 2;
+    const isSel = sel === appid && !burn;
+    const offeredTo = onOffer.get(appid);
+    return (
+      <button key={appid} type="button" ref={(el) => { if (el) cardEls.current.set(appid, el); else cardEls.current.delete(appid); }}
+        className={`dh-card ${isSel ? 'is-sel' : ''} ${burn ? 'is-burning' : ''} ${playing.has(appid) ? 'is-playing' : ''} ${giving ? 'is-giving' : ''}`}
+        style={{ '--r': `${c * 4}deg`, '--y': `${Math.abs(c) * Math.abs(c) * 3}px` } as CSSProperties}
+        disabled={burn} aria-pressed={isSel} onClick={() => pick(appid)}
+        aria-label={`${name}${g ? `, ${g.hours > 0 ? `${hrs(g.hours)} hours together` : 'nobody has played it'}` : ''}${missing.length ? `, ${missing.length} short` : ''}`}>
+        <span className="dh-face">
+          <span className="dh-pip" aria-hidden>{SUITS[appid % 4]}</span>
+          <span className="dh-card-art"><Cover appid={appid} name={name} kind="box" />
+            <span className="dh-art-hrs" aria-hidden>{g ? (g.hours > 0 ? `${hrs(g.hours)}h` : 'New') : '$'}</span>
+            {missing.length > 0 && <span className="dh-art-short" aria-hidden title={`Short: ${missing.map((p) => p.name).join(', ')}`}>-{missing.length}</span>}
+          </span>
+          <span className="dh-card-name">{name}</span>
+          <span className="dh-card-meta">
+            <b>{g ? (g.hours > 0 ? `${hrs(g.hours)}h` : 'Fresh') : '$ Pitch'}</b>
+            {missing.length > 0 && (
+              <span className="dh-short" title={`Short: ${missing.map((p) => p.name).join(', ')}`}>
+                {missing.slice(0, 2).map((p) => <Avatar key={p.id} p={p} size={12} />)}
+                {missing.length > 2 && <small>+{missing.length - 2}</small>}
+              </span>
+            )}
+          </span>
+          {offeredTo && <span className="dh-tag">→ {who(offeredTo)}</span>}
+        </span>
+        {burn && (
+          <span className="dh-fire" aria-hidden>
+            <i /><i /><i /><i /><i /><i />
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  const selName = sel != null ? nameOf(sel) : '';
+  let bar: JSX.Element | null;
+  if (giving) {
+    bar = (
+      <div className="dh-bar is-give">
+        <span className="dh-bar-txt">{sel != null ? <>Give <b>{who(giving.from)}</b> your <b>{selName}</b>?</> : <>Pick a card to give <b>{who(giving.from)}</b></>}</span>
+        <button type="button" className="nh-btn nh-btn-sm" disabled={sel == null} onClick={() => doGive(giving.id)}>Trade</button>
+        <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => { sfx.click(); setMode(null); setSel(null); }}>Cancel</button>
+      </div>
+    );
+  } else if (mode?.k === 'offer' && sel != null) {
+    bar = (
+      <div className="dh-bar is-offer">
+        <span className="dh-bar-txt">Offer <b>{selName}</b> to</span>
+        <div className="dh-targets" role="group" aria-label="Offer to which player">
+          {targets.length === 0 && <span className="dh-bar-txt">nobody's here</span>}
+          {targets.map((p) => (
+            <button key={p.id} type="button" className="dh-target" onClick={() => doOffer(p.id)}>
+              <Avatar p={p} size={18} /><span>{p.name}</span>
+            </button>
+          ))}
+        </div>
+        <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => { sfx.click(); setMode(null); }}>Cancel</button>
+      </div>
+    );
+  } else if (sel != null) {
+    bar = (
+      <div className="dh-bar">
+        <button type="button" className="nh-btn nh-btn-sm dh-play" disabled={full} onClick={() => doPlay(sel)} title={full ? `You've played all ${picks}` : 'Play it onto the table'}>
+          {full ? 'Picks full' : 'Play'}
+        </button>
+        <button type="button" className="nh-btn nh-btn-sm nh-btn-red dh-burn" disabled={burnsLeft <= 0} onClick={() => doBurn(sel)} title={draft.deck <= 0 ? "Deck's empty: you won't draw a new one" : 'Discard it and draw a new one'}>
+          Burn{burnsLeft > 0 ? '' : ' (used)'}
+        </button>
+        <button type="button" className="nh-btn nh-btn-sm dh-offer" disabled={targets.length === 0} onClick={() => { sfx.click(); setMode({ k: 'offer' }); }}>Offer to…</button>
+      </div>
+    );
+  } else if (incoming.length > 0) {
+    bar = null; // the trade strip above the fan says it all
+  } else {
+    bar = (
+      <div className="dh-bar is-idle">
+        <span className="dh-bar-txt">{hand.length ? (full ? 'Your picks are in. Trade the rest, or sit tight.' : 'Tap a card to play, burn or trade it.') : "Your hand's empty."}</span>
+        <span className="dh-stat">Burns <b>{burnsLeft}</b></span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <section className="dh-table" aria-label="Hands at the table">
+        {others.map((p) => {
+          const c = draft.handCounts?.[p.id] ?? 0;
+          return (
+            <span key={p.id} className={`dh-seat ${p.connected || p.bot ? '' : 'is-off'}`} title={`${p.name}: ${c} card${c === 1 ? '' : 's'}`}>
+              <Avatar p={p} size={18} /><span className="dh-seat-name">{p.name}</span><CardBacks n={c} /><b>{c}</b>
+            </span>
+          );
+        })}
+      </section>
+
+      {outgoing.length > 0 && (
+        <section className="dh-offers" aria-label="Trades">
+          {outgoing.map((o) => (
+            <div key={o.id} className="dh-trade is-out">
+              <span className="dh-trade-art"><Cover appid={o.give} name={nameOf(o.give)} kind="box" /></span>
+              <div className="dh-trade-txt">
+                <span className="dh-trade-k">Your offer</span>
+                <span><b>{nameOf(o.give)}</b> → {who(o.to)}</span>
+                <span className="dh-wait"><i className="nh-spin" /> Waiting on {who(o.to)}…</span>
+              </div>
+              <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => decline(o.id)}>Withdraw</button>
+            </div>
+          ))}
+        </section>
+      )}
+
+      <section className={`dh ${giving ? 'is-give' : ''}`} aria-label="Your hand">
+          {!giving && sel == null && incoming.length > 0 && (
+            <div className="dh-offers is-in" aria-label="Trade offers to you" aria-live="polite">
+            {incoming.slice(0, 1).map((o) => (
+            <div key={o.id} className="dh-trade">
+              <span className="dh-trade-art"><Cover appid={o.give} name={nameOf(o.give)} kind="box" /></span>
+              <div className="dh-trade-txt">
+                <span className="dh-trade-k">Trade</span>
+                <span><b>{who(o.from)}</b> offers <b>{nameOf(o.give)}</b></span>
+                <div className="dh-trade-btns">
+                  <button type="button" className="nh-btn nh-btn-sm" disabled={hand.length === 0}
+                    onClick={() => { sfx.unlock(); sfx.click(); setSel(null); setMode({ k: 'give', offer: o.id }); }}>Accept: give one of mine…</button>
+                  <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => decline(o.id)}>Decline</button>
+                </div>
+              </div>
+            </div>
+          ))}
+            {incoming.length > 1 && <span className="dh-more">+{incoming.length - 1} more offer{incoming.length === 2 ? '' : 's'} waiting</span>}
+            </div>
+          )}
+        <div className="dh-fan" role="group" aria-label={`Your hand: ${hand.length} of ${DRAFT_HAND} cards`}>
+          <div className="dh-deck" ref={deckRef} title={`${draft.deck} left in the deck`}>
+            <CardBacks n={draft.deck} max={4} big />
+            <span className="dh-deck-n"><b>{draft.deck}</b>deck</span>
+          </div>
+          {slots.map(card)}
+          {n === 0 && <div className="dh-none">No cards</div>}
+        </div>
+        {bar}
+      </section>
+    </>
+  );
+}

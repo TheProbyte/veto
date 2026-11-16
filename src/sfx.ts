@@ -809,9 +809,9 @@ export const sfx = {
     out(g, 0.5);
     lfo.start(t); lfo.stop(t + 0.52);
   },
-  spit() {                 // comic "ptoo" ... ping! into the spittoon
+  spit() {                 // comic "ptoo" ... ping! into the spittoon (after a 0.3s cheek-puff wind-up; lands at ~0.85s like the scene)
     if (!ready()) return;
-    const t = now();
+    const t = now() + 0.3;
     noiseHit(t, 'lowpass', 1500, 0.4, 0.02);                 // "p"
     const o = ctx!.createOscillator();                        // "too"
     o.type = 'triangle';
@@ -824,7 +824,7 @@ export const sfx = {
     out(g, 0.1);
     o.start(t + 0.03); o.stop(t + 0.2);
     noiseHit(t + 0.03, 'bandpass', 900, 0.15, 0.1, 0, 2);     // breathy
-    const tp = t + 0.36;                                      // spittoon ping
+    const tp = t + 0.55;                                      // spittoon ping
     tone(tp, 'sine', 1750, 1740, 0.09, 0.4, 0.5, 0.001);
     tone(tp, 'sine', 2730, 2720, 0.04, 0.25, 0.5, 0.001);
     noiseHit(tp, 'bandpass', 2000, 0.12, 0.02, 0.2, 2);
@@ -944,9 +944,9 @@ export const sfx = {
     voice(t, 380, 620, 560, 0.18, 0.35);
     voice(t + 0.22, 520, 760, 300, 0.55, 0.45);
   },
-  clap() {                 // a slow clap: three hand claps
+  clap() {                 // a slow clap: wind-up, then three hand claps at 0.25 / 0.67 / 1.09s (the scene's palms meet on these)
     if (!ready()) return;
-    const t = now() + 0.01;
+    const t = now() + 0.25;
     for (let i = 0; i < 3; i++) {
       const tt = t + i * 0.42;
       noiseHit(tt, 'bandpass', 1300, 0.55, 0.05, 0.5, 1.2);
