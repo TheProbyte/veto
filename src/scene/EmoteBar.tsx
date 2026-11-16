@@ -122,6 +122,9 @@ export default function EmoteBar({ state, send, skew }: RoomProps) {
       <button
         className={`emo-btn px-btn ${open ? 'open' : ''}`}
         onClick={() => toggle()}
+        // Space belongs to the game (FIRE / BANG) even while this button has focus; E / Enter / tap open it
+        onKeyDown={(e) => { if (e.key === ' ') e.preventDefault(); }}
+        onKeyUp={(e) => { if (e.key === ' ') e.preventDefault(); }}
         aria-label="Emotes and taunts (E)"
         aria-expanded={open}
         title="Emotes & taunts (E)"

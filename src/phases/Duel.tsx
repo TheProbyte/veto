@@ -94,10 +94,7 @@ export default function Duel({ state, me, send, skew }: RoomProps) {
     send({ t: 'bang', reaction: Math.max(1, reaction) });
   };
   useEffect(() => {
-    const skip = (t: EventTarget | null) => {
-      const el = t as HTMLElement | null;
-      return !!el?.closest?.('.emo, .sound, input, textarea, select, a');
-    };
+    const skip = (t: EventTarget | null, sel = '.emo, .sound, input, textarea, select, a') => !!(t as HTMLElement | null)?.closest?.(sel);
     const onDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (skip(e.target)) return;
@@ -105,7 +102,7 @@ export default function Duel({ state, me, send, skew }: RoomProps) {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== ' ' && e.code !== 'Space' && e.key !== 'Enter') return;
-      if (skip(e.target)) return;
+      if (skip(e.target, '.emo-wheel, .sound, input, textarea, select')) return; // a focused emote button still lets Space bang
       e.preventDefault();
       if (e.repeat) return;
       bangRef.current();

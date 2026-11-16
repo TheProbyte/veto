@@ -54,7 +54,7 @@ export default function Veto({ state, me, send, skew }: RoomProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.closest?.('.emo, .sound'))) return;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.closest?.('.emo-wheel, .sound'))) return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); keyRef.current.aimAt(-1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); keyRef.current.aimAt(1); }
       else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); if (!e.repeat) keyRef.current.fire(); }

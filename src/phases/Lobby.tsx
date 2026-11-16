@@ -37,8 +37,10 @@ export function rulesSummary(s: Settings) {
 }
 
 /** Host-editable table rules (lobby + nominate before the deal). Non-hosts get a one-line summary. */
-export function TableRules({ state, isHost, send, collapsible }: { state: RoomState; isHost: boolean; send: RoomProps['send']; collapsible?: boolean }) {
+export function TableRules({ state, isHost: host, send, collapsible }: { state: RoomState; isHost: boolean; send: RoomProps['send']; collapsible?: boolean }) {
   const server = settingsOf(state);
+  // the server lets anyone edit the rules while the host is away
+  const isHost = host || !state.players.some((p) => p.host && p.connected);
   const [draft, setDraft] = useState<Settings>(server);
   const [open, setOpen] = useState(!collapsible);
   const pend = useRef<Partial<Settings> | null>(null);
