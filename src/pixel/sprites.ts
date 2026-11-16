@@ -38,7 +38,17 @@ export interface BustLook {
   shine?: boolean; // gold hat
   scarfPat?: 'skull' | 'stars';
   coatPat?: 'poncho' | 'vest';
+  /** LOOK_LABELS.coat order: 0 duster, 1 black frock + waistcoat, 2 leather jacket, 3 blue bib shirt + suspenders,
+   * 4 grey vest over a striped shirt, 5 hide sheriff's vest, 6 poncho, 7 gold vest */
+  coatKind?: number;
+  /** what the arms are wearing (coat sleeve or shirt sleeve) */
+  sleeve?: string;
+  /** shirt showing at the collar / under a vest */
+  shirt?: string;
 }
+// per coat option: sleeve colour + shirt colour (indexed like COATS)
+const SLEEVES = ['#6b5032', '#1c1d22', '#4a2c1a', '#1e2c4a', '#d8ccb0', '#9e3b2a', '#8a3a1c', '#cfc2a4'];
+const SHIRTS = [PAL.parch2, PAL.parch, '#3a5470', '#2b3f66', '#d8ccb0', '#9e3b2a', PAL.parch2, PAL.parch2];
 
 const wrap = (v: number, n: number) => ((Math.floor(v) % n) + n) % n;
 
@@ -58,6 +68,9 @@ export function lookFromStyle(st: Look, id = ''): BustLook {
     shine: wrap(st.hatColor, HAT_COLS.length) === 6,
     scarfPat: ({ 6: 'skull', 7: 'stars' } as const)[wrap(st.bandana, SCARVES.length) as 6 | 7],
     coatPat: ({ 6: 'poncho', 7: 'vest' } as const)[wrap(st.coat, COATS.length) as 6 | 7],
+    coatKind: wrap(st.coat, COATS.length),
+    sleeve: SLEEVES[wrap(st.coat, COATS.length)],
+    shirt: SHIRTS[wrap(st.coat, COATS.length)],
   };
 }
 
@@ -150,13 +163,15 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   const off = (v?: number) => (v ? Math.sign(v) * Math.max(1, Math.round(Math.abs(v) * s)) : 0);
   const headX = off(pose?.hx), headY = off(pose?.hy);
 
-  // --- coat / shoulders
+  // --- coat / shoulders (vests: the shirt is the silhouette, the vest goes on top)
+  const ck = L.coatKind ?? -1;
+  const base = ck === 4 || ck === 5 ? L.shirt ?? L.coat : L.coat;
   for (let y = 29; y < 56; y++) {
     const t = Math.min(1, (y - 29) / 7);
     const hw = Math.round(9 + 14 * Math.sqrt(t));
-    R(24 - hw, y, hw * 2, 1, L.coat);
+    R(24 - hw, y, hw * 2, 1, base);
   }
-  const coatD = shade(L.coat, 0.55);
+  const coatD = shade(base, 0.55);
   c.fillStyle = coatD;
   const y38 = X(38), Hb = Math.round(BUST_H * s);
   for (let y = y38; y < Hb; y++) for (let x = 0; x < W; x++) {
@@ -164,12 +179,15 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
     const yy = y / s, tt = Math.min(1, (yy - 29) / 7), hw = 9 + 14 * Math.sqrt(Math.max(0, tt));
     if (t * 1.3 > bayer(x, y) && Math.abs(x / s - 24) < hw - 0.5) c.fillRect(x, y, 1, 1);
   }
-  R(21, 30, 6, 14, '#1a120c');
-  R(22, 31, 4, 12, PAL.parch3);
-  line(c, X(19), X(30), X(22), X(46), PAL.ink);
-  line(c, X(29), X(30), X(26), X(46), PAL.ink);
-  R(24, 39, 1, 1, PAL.metal3);
-  R(15, 28, 4, 4, L.coat); R(29, 28, 4, 4, L.coat);
+  if (ck >= 0 && ck <= 5) drawCoat(ck, L, R, (x0, y0, x1, y1, col) => line(c, X(x0), X(y0), X(x1), X(y1), col));
+  else {
+    R(21, 30, 6, 14, '#1a120c');
+    R(22, 31, 4, 12, PAL.parch3);
+    line(c, X(19), X(30), X(22), X(46), PAL.ink);
+    line(c, X(29), X(30), X(26), X(46), PAL.ink);
+    R(24, 39, 1, 1, PAL.metal3);
+    R(15, 28, 4, 4, L.coat); R(29, 28, 4, 4, L.coat);
+  }
   if (L.coatPat === 'poncho') {
     const ST = ['#8a3a1c', '#d4a52a', '#e8d5b5', '#2f6a3a', '#8a3a1c', '#1e2c4a'];
     for (let y = 28; y < 56; y++) {
@@ -177,6 +195,9 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
       R(24 - hw, y, hw * 2, 1, ST[Math.floor((y - 28) / 3) % ST.length]);
       if ((y - 28) % 3 === 2) for (let x = 24 - hw; x < 24 + hw; x += 3) R(x, y, 1, 1, PAL.ink);
     }
+    // a diamond band across the chest + fringe along a stripe
+    for (let x = 12; x < 37; x++) { const k = Math.abs(((x - 12) % 6) - 3); R(x, 34 + k - 1, 1, 1, '#e8d5b5'); R(x, 34 - k + 2, 1, 1, '#1e2c4a'); }
+    for (let x = 13; x < 36; x += 2) R(x, 41, 1, 2, '#d4a52a');
     for (let i = 0; i < 5; i++) R(22 + (i % 2), 28 + i, 4 - (i % 2) * 2, 1, PAL.wood1); // neck slit
   } else if (L.coatPat === 'vest') {
     for (let y = 31; y < 56; y++) {
@@ -207,9 +228,16 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
       for (const [sx, sy] of [[18, 27], [21, 28], [24, 27], [27, 28], [30, 27], [22, 30], [26, 30]]) R(sx, sy, 1, 1, PAL.white);
     }
   } else {
-    R(19, 28, 4, 3, PAL.parch2); R(25, 28, 4, 3, PAL.parch2);
-    R(23, 29, 2, 3, sk0);
-    R(19, 28, 4, 1, PAL.parch);
+    const sh = L.shirt ?? PAL.parch2;
+    if (ck === 1) { // high white wing collar + a black string tie
+      R(20, 27, 3, 3, PAL.parch); R(25, 27, 3, 3, PAL.parch); R(23, 28, 2, 2, sk0); R(23, 30, 2, 1, PAL.ink); R(24, 31, 1, 4, PAL.ink);
+    } else if (ck === 2) { // turned-up shearling collar does the work: shirt points peek out
+      R(20, 28, 3, 3, sh); R(25, 28, 3, 3, sh); R(23, 29, 2, 3, sk0);
+    } else {
+      R(19, 28, 4, 3, sh); R(25, 28, 4, 3, sh);
+      R(23, 29, 2, 3, sk0);
+      R(19, 28, 4, 1, shade(sh, 1.2));
+    }
   }
 
   // --- head (offset as a whole with the hat for laughs, bows, tilts)
@@ -430,7 +458,7 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   if (o.hand) {
     c.save(); c.translate(headX, 0);
     const hy = 9 + (o.hatDy ?? 0) + (pose?.hy ?? 0);
-    const sleeve = L.coatPat === 'vest' ? '#cfc2a4' : L.coatPat === 'poncho' ? '#8a3a1c' : L.coat;
+    const sleeve = L.sleeve ?? (L.coatPat === 'vest' ? '#cfc2a4' : L.coatPat === 'poncho' ? '#8a3a1c' : L.coat);
     const top = hy + 4, len = Math.max(4, 33 - top);
     R(33, top, 6, len, PAL.ink); R(34, top, 4, len, sleeve); R(34, top, 1, len, shade(sleeve, 1.4));
     R(32, hy - 1, 7, 6, PAL.ink); R(33, hy, 5, 4, sk1); R(33, hy, 5, 1, sk2); R(37, hy + 1, 1, 3, sk0);
@@ -440,7 +468,7 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
   if (o.gun) {
     const rc = o.gun === 2 ? -2 : 0; // recoil kicks the barrel up
     const gx = 34, gy = 33 + rc;
-    R(gx - 2, gy + 4, 6, 8, L.coat); // forearm
+    R(gx - 2, gy + 4, 6, 8, L.sleeve ?? L.coat); // forearm
     R(gx - 1, gy + 2, 5, 4, sk1); R(gx - 1, gy + 2, 5, 1, sk2); // fist
     R(gx + 1, gy - 6 - rc, 3, 9 + rc, PAL.metal1); // barrel, pointing up/forward
     R(gx + 1, gy - 6 - rc, 1, 9 + rc, PAL.metal3);
@@ -483,10 +511,95 @@ export function renderBust(L: BustLook, o: BustOpts): HTMLCanvasElement {
 }
 
 type RectFn = (x: number, y: number, w: number, h: number, col: string) => void;
+type LineFn = (x0: number, y0: number, x1: number, y1: number, col: string) => void;
+
+/** the chest of coats 0..5 (bust px). The table hides rows below ~40 in the room and a bandana covers the middle,
+ * so each one reads first on the shoulders and outer chest (rows 28-40), the full torso only in the creator. */
+function drawCoat(k: number, L: BustLook, R: RectFn, ln: LineFn) {
+  const coat = L.coat, sh = L.shirt ?? PAL.parch2;
+  const hwAt = (y: number) => Math.round(9 + 14 * Math.sqrt(Math.min(1, Math.max(0, (y - 29) / 7))));
+  const vest = (col: string, edge: string) => { // a vest over the shirt: armholes leave the shirt shoulders, V neck closes at the chest
+    for (let y = 30; y < 56; y++) {
+      const out = Math.min(hwAt(y) - 3, Math.round(6 + (y - 30) * 1.6)), inn = Math.max(0, Math.round(4 - (y - 30) * 0.5));
+      if (out <= inn) continue;
+      R(24 - out, y, out - inn, 1, col); R(24 + inn, y, out - inn, 1, col);
+      R(24 - out, y, 1, 1, edge); R(24 + out - 1, y, 1, 1, edge);
+      if (inn > 0) { R(24 - inn - 1, y, 1, 1, edge); R(24 + inn, y, 1, 1, edge); }
+    }
+  };
+  switch (k) {
+    case 0: { // duster: long open coat, wide notched lapels over a cream shirt, string tie
+      R(20, 30, 8, 14, sh); R(24, 31, 1, 8, PAL.ink);
+      const lap = shade(coat, 1.35), lapD = shade(coat, 0.7);
+      for (let y = 29; y < 42; y++) {
+        const w = y < 34 ? 4 : Math.max(1, 4 - Math.floor((y - 34) / 2));
+        const xl = 16 + Math.floor((y - 29) * 0.35), xr = 32 - Math.floor((y - 29) * 0.35) - w;
+        R(xl, y, w, 1, lap); R(xr, y, w, 1, lap);
+        R(xl + w, y, 1, 1, lapD); R(xr - 1, y, 1, 1, lapD);
+      }
+      R(16, 33, 2, 1, PAL.ink); R(30, 33, 2, 1, PAL.ink); // the notches
+      R(15, 28, 4, 2, coat); R(29, 28, 4, 2, coat);
+      R(14, 38, 3, 1, lapD); // pocket flap
+      break;
+    }
+    case 1: { // black frock coat, oxblood waistcoat, gold watch chain, satin lapels
+      R(20, 30, 8, 16, '#5a1a24'); R(21, 30, 6, 2, PAL.parch);
+      R(22, 32, 4, 1, '#3a0f16');
+      for (let y = 29; y < 44; y++) { const xl = 17 + Math.floor((y - 29) * 0.25), xr = 30 - Math.floor((y - 29) * 0.25); R(xl, y, 2, 1, PAL.metal1); R(xr, y, 2, 1, PAL.metal1); R(xl + 2, y, 1, 1, PAL.ink); R(xr - 1, y, 1, 1, PAL.ink); }
+      R(24, 34, 1, 1, GOLD[3]); R(24, 37, 1, 1, GOLD[3]); R(24, 40, 1, 1, GOLD[3]);
+      // pocket-watch chain draped across from a button to the pocket
+      for (const [x, y] of [[23, 37], [22, 38], [21, 38], [20, 37]]) R(x, y, 1, 1, GOLD[2]);
+      R(20, 36, 1, 1, GOLD[4]); R(25, 38, 1, 1, GOLD[2]); R(26, 38, 1, 1, GOLD[1]);
+      R(15, 28, 4, 2, coat); R(29, 28, 4, 2, coat);
+      R(14, 30, 2, 6, '#2a2c33'); // shoulder sheen
+      break;
+    }
+    case 2: { // leather jacket: big shearling collar, stitched yoke seams, snap front over a blue shirt
+      R(21, 30, 6, 14, sh); R(22, 31, 1, 12, shade(sh, 0.75));
+      const fleece = '#c9a87a', fleeceD = '#8a6a48';
+      for (let y = 27; y < 33; y++) { const w = 6 - Math.max(0, y - 30); R(14 + (y - 27), y, w, 1, fleece); R(34 - (y - 27) - w, y, w, 1, fleece); }
+      R(14, 27, 6, 1, fleeceD); R(28, 27, 6, 1, fleeceD); R(19, 32, 2, 1, fleeceD); R(27, 32, 2, 1, fleeceD);
+      const st = shade(coat, 1.5);
+      for (let x = 12; x < 37; x += 2) if (x < 20 || x > 28) R(x, 35, 1, 1, st); // yoke stitching
+      R(20, 33, 1, 12, PAL.ink); R(27, 33, 1, 12, PAL.ink);
+      R(19, 36, 1, 1, PAL.metal3); R(28, 36, 1, 1, PAL.metal3); R(19, 40, 1, 1, PAL.metal3); R(28, 40, 1, 1, PAL.metal3);
+      R(13, 31, 1, 4, shade(coat, 1.4)); // shine on the leather
+      break;
+    }
+    case 3: { // cavalry bib-front shirt with suspenders (no coat)
+      const bib = shade(coat, 1.3);
+      R(19, 30, 10, 13, bib); R(19, 30, 10, 1, shade(coat, 1.6));
+      for (let y = 32; y < 42; y += 3) { R(20, y, 1, 1, PAL.parch); R(27, y, 1, 1, PAL.parch); }
+      R(23, 30, 2, 13, shade(coat, 0.8));
+      const strap = '#3a2214', strapHi = '#5a3a22';
+      for (let y = 29; y < 56; y++) { const d = Math.floor((y - 29) / 6); R(16 + d, y, 2, 1, strap); R(30 - d, y, 2, 1, strap); R(16 + d, y, 1, 1, strapHi); R(30 - d, y, 1, 1, strapHi); }
+      R(17, 39, 3, 2, GOLD[2]); R(29, 39, 3, 2, GOLD[2]); // brass clips
+      break;
+    }
+    case 4: { // grey button vest over a pinstriped shirt (shirt sleeves + shoulders show)
+      for (let y = 29; y < 56; y++) { const hw = hwAt(y); for (let x = 24 - hw + 1; x < 24 + hw; x += 3) R(x, y, 1, 1, '#9aa4b4'); }
+      vest(coat, PAL.ink);
+      R(16, 31, 2, 9, shade(coat, 1.35));
+      for (let y = 36; y < 50; y += 3) R(24, y, 1, 1, PAL.metal4);
+      R(17, 38, 4, 1, shade(coat, 0.6)); R(28, 38, 4, 1, shade(coat, 0.6)); // pocket welts
+      break;
+    }
+    case 5: { // buckskin sheriff's vest with fringe and a tin star, over a red shirt
+      vest(coat, shade(coat, 0.6));
+      for (let x = 13; x < 36; x++) if (x < 21 || x > 27) R(x, 33 + ((x & 1) ? 1 : 0), 1, 1, (x & 1) ? shade(coat, 0.6) : shade(coat, 1.3)); // fringe
+      // the star, on his left chest
+      const sx = 16, sy = 34;
+      for (const [dx, dy] of [[2, 0], [1, 1], [2, 1], [3, 1], [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [1, 3], [2, 3], [3, 3], [0, 4], [1, 4], [3, 4], [4, 4]]) R(sx + dx, sy + dy, 1, 1, GOLD[2]);
+      R(sx + 2, sy + 1, 1, 1, GOLD[4]); R(sx + 1, sy + 2, 1, 1, GOLD[3]); R(sx + 2, sy + 2, 1, 1, GOLD[0]);
+      break;
+    }
+  }
+  void ln;
+}
 function fist(R: RectFn, x: number, y: number, sk1: string, sk2: string) { R(x, y, 4, 4, sk1); R(x, y, 4, 1, sk2); R(x, y + 3, 4, 1, shade(sk1, 0.7)); }
 function card(R: RectFn, x: number, y: number, red: boolean) { R(x - 1, y - 1, 5, 7, PAL.ink); R(x, y, 3, 5, PAL.parch); R(x + 1, y + 2, 1, 1, red ? PAL.red1 : PAL.ink); }
 function drawArms(arm: PoseArm, L: BustLook, R: RectFn, sk1: string, sk2: string) {
-  const sleeve = L.coatPat === 'vest' ? '#cfc2a4' : L.coatPat === 'poncho' ? '#8a3a1c' : L.coat;
+  const sleeve = L.sleeve ?? (L.coatPat === 'vest' ? '#cfc2a4' : L.coatPat === 'poncho' ? '#8a3a1c' : L.coat);
   const forearm = (x: number, y: number, h = 6) => R(x, y, 5, h, sleeve);
   // outlined sleeve so an arm reads against a coat of the same colour
   const limb = (x: number, y: number, w: number, h: number) => { R(x - 1, y - 1, w + 2, h + 2, PAL.ink); R(x, y, w, h, sleeve); R(x, y, w, 1, shade(sleeve, 1.45)); };
@@ -522,7 +635,7 @@ function drawArms(arm: PoseArm, L: BustLook, R: RectFn, sk1: string, sk2: string
       break;
     case 'shrug': // shoulders up to the ears, elbows out, forearms up, palms open to the sides
       R(11, 22, 9, 8, PAL.ink); R(28, 22, 9, 8, PAL.ink);
-      R(12, 23, 8, 7, L.coat); R(28, 23, 8, 7, L.coat); R(12, 23, 8, 1, shade(L.coat, 1.4)); R(28, 23, 8, 1, shade(L.coat, 1.4));
+      { const sl = L.sleeve ?? L.coat; R(12, 23, 8, 7, sl); R(28, 23, 8, 7, sl); R(12, 23, 8, 1, shade(sl, 1.4)); R(28, 23, 8, 1, shade(sl, 1.4)); }
       limb(4, 28, 10, 4); limb(34, 28, 10, 4);
       limb(3, 19, 4, 11); limb(41, 19, 4, 11);
       hand(1, 14, 6, 5); hand(41, 14, 6, 5);

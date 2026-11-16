@@ -1185,6 +1185,29 @@ export const sfx = {
     noiseHit(t + 0.38, 'highpass', 4600, 0.15, 0.3, 0.1);
     tone(t, 'sine', 1900, 2300, 0.02, 0.3);
   },
+  // ---- clickable saloon props (scene pass) ----
+  pianoFlourish() {        // the pianist shows off: a quick rising honky-tonk run into a rolled chord
+    if (!ready()) return;
+    const t = now() + 0.01;
+    const root = 60 + [0, 5, 7][Math.floor(Math.random() * 3)];
+    const run = [0, 4, 7, 9, 12, 16, 19];
+    run.forEach((n, i) => pianoNote(t + i * 0.055, root + n, 0.05 + i * 0.006));
+    const ct = t + run.length * 0.055 + 0.04;
+    [-12, 0, 4, 7, 12].forEach((n, i) => pianoNote(ct + i * 0.018, root + n, 0.07));
+  },
+  bottleClink() {          // bottles on the shelf rattle against each other: a few bright clinks
+    if (!ready()) return;
+    const t = now() + 0.01;
+    glassClink(t); glassClink(t + rnd(0.06, 0.09)); glassClink(t + rnd(0.13, 0.18));
+    noiseHit(t, 'bandpass', 4200, 0.05, 0.05, 0.2, 2);
+  },
+  lampCreak() {            // the hanging lamp knocked swinging: chain jingle + a creak + the flame sputtering
+    if (!ready()) return;
+    const t = now() + 0.01;
+    for (let i = 0; i < 4; i++) { const f = rnd(1800, 2600); tone(t + i * 0.035, 'triangle', f, f * 0.97, 0.018, 0.08, 0.3, 0.001); }
+    tone(t + 0.12, 'sawtooth', 210, 160, 0.025, 0.32, 0.2, 0.05);
+    noiseHit(t + 0.05, 'bandpass', 900, 0.06, 0.35, 0.1, 1.2);
+  },
 };
 
 /* ---- recorded ambience (public/sfx/*, listed in sfxManifest) with the synth as the fallback ---- */

@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react';
 import { PAL, hashStr, rnd } from './palette';
 import { bayer, makeCanvas, px } from './dither';
-import { computeLayout, SceneRenderer, type CatAct, type Layout, type SceneData } from './scene';
+import { computeLayout, SceneRenderer, type CatAct, type HotKind, type Layout, type PokeResult, type SceneData } from './scene';
 import { drawCrack, holeAt, type DrawFn } from './sprites';
 import { peekPixelized, pixelize, type Pixelized } from './pixelize';
 import './pixel.css';
@@ -42,7 +42,14 @@ export interface SceneApi {
   catAt(clientX: number, clientY: number): boolean;
   /** tap the cat: starts its next reaction (null = missed / it's busy) */
   pokeCat(clientX: number, clientY: number, touch?: boolean): CatAct | null;
+  /** which clickable prop (cat, barkeep, lamp, bottles, doors, piano, window) is under this point */
+  hotAt(clientX: number, clientY: number, touch?: boolean): HotKind | null;
+  /** click / tap a prop: starts its reaction (null = nothing there / it's resting) */
+  poke(clientX: number, clientY: number, touch?: boolean): PokeResult | null;
 }
+
+/** mouse parallax only with a fine pointer and motion allowed */
+const parallaxOk = () => { try { return matchMedia('(pointer: fine)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
 
 /** One canvas, its own rAF loop (~10-13fps). Scene data is read from a ref, so React never re-renders per frame. Pauses while the tab is hidden. */
 export function PixelScene({ layout, data, api }: { layout: Layout; data: SceneData; api?: MutableRefObject<SceneApi | null> }) {
@@ -58,7 +65,26 @@ export function PixelScene({ layout, data, api }: { layout: Layout; data: SceneD
     c.imageSmoothingEnabled = false;
     const prof = motionProfile();
     let r: SceneRenderer | null = null;
-    try { r = new SceneRenderer(layout, { motes: prof.motes, reduce: prof.reduce, low: prof.low }); } catch (e) { console.error(e); return; }
+    try { r = new SceneRenderer(layout, { motes: prof.motes, reduce: prof.reduce, low: prof.low, felt: dataRef.current.felt }); } catch (e) { console.error(e); return; }
+    // the DOM nameplates (+ the barkeep's bubble) follow their layer's parallax offset
+    const host = cv.parentElement;
+    let lastPlx = '';
+    const syncPlx = () => {
+      if (!r || !host) return;
+      const k = `${r.lp.x},${r.lp.y},${r.lw.x},${r.lw.y}`;
+      if (k === lastPlx) return;
+      lastPlx = k;
+      host.style.setProperty('--plx-x', String(r.lp.x)); host.style.setProperty('--plx-y', String(r.lp.y));
+      host.style.setProperty('--plx-wx', String(r.lw.x)); host.style.setProperty('--plx-wy', String(r.lw.y));
+    };
+    const plxOn = parallaxOk();
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse' || !r) return;
+      r.plxT.x = Math.max(-1, Math.min(1, (e.clientX / Math.max(1, window.innerWidth)) * 2 - 1));
+      r.plxT.y = Math.max(-1, Math.min(1, (e.clientY / Math.max(1, window.innerHeight)) * 2 - 1));
+    };
+    const onLeave = (e: PointerEvent) => { if (r && !e.relatedTarget) { r.plxT.x = 0; r.plxT.y = 0; } };
+    if (plxOn) { window.addEventListener('pointermove', onMove, { passive: true }); document.documentElement.addEventListener('pointerleave', onLeave); }
     let raf = 0, last = 0, dead = false;
     const step = 1000 / prof.fps;
     const tick = (t: number) => {
@@ -67,7 +93,7 @@ export function PixelScene({ layout, data, api }: { layout: Layout; data: SceneD
       raf = requestAnimationFrame(tick);
       if (t - last < step) return;
       last = t;
-      try { r!.frame(c, t, dataRef.current); } catch (e) { console.error(e); dead = true; }
+      try { r!.frame(c, t, dataRef.current); syncPlx(); } catch (e) { console.error(e); dead = true; }
     };
     const start = () => { if (!raf && !dead && !document.hidden) { last = 0; raf = requestAnimationFrame(tick); } };
     // screen -> scene pixels; a finger gets a bigger target than a mouse
@@ -79,11 +105,16 @@ export function PixelScene({ layout, data, api }: { layout: Layout; data: SceneD
     if (api) api.current = {
       catAt: (x, y) => { if (dead || !r) return false; const p = toScene(x, y); return r.catHit(p.sx, p.sy, pad(false)); },
       pokeCat: (x, y, touch) => { if (dead || !r) return null; const p = toScene(x, y); return r.pokeCat(p.sx, p.sy, pad(!!touch)); },
+      hotAt: (x, y, touch) => { if (dead || !r) return null; const p = toScene(x, y); return r.hotAt(p.sx, p.sy, pad(!!touch)); },
+      poke: (x, y, touch) => { if (dead || !r) return null; const p = toScene(x, y); return r.poke(p.sx, p.sy, pad(!!touch)); },
     };
     const onVis = () => { if (document.hidden) { cancelAnimationFrame(raf); raf = 0; } else start(); };
     document.addEventListener('visibilitychange', onVis);
     start();
-    return () => { dead = true; cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis); if (api) api.current = null; };
+    return () => {
+      dead = true; cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis); if (api) api.current = null;
+      window.removeEventListener('pointermove', onMove); document.documentElement.removeEventListener('pointerleave', onLeave);
+    };
   }, [layout]); // eslint-disable-line react-hooks/exhaustive-deps
   const style: CSSProperties = { width: layout.W * layout.P, height: layout.H * layout.P };
   return <canvas ref={ref} className="px-scene" style={style} aria-hidden />;

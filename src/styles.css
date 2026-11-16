@@ -549,7 +549,7 @@ canvas { image-rendering: pixelated; }
   .finalists li { font-size: calc(var(--pt) * 7); padding: 4px 8px 2px; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* result: poster + LAUNCH in one screen, the rest scrolls */
-  .phase-result { --front-top: clamp(calc(env(safe-area-inset-top) + 12px), calc(100dvh - 470px), var(--stage-top)); }
+  .phase-result { --front-top: clamp(calc(env(safe-area-inset-top) + 48px), calc(100dvh - 500px), var(--stage-top)); }
   .result { margin-top: 0; gap: 14px; }
   .poster-wrap { width: min(78vw, 360px); }
   .poster { padding: 18px 16px 20px; }
@@ -1011,3 +1011,22 @@ html.cat-hover .saloon-front, html.cat-hover .saloon-stage { cursor: var(--cur-p
 .shotflip-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--pu) * 1); display: flex; justify-content: center; gap: var(--pu); }
 .shotflip-dots i { width: calc(var(--pu) * 1.5); height: calc(var(--pu) * 1.5); min-width: 3px; min-height: 3px; background: rgba(11,7,5,.7); box-shadow: 0 0 0 1px rgba(232,213,181,.6); }
 .shotflip-dots i.on { background: var(--amber); }
+
+/* round brass coin buttons (◀ ▶): stepped-circle clip, ink edge + dark rim below, a brass face that lifts on hover and sinks on press */
+.coin {
+  --coin-clip: polygon(25% 0, 75% 0, 75% 6%, 88% 6%, 88% 12%, 94% 12%, 94% 25%, 100% 25%, 100% 75%, 94% 75%, 94% 88%, 88% 88%, 88% 94%, 75% 94%, 75% 100%, 25% 100%, 25% 94%, 12% 94%, 12% 88%, 6% 88%, 6% 75%, 0 75%, 0 25%, 6% 25%, 6% 12%, 12% 12%, 12% 6%, 25% 6%);
+  position: relative; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 0; aspect-ratio: 1;
+  clip-path: var(--coin-clip); background: linear-gradient(180deg, #120904 0 50%, #6b4512 50%); color: #3b2416; cursor: var(--cur-pointer);
+  transition: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.coin::before {
+  content: ''; position: absolute; inset: var(--pu) var(--pu) calc(var(--pu) * 2) var(--pu); clip-path: var(--coin-clip); pointer-events: none;
+  background: radial-gradient(circle at 38% 32%, #fff2c0 0 10%, #f6cf62 11% 38%, #d9a33c 39% 66%, #a8701e 67%);
+}
+.coin > .pxi, .coin > i { position: relative; z-index: 1; width: 46%; height: 46%; transform: translateY(calc(var(--pu) * -0.5)); }
+@media (hover: hover) { .coin:hover:not(:disabled) { transform: translateY(calc(var(--pu) * -1)); filter: brightness(1.12); } }
+.coin:active:not(:disabled)::before { inset: calc(var(--pu) * 2) var(--pu) var(--pu) var(--pu); }
+.coin:active:not(:disabled) > .pxi { transform: translateY(calc(var(--pu) * 0.5)); }
+.coin:disabled { cursor: var(--cur-no); filter: grayscale(1) brightness(.55); transform: none; }
+.coin:focus-visible { outline: none; filter: brightness(1.2); }
+.coin:focus-visible::before { box-shadow: inset 0 0 0 var(--pu) #fff3c4; }

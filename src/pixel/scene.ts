@@ -1,7 +1,7 @@
 import { PAL, hexRgb, rnd } from './palette';
 import { bayer, circle, ditherBands, ellipse, line, makeCanvas, px } from './dither';
 import { FELTS, type Look } from '../../shared/types';
-import { BK_BOX, BK_HEAD, drawBarkeep, type BkPose } from './barkeep';
+import { BK_HEAD, drawBarkeep, type BkPose } from './barkeep';
 import { peekPixelized, pixelize } from './pixelize';
 import { BUST_H, BUST_W, bustFor, poseKey, renderBust, shade, styleSig, type BustLook, type Pose } from './sprites';
 
@@ -880,7 +880,7 @@ export class SceneRenderer {
       if (t - e.at > 3000) continue;
       // back-dated to when it arrived (the sound already started then), so clap contacts land on the claps
       if (e.k === 'emote') this.anims.set(e.pid, { kind: e.emote, v: this.vt - Math.max(0, Math.min(400, t - e.at)), emote: true });
-      else if (e.k === 'bolt') { this.bolt = { v: this.vt, big: e.big }; this.nextBolt = this.vt + 9000 + Math.random() * 12000; }
+      else if (e.k === 'bolt') { this.bolt = { v: this.vt, big: e.big }; this.boltWin = -1; this.nextBolt = this.vt + 9000 + Math.random() * 12000; }
       else if (e.k === 'doors') { this.doorV = this.vt; this.doorLeave = e.leave; this.spawnGust(e.leave ? 34 : 18); }
       else if (e.k === 'slowmo') this.slowUntil = t + 1500;
       else if (e.k === 'talk') this.bk.talkUntil = this.vt + Math.max(600, e.ms - Math.max(0, t - e.at));
@@ -939,6 +939,7 @@ export class SceneRenderer {
     const storm = this.dawn < 1;
     if (storm && !result && vt > this.nextBolt) {
       this.bolt = { v: vt, big: Math.random() < 0.25 };
+      this.boltWin = -1;
       this.nextBolt = vt + 9000 + Math.random() * 16000;
       D.fx?.onBolt?.(this.bolt.big);
     }
@@ -1257,7 +1258,7 @@ export class SceneRenderer {
       wins.forEach((w, wi) => {
         c.fillStyle = boltK > 0.6 ? PAL.white : PAL.moon; c.fillRect(w.x, w.y, w.w, w.h);
         w.mesa.forEach((hgt, xx) => { c.fillStyle = PAL.blue0; c.fillRect(w.x + xx, w.y + w.h - hgt, 1, hgt); });
-        if (boltK > 0.5 && (this.bolt.big || wi === Math.floor(this.bolt.v / 1000) % wins.length)) {
+        if (boltK > 0.5 && (this.bolt.big || wi === (this.boltWin >= 0 ? this.boltWin : Math.floor(this.bolt.v / 1000) % wins.length))) {
           let x = w.x + Math.round(w.w * (0.3 + rnd(Math.floor(this.bolt.v), wi, 3) * 0.4)), y = w.y;
           while (y < w.y + w.h - (w.mesa[0] ?? 3)) {
             const nx = Math.max(w.x, Math.min(w.x + w.w - 1, x + Math.round((rnd(x, y, 5) - 0.5) * 5))), ny = y + 2 + Math.floor(rnd(y, x, 6) * 3);
@@ -1295,9 +1296,10 @@ export class SceneRenderer {
     const pi = this.geo.piano;
     if (!pi) return;
     const x = pi.x, floor = pi.floor, top = floor - 20, ky = top + 10;
-    const bpm = D.fx?.tempo() ?? 0;
-    const startled = shotAge < 1800;
-    const playing = bpm > 0 && !startled && !this.reduce;
+    const flour = vt - this.pianoV < 1500; // clicked: a quick flourish, and he turns to grin at you
+    const bpm = flour ? 260 : D.fx?.tempo() ?? 0;
+    const startled = shotAge < 1800 || (flour && vt - this.pianoV > 350);
+    const playing = (bpm > 0 && !(shotAge < 1800) && !this.reduce) || (flour && !this.reduce);
     const beat = playing ? Math.floor((vt / 60000) * bpm * 2) : 0; // eighth notes
     const bx = x + 8; // his back, centered on the keyboard
     // body (seen from behind): white shirt, black waistcoat, sleeve garters
@@ -1320,6 +1322,7 @@ export class SceneRenderer {
       c.fillStyle = PAL.skin2; c.fillRect(hx + 3, hy + 1, 4, 5); c.fillRect(hx + 7, hy + 3, 1, 1);
       px(c, hx + 5, hy + 2, PAL.white); px(c, hx + 6, hy + 2, PAL.ink);
       c.fillStyle = '#3a2418'; c.fillRect(hx + 4, hy + 4, 3, 1); // moustache
+      if (flour) { px(c, hx + 5, hy + 5, PAL.ink); px(c, hx + 6, hy + 5, PAL.white); px(c, hx + 5, hy + 2, PAL.ink); px(c, hx + 6, hy + 2, PAL.ink); } // a wink + a grin
     } else {
       c.fillStyle = PAL.skin1; c.fillRect(hx, hy + 2, 1, 2); c.fillRect(hx + 5, hy + 2, 1, 2); // ears
     }
@@ -1331,10 +1334,175 @@ export class SceneRenderer {
     px(c, hx + 1, hy - 5, PAL.metal3);
     // music notes drifting up while he plays
     if (playing) {
-      const ph = (vt / 60000 * bpm) % 2;
-      const nx = x + 18 + Math.round(ph * 2), ny = top - 4 - Math.round(ph * 4);
-      if (ph < 1.6) { px(c, nx, ny, PAL.parch2); px(c, nx + 1, ny - 1, PAL.parch2); px(c, nx + 1, ny - 2, PAL.parch2); px(c, nx + 2, ny - 2, PAL.parch2); }
+      for (let n = 0; n < (flour ? 3 : 1); n++) {
+        const ph = (vt / 60000 * bpm + n * 0.66) % 2;
+        const nx = x + 18 + Math.round(ph * 2) + n * 3, ny = top - 4 - Math.round(ph * (flour ? 7 : 4));
+        const col = flour ? PAL.lamp0 : PAL.parch2;
+        if (ph < 1.6) { px(c, nx, ny, col); px(c, nx + 1, ny - 1, col); px(c, nx + 1, ny - 2, col); px(c, nx + 2, ny - 2, col); }
+      }
     }
+  }
+
+  /* ================= the barkeep ================= */
+
+  /** pick the spot behind the bar where his head is least hidden by the players' hats (and clear of the lamp) */
+  private bkSpot(lx: number): number {
+    const sh = this.geo.shelf, { W, H, cx } = this.L, fg = this.fg, bk = this.bk;
+    const lo = Math.max(sh.x0 + 10, 15), hi = Math.min(sh.x1 - 10, W - 15);
+    if (hi <= lo) return cx;
+    const lw = this.lw, Y0 = bk.y;
+    const lampBot = this.L.lampLen + 13;
+    let best = lo, bc = 1e9;
+    for (let x = lo; x <= hi; x++) {
+      let cost = 0;
+      for (let y = Y0 + BK_HEAD.y; y < Y0 + 26; y++) {
+        const head = y < Y0 + BK_HEAD.y + BK_HEAD.h;
+        const sy = y + lw.y;
+        if (sy < 0 || sy >= H) continue;
+        for (let xx = x + BK_HEAD.x; xx < x + BK_HEAD.x + BK_HEAD.w; xx++) {
+          const sx = xx + lw.x;
+          if (sx >= 0 && sx < W && fg[sy * W + sx] === 1) cost += head ? 3 : 1;
+        }
+      }
+      // the lamp + its halo hang in front of whatever is under them
+      const ov = Math.max(0, Math.min(x + 6, lx + 10) - Math.max(x - 6, lx - 10)) * Math.max(0, Math.min(Y0 + 14, lampBot) - Y0);
+      cost += ov * 3 + Math.abs(x - cx) * 0.08 + (bk.placed ? Math.abs(x - bk.x) * 0.12 : 0);
+      if (cost < bc) { bc = cost; best = x; }
+    }
+    return best;
+  }
+
+  private drawBarkeep(c: Ctx, vt: number, dt: number, D: SceneData, shooter: SeatGeom | undefined, turnAge: number, shotAge: number, lx: number) {
+    const bk = this.bk, sh = this.geo.shelf;
+    if (sh.x1 - sh.x0 < 24) return;
+    if (!bk.placed) {
+      if (this.frames < 3) return; // wait for a frame of busts to know where the hats are
+      bk.x = bk.tx = this.bkSpot(lx); bk.placed = true; bk.nextSpot = vt + 2000;
+    } else if (vt > bk.nextSpot) { bk.tx = this.bkSpot(lx); bk.nextSpot = vt + 1600; }
+    // walks over (1px steps) when the table changes
+    const walking = bk.x !== bk.tx;
+    if (walking) {
+      bk.walk += this.reduce ? 1e9 : dt;
+      while (bk.walk > 75 && bk.x !== bk.tx) { bk.walk -= 75; bk.x += Math.sign(bk.tx - bk.x); }
+      if (bk.x === bk.tx) bk.walk = 0;
+    }
+    bk.fT += dt;
+    while (bk.fT > 150) { bk.fT -= 150; bk.f++; }
+    if (this.reduce) bk.f = 0;
+    // whose turn: point at them when it starts, then keep an eye on them
+    if (shooter && D.shooter && D.shooter !== bk.pointId) { bk.pointId = D.shooter; bk.pointV = turnAge < 600 ? vt - turnAge : -1e9; }
+    if (!D.shooter) bk.pointId = '';
+    let pose: BkPose;
+    let dir: -1 | 0 | 1 = 0;
+    const sdir = shooter ? (shooter.x > bk.x + 4 ? 1 : shooter.x < bk.x - 4 ? -1 : 0) : 0;
+    const talking = vt < bk.talkUntil;
+    if (shotAge < 900) pose = 'duck';
+    else if (vt - bk.cheersV < 2800) pose = 'cheers';
+    else if (shooter && vt - bk.pointV < 1400) { pose = 'point'; dir = sdir || 1; }
+    else if (talking) pose = 'talk';
+    else if (walking) pose = 'idle';
+    else {
+      if (vt > bk.idleUntil) { bk.idle = bk.idle === 'polish' ? 'wipe' : 'polish'; bk.idleUntil = vt + (bk.idle === 'polish' ? 5000 + Math.random() * 4000 : 3000 + Math.random() * 2000); }
+      pose = bk.idle;
+    }
+    if (pose !== 'point' && pose !== 'duck' && shooter) dir = sdir;
+    else if (pose === 'polish' && !shooter) dir = Math.floor(vt / 3700) % 3 === 2 ? (Math.floor(vt / 11100) % 2 ? 1 : -1) : 0;
+    if (vt > bk.blinkAt + 160) bk.blinkAt = vt + 2500 + Math.random() * 2500;
+    const blink = vt > bk.blinkAt;
+    const mouth = talking && pose !== 'duck' ? ([0, 1, 2, 1, 0, 2] as const)[bk.f % 6] : pose === 'cheers' ? 1 : 0;
+    c.save();
+    c.beginPath(); c.rect(bk.x - 30, bk.y - 12, 60, 46); c.clip();
+    drawBarkeep(c, bk.x, bk.y + (walking && bk.f % 2 ? 1 : 0), { pose, f: bk.f, dir, mouth, blink, counter: true });
+    c.restore();
+  }
+
+  /** bottles that were clicked rattle on the shelf for a moment */
+  private drawClinks(c: Ctx, vt: number) {
+    if (!this.clinks.length) return;
+    this.clinks = this.clinks.filter((k) => vt - k.v < 520);
+    const st = this.geo.shelfStrip, bs = this.geo.bottles;
+    if (!st || !bs) return;
+    if (!this.shelfCv) {
+      const mk = (im: ImageData) => { const [cv, cc] = makeCanvas(im.width, im.height); cc.putImageData(im, 0, 0); return cv; };
+      this.shelfCv = { bare: mk(st.bare), full: mk(st.full) };
+    }
+    const { bare, full } = this.shelfCv;
+    for (const k of this.clinks) {
+      const b = bs[k.bi];
+      if (!b || this.missing.has(k.bi)) continue;
+      const age = vt - k.v;
+      if (age < 0) continue;
+      const jx = this.reduce ? 0 : ([1, -1, 1, 0, -1, 0] as const)[Math.floor(age / 85) % 6];
+      const jy = !this.reduce && age < 170 ? -1 : 0;
+      const sx = b.x - st.x, sy = b.y - st.y;
+      c.drawImage(bare, sx, sy, b.w, b.h, b.x, b.y, b.w, b.h);
+      c.drawImage(full, sx, sy, b.w, b.h, b.x + jx, b.y + jy, b.w, b.h);
+      if (age < 240 && !this.reduce) glyph(c, Math.floor(age / 80) % 2 ? GL.star3 : GL.star5, b.x + (b.w >> 1) + 3, b.y + 2, '#fff3b8', 1);
+    }
+  }
+
+  /* ================= clickable props ================= */
+
+  /** what's under (sx, sy) (screen scene px): the lamp first (it hangs in front of everything), then nothing if a player is in front */
+  hotAt(sx: number, sy: number, pad = 2): HotKind | null {
+    const { W, H } = this.L;
+    const lp = this.lampPos;
+    if (sx >= lp.x - 5 - pad && sx <= lp.x + 5 + pad && sy >= lp.y - 3 - pad && sy <= lp.y + 11 + pad) return 'lamp';
+    if (sx < 0 || sy < 0 || sx >= W || sy >= H) return null;
+    if (this.fg[Math.floor(sy) * W + Math.floor(sx)]) return null; // a player / the table is in front
+    const x = sx - this.lw.x, y = sy - this.lw.y; // wall-layer coords
+    const inR = (r: Rect, p = pad) => x >= r.x - p && x < r.x + r.w + p && y >= r.y - p && y < r.y + r.h + p;
+    const bk = this.bk;
+    if (bk.placed && inR({ x: bk.x + BK_HEAD.x, y: bk.y + BK_HEAD.y, w: BK_HEAD.w, h: 26 }, Math.min(pad, 3))) return 'barkeep';
+    if (this.catHit(sx, sy, pad)) return 'cat';
+    if (this.geo.bottles?.some((b, i) => !this.missing.has(i) && inR(b, Math.min(pad, 2)))) return 'bottles';
+    const d = this.geo.door;
+    if (d && inR(d, 0)) return 'doors';
+    const pn = this.geo.piano;
+    if (pn && inR({ x: pn.x - 6, y: pn.floor - 30, w: 36, h: 30 }, 0)) return 'piano';
+    if (this.geo.wins.some((w) => inR(w, 1))) return 'window';
+    return null;
+  }
+
+  /** click / tap on a prop: starts its reaction and says which (null = nothing there, or it's resting) */
+  poke(sx: number, sy: number, pad = 2): PokeResult | null {
+    const k = this.hotAt(sx, sy, pad);
+    const vt = this.vt;
+    const x = sx - this.lw.x, y = sy - this.lw.y;
+    switch (k) {
+      case null: return null;
+      case 'cat': { const act = this.pokeCat(sx, sy, pad); return act ? { k: 'cat', act } : null; }
+      case 'lamp': this.lampKick = { v: vt, amp: (sx < this.lampPos.x ? 1 : -1) * 0.42 }; return { k: 'lamp' };
+      case 'doors': this.doorV = vt; this.doorLeave = false; this.spawnGust(16); return { k: 'doors' };
+      case 'piano': if (vt - this.pianoV < 1500) return null; this.pianoV = vt; return { k: 'piano' };
+      case 'bottles': {
+        const bs = this.geo.bottles ?? [];
+        let bi = -1, bd = 1e9;
+        bs.forEach((b, i) => { if (this.missing.has(i)) return; const dd = Math.abs(b.x + b.w / 2 - x) + Math.abs(b.y + b.h / 2 - y) * 0.3; if (dd < bd) { bd = dd; bi = i; } });
+        if (bi < 0) return null;
+        this.clinks = this.clinks.filter((q) => q.bi !== bi && q.bi !== bi - 1 && q.bi !== bi + 1);
+        this.clinks.push({ bi, v: vt });
+        if (bs[bi - 1]) this.clinks.push({ bi: bi - 1, v: vt + 60 });
+        if (bs[bi + 1]) this.clinks.push({ bi: bi + 1, v: vt + 110 });
+        return { k: 'bottles' };
+      }
+      case 'window': {
+        if (vt - this.winV < 4000 || this.dawn > 0.3) return null; // rate-limited
+        this.winV = vt;
+        const wi = Math.max(0, this.geo.wins.findIndex((w) => x >= w.x - 1 && x < w.x + w.w + 1));
+        const big = Math.random() < 0.3;
+        this.bolt = { v: vt, big: false };
+        this.boltWin = wi;
+        this.nextBolt = Math.max(this.nextBolt, vt + 7000);
+        return { k: 'window', big };
+      }
+      case 'barkeep': {
+        const bk = this.bk;
+        bk.talkUntil = Math.max(bk.talkUntil, vt + 1300);
+        return { k: 'barkeep', x: bk.x, y: bk.y - 1 };
+      }
+    }
+    return null;
   }
 
   /** the cat's box on the shelf in scene pixels (null while it's away, bolting, or there's no shelf) */
@@ -1350,9 +1518,12 @@ export class SceneRenderer {
   catHit(sx: number, sy: number, pad = 2): boolean {
     const b = this.catBox();
     if (!b) return false;
-    if (sx < b.x - pad || sx >= b.x + b.w + pad || sy < b.y - pad || sy >= b.y + b.h + pad) return false;
+    const ow = this.lw;
     const { W, H } = this.L, fg = this.fg;
-    const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < W && y < H ? fg[Math.floor(y) * W + Math.floor(x)] : 1);
+    // fg is in screen space; the cat lives on the (shifted) wall layer
+    const at = (x: number, y: number) => { x += ow.x; y += ow.y; return x >= 0 && y >= 0 && x < W && y < H ? fg[Math.floor(y) * W + Math.floor(x)] : 1; };
+    sx -= ow.x; sy -= ow.y;
+    if (sx < b.x - pad || sx >= b.x + b.w + pad || sy < b.y - pad || sy >= b.y + b.h + pad) return false;
     if (at(sx, sy)) return false; // that's the bust in front of it
     let vis = 0, n = 0;
     for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) { n++; if (!at(x, y)) vis++; }

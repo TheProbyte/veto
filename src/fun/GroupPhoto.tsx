@@ -288,7 +288,7 @@ function PhotoModal({ state, onClose }: { state: RoomState; onClose: () => void 
   };
 
   return (
-    <div className="fun-modal" role="dialog" aria-modal="true" aria-label="Group photo" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fun-modal" role="dialog" aria-modal="true" aria-label="Group photo" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="fun-photo px-box">
         <div className="fun-photo-head">
           <b>Group photo</b>

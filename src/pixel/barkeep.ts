@@ -28,7 +28,7 @@ export const BK = {
 } as const;
 
 /** his box relative to the origin (for hit tests / placement) */
-export const BK_BOX = { x: -14, y: -4, w: 28, h: 38 };
+export const BK_BOX = { x: -12, y: -4, w: 24, h: 38 };
 /** head box (what must stay clear of the players' hats) */
 export const BK_HEAD = { x: -6, y: 0, w: 12, h: 14 };
 /** where the quip bubble's tail points (above the hat) */
@@ -183,15 +183,15 @@ export function drawBarkeep(c: Ctx, x: number, y: number, s: BkState) {
 
   // ---- the back-bar counter in front of his waist
   if (s.counter !== false) {
-    R(-14, 26, 28, 1, PAL.wood4);
-    R(-14, 27, 28, 2, PAL.wood3);
-    R(-14, 29, 28, 1, PAL.ink);
-    R(-13, 30, 26, 4, PAL.wood1);
-    for (let i = -12; i < 13; i += 6) R(i, 31, 1, 3, PAL.wood0);
+    R(-12, 26, 24, 1, PAL.wood4);
+    R(-12, 27, 24, 2, PAL.wood3);
+    R(-12, 29, 24, 1, PAL.ink);
+    R(-11, 30, 22, 4, PAL.wood1);
+    for (let i = -10; i < 11; i += 5) R(i, 31, 1, 3, PAL.wood0);
     if (s.pose !== 'wipe' && s.pose !== 'cheers') { // a glass waiting on the bar
       R(-11, 22, 4, 4, PAL.ink); R(-10, 23, 2, 3, BK.glass); P(-10, 24, PAL.lamp2);
     }
     // a bottle at the end of the bar
-    R(9, 19, 3, 7, '#1f3318'); R(10, 17, 1, 2, '#1f3318'); P(9, 20, '#3e6630'); R(9, 22, 3, 2, PAL.parch3);
+    R(8, 19, 3, 7, '#1f3318'); R(9, 17, 1, 2, '#1f3318'); P(8, 20, '#3e6630'); R(8, 22, 3, 2, PAL.parch3);
   }
 }

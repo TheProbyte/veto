@@ -205,7 +205,7 @@ function spawn(G: Game, now: number) {
     x = rand(s.x0 + sp.width / 2 + 1, s.x1 - sp.width / 2 - 1);
     if (!G.tgts.some((q) => q.surf === si && Math.abs(q.x - x) < sp.width + 4)) break;
   }
-  const life = clamp(lerp(1350, 900, t) + rand(-250, 150), 600, 1400);
+  const life = clamp(lerp(1400, 1000, t) + rand(-250, 100), 600, 1400);
   const slide = kind !== 'pot' && Math.random() < (s.kind === 'bar' ? 0.55 : 0.22) * (0.5 + t);
   G.tgts.push({ id: ++G.id, kind, surf: si, x, y: s.y, born: now, life, vx: slide ? (Math.random() < 0.5 ? -1 : 1) * rand(0.12, 0.22) * G.g.W : 0 });
 }
@@ -229,7 +229,7 @@ function tick(G: Game, now: number, dt: number, spawning: boolean) {
   if (spawning && now >= G.nextSpawn && now - G.start < ROUND_MS - 400) {
     spawn(G, now);
     const t = clamp((now - G.start) / ROUND_MS, 0, 1);
-    G.nextSpawn = now + lerp(620, 380, t) + rand(0, 160);
+    G.nextSpawn = now + lerp(450, 280, t) + rand(0, 120);
   }
   for (const q of G.tgts) {
     if (q.toss) {
@@ -391,6 +391,7 @@ function Gallery({ onClose, onSubmit, tableBest }: { onClose: () => void; onSubm
     let hit: Tgt | null = null, hd = 1e9;
     for (const q of G.tgts) {
       const [bx, by, bw, bh] = bounds(q);
+      if (q.toss && y > G.g.bar) continue; // the part behind the bar is hidden
       if (x >= bx - pad && x < bx + bw + pad && y >= by - pad && y < by + bh + pad) {
         if (!q.toss && now - q.born < 50) continue; // not up yet
         const d = Math.hypot(x - (bx + bw / 2), y - (by + bh / 2));

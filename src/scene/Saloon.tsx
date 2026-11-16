@@ -17,6 +17,15 @@ import ContextMenu from './ContextMenu';
 import { setSceneScale, textUnit } from '../ui/scale';
 import '../ui/cursors';
 import PixelIcon, { hasPixelIcon } from '../ui/PixelIcon';
+import { paintTx, TX_STEP, TX_T, type TxKind } from '../pixel/transitions';
+import './scene.css';
+
+/** the barkeep's caption-only quips when you click him */
+const QUIPS = [
+  "What'll it be?", 'No credit.', 'Keep your boots off the bar.', 'House rules: no spitting on the felt.',
+  "I've seen worse hands.", 'Pay at the bar, partner.', 'Glasses ain\'t free.', 'Easy on the trigger.',
+  'Piano player takes requests. Badly.', "Last fella who asked ain't here no more.", 'We close at dawn.', 'Mind the cat.',
+];
 
 /** piano player's tempo per music mode (fallback until sfx.getMusicBpm exists; matches src/music.ts grooves) */
 const BPM: Record<string, number> = { lobby: 76, veto: 92, roulette: 92, result: 76, off: 0 };
@@ -64,8 +73,19 @@ function useStageLayout(split: boolean): Layout {
   return L;
 }
 
-interface Wipe { id: number; from: Phase; to: Phase; draw: boolean; closing: boolean }
-const WIPE = { draw: { close: 420, hold: 640, open: 420 }, soft: { close: 220, hold: 70, open: 260 } };
+interface Wipe { id: number; from: Phase; to: Phase; draw: boolean; closing: boolean; kind: TxKind; fade: boolean }
+const WIPE = { draw: { close: 420, hold: 640, open: 420 }, fade: { close: 180, hold: 40, open: 200 } };
+const wipeT = (w: Wipe) => (w.draw ? WIPE.draw : w.fade ? WIPE.fade : TX_T[w.kind]);
+/** which transition plays into a phase (DRAW! is nominate -> veto) */
+function txKind(from: Phase, to: Phase, mini?: string): TxKind {
+  if (to === 'vote') return 'dust';
+  if (to === 'mini') return mini === 'horse' ? 'sun' : mini === 'golf' ? 'felt' : mini === 'slide' ? 'whiskey' : 'dust';
+  if (to === 'slide') return 'whiskey';
+  if (to === 'roulette') return 'cylinder';
+  if (to === 'result') return 'lantern';
+  if (to === 'nominate' || to === 'lobby') return from === 'result' ? 'lantern' : 'shuffle';
+  return 'dust';
+}
 
 export default function Saloon({ children, ...rp }: RoomProps & { children: ReactNode }) {
   const { state, me } = rp;
@@ -84,8 +104,9 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   if (seenPhase !== state.phase) {
     setSeenPhase(state.phase);
     const draw = seenPhase === 'nominate' && state.phase === 'veto';
-    setWipe(reducedMotion() ? (draw ? { id: Date.now(), from: seenPhase, to: state.phase, draw, closing: false } : null)
-      : { id: Date.now(), from: seenPhase, to: state.phase, draw, closing: true });
+    const rm = reducedMotion();
+    const kind = txKind(seenPhase, state.phase, state.mini?.kind);
+    setWipe({ id: Date.now(), from: seenPhase, to: state.phase, draw, closing: !(draw && rm), kind, fade: rm && !draw });
   }
   const frozen = useRef<ReactNode>(children);
   const closing = !!wipe?.closing;
@@ -94,7 +115,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   const phase: Phase = closing ? wipe!.from : state.phase;
   useEffect(() => {
     if (!wipe) return;
-    const T = wipe.draw ? WIPE.draw : WIPE.soft;
+    const T = wipeT(wipe);
     const timers: number[] = [];
     // drawSting lands ~0.45s after the call, i.e. right as DRAW! slams in at T.close
     if (wipe.draw) { play('cardRiffle'); timers.push(window.setTimeout(() => { if (!play('drawSting')) sfx.shot(); }, Math.max(0, T.close - 450))); }
@@ -133,6 +154,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
   // ---- emotes (transient room events). Typed 'say' lines are ignored: the saloon is emotes only.
   const [pops, setPops] = useState<Record<string, { emote: string; id: number }>>({});
   useEffect(() => rp.on((e: RoomEvent) => {
+    if (e.t === 'narrate') { push({ k: 'talk', ms: Math.max(1800, Math.min(3200, String(e.text ?? '').length * 45)), at: performance.now() }); return; }
     if (e.t !== 'emote' || !(e.emote in EMOTES)) return;
     push({ k: 'emote', pid: e.pid, emote: e.emote, at: performance.now() });
     EMOTE_SFX[e.emote]?.();
@@ -167,6 +189,8 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
 
   // ---- the shelf cat: tap / click it (only on bare background: never steals a press from the UI)
   const sceneApi = useRef<SceneApi | null>(null);
+  const [quip, setQuip] = useState<{ id: number; text: string; x: number; y: number } | null>(null);
+  const lastQuip = useRef(-1);
   useEffect(() => {
     const BARE = '.px-scene, .scene, .seats, .saloon, .saloon-ui, .saloon-front, .saloon-stage, .front-top';
     const bare = (t: EventTarget | null) => t instanceof Element && t.matches(BARE);
@@ -179,13 +203,34 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
       const d = down; down = null;
       if (!d || d.id !== e.pointerId || performance.now() - d.at > 700 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 12) return;
       if (busy()) return;
-      const k = sceneApi.current?.pokeCat(e.clientX, e.clientY, e.pointerType !== 'mouse');
-      if (!k) return;
+      const r = sceneApi.current?.poke(e.clientX, e.clientY, e.pointerType !== 'mouse');
+      if (!r) return;
       sfx.unlock();
-      if (k === 'meow') sfx.meow();
-      else if (k === 'hiss') window.setTimeout(() => sfx.hiss(), 120);
-      else if (k === 'leap') window.setTimeout(() => sfx.swish(), 160);
-      else if (k === 'knock') sfx.meow(true);
+      switch (r.k) {
+        case 'cat': {
+          const k = r.act;
+          if (k === 'meow') sfx.meow();
+          else if (k === 'hiss') window.setTimeout(() => sfx.hiss(), 120);
+          else if (k === 'leap') window.setTimeout(() => sfx.swish(), 160);
+          else if (k === 'knock') sfx.meow(true);
+          break;
+        }
+        case 'doors': sfx.doors(); break;
+        case 'lamp': sfx.lampCreak(); break;
+        case 'piano': sfx.pianoFlourish(); break;
+        case 'bottles': sfx.bottleClink(); break;
+        case 'window': { const big = r.big; window.setTimeout(() => sfx.thunder(big ? 0.7 : 0.4), 380 + Math.random() * 420); break; }
+        case 'barkeep': {
+          let i = Math.floor(Math.random() * QUIPS.length);
+          if (i === lastQuip.current) i = (i + 1) % QUIPS.length;
+          lastQuip.current = i;
+          const id = Date.now();
+          setQuip({ id, text: QUIPS[i], x: r.x, y: r.y });
+          sfx.blip(); window.setTimeout(() => sfx.blip(), 110);
+          window.setTimeout(() => setQuip((q) => (q && q.id === id ? null : q)), 2700);
+          break;
+        }
+      }
     };
     const onCancel = () => { down = null; };
     // hover cursor (mouse): on <html>, since React owns .saloon's className
@@ -195,7 +240,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
       if (e.pointerType !== 'mouse') return;
       mx = e.clientX; my = e.clientY; tgt = e.target;
       if (raf) return;
-      raf = requestAnimationFrame(() => { raf = 0; root.classList.toggle('cat-hover', bare(tgt) && !busy() && !!sceneApi.current?.catAt(mx, my)); });
+      raf = requestAnimationFrame(() => { raf = 0; root.classList.toggle('scene-hot', bare(tgt) && !busy() && !!sceneApi.current?.hotAt(mx, my)); });
     };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('pointerup', onUp, true);
@@ -206,9 +251,12 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
       window.removeEventListener('pointerup', onUp, true);
       window.removeEventListener('pointercancel', onCancel, true);
       window.removeEventListener('pointermove', onMove, true);
-      cancelAnimationFrame(raf); root.classList.remove('cat-hover');
+      cancelAnimationFrame(raf); root.classList.remove('scene-hot');
     };
   }, []);
+
+  // ---- the barkeep raises a glass when the result comes in
+  useEffect(() => { if (state.phase === 'result') push({ k: 'cheers', at: performance.now() }); }, [state.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- slow-mo vignette
   const [slow, setSlow] = useState(0);
@@ -293,7 +341,8 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
     dimAll: state.phase === 'roulette' ? 0.45 : state.phase === 'result' ? 0.9 : 1,
     fx: sceneFx.current,
     poster: posterId,
-  }), [state.players, shooter, state.phase, fx, posterId]); // eslint-disable-line react-hooks/exhaustive-deps
+    felt: state.settings?.felt ?? 0,
+  }), [state.players, shooter, state.phase, fx, posterId, state.settings?.felt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stageTop = layout.tableTop * layout.P + (layout.portrait ? 30 : 44);
   const seats = useMemo(() => state.players.map((p) => p.seat), [state.players]);
@@ -308,6 +357,11 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
             <Seat key={p.id} p={p} me={me} L={layout} seats={seats} shooter={shooter} order={veto ? state.turnOrder.indexOf(p.id) : -1} turnIdx={state.turnIdx} n={state.turnOrder.length} fresh={fresh.has(p.id)} pop={pops[p.id]} />
           ))}
         </div>
+        {quip && (
+          <div className="bk-say" role="status">
+            <div key={quip.id} className="bk-say-in" style={{ '--bx': `${quip.x * layout.P}px`, '--by': `${quip.y * layout.P}px` } as CSSProperties}>{quip.text}</div>
+          </div>
+        )}
       </div>
       {slow > 0 && <div className="slowmo-vig" aria-hidden />}
 
@@ -343,7 +397,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
 
       {fx && <ShotFX key={fx.id} shot={fx} board={state.board} players={state.players} />}
 
-      {wipe && <PhaseWipe key={wipe.id} w={wipe} />}
+      {wipe && (wipe.draw ? <PhaseWipe key={wipe.id} w={wipe} /> : <PhaseFx key={wipe.id} w={wipe} L={layout} />)}
 
       <SoundMenu phase={state.phase} />
       <ContextMenu room={rp} />
@@ -353,7 +407,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
 
 /** pixel iris: black tiles close in rings toward the centre, then open from it (opacity only) */
 function PhaseWipe({ w }: { w: Wipe }) {
-  const T = w.draw ? WIPE.draw : WIPE.soft;
+  const T = wipeT(w);
   const tiles = useMemo(() => {
     if (!w.closing) return [];
     const vw = window.innerWidth, vh = window.innerHeight;
@@ -376,6 +430,45 @@ function PhaseWipe({ w }: { w: Wipe }) {
           '--d1': `${Math.round((1 - t.d) * T.close * 0.85)}ms`, '--d2': `${Math.round(T.close + T.hold + t.d * T.open * 0.85)}ms` } as CSSProperties} />
       ))}
       {w.draw && <div className="draw-title"><span>DRAW!</span></div>}
+    </div>
+  );
+}
+
+/** phase-specific transition (dust swirl, sun bloom, felt wipe, whiskey splash, cylinder spin, lantern, card shuffle):
+ * a low-res canvas over everything, stepped at TX_STEP; reduced motion gets a plain fade */
+function PhaseFx({ w, L }: { w: Wipe; L: Layout }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const T = wipeT(w);
+  const total = T.close + T.hold + T.open;
+  useEffect(() => {
+    if (w.fade) return;
+    const cv = ref.current; if (!cv) return;
+    // the full viewport (the stage layout can be half-width on a landscape phone)
+    const W = Math.ceil(window.innerWidth / L.P), H = Math.ceil(window.innerHeight / L.P);
+    cv.width = W; cv.height = H;
+    cv.style.width = `${W * L.P}px`; cv.style.height = `${H * L.P}px`;
+    const c = cv.getContext('2d'); if (!c) return;
+    const img = c.createImageData(W, H);
+    const buf = new Uint32Array(img.data.buffer);
+    const t0 = performance.now();
+    let raf = 0, last = -1;
+    const tick = () => {
+      const ms = performance.now() - t0;
+      if (ms > total) { c.clearRect(0, 0, W, H); return; }
+      raf = requestAnimationFrame(tick);
+      const step = Math.floor(ms / TX_STEP);
+      if (step === last) return;
+      last = step;
+      paintTx(buf, w.kind, W, H, ms);
+      c.putImageData(img, 0, 0);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (w.fade) return <div className="wipe ptx ptx-fade" aria-hidden style={{ '--pt-all': `${total}ms` } as CSSProperties} />;
+  return (
+    <div className={`wipe ptx ptx-${w.kind}`} aria-hidden>
+      <canvas ref={ref} />
     </div>
   );
 }

@@ -456,7 +456,7 @@ export default function Horse(p: RoomProps) {
         if (shot.dust >= 0) drawDust(c, rx, toScreen(g, 0, shot.straddled ? 2 : 0, d.lane)[1], shot.dust, !shot.straddled);
         if (shot.puffs) {
           const gy = toScreen(g, 0, 1, d.lane)[1];
-          for (const [pdx, age] of shot.puffs) drawDust(c, toScreen(g, d.saddle + pdx, 0, d.lane)[0], gy, age * 1.4, false);
+          for (const [pdx, age] of shot.puffs) drawDust(c, toScreen(g, d.saddle + pdx, 0, d.lane)[0], gy, age * 1.4, true);
         }
         if (d.pid === meId && my.current.phase === 'ready' && !m.results[meId]) drawMarker(c, Math.round(rx), Math.round(ry - 24), perf);
       }
