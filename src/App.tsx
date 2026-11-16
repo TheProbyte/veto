@@ -8,6 +8,7 @@ import Nominate from './phases/Nominate';
 import Veto from './phases/Veto';
 import Roulette from './phases/Roulette';
 import Result from './phases/Result';
+import Duel from './phases/Duel';
 import type { RoomProps } from './props';
 
 function getName(): string | null {
@@ -22,14 +23,14 @@ export default function App() {
 
 function Room({ code }: { code: string }) {
   const [name, setName] = useState<string | null>(getName());
-  const { state, me, send, connected, error, skew } = useRoom(code, name);
+  const { state, me, send, connected, error, skew, on } = useRoom(code, name);
   useWakeLock(state?.phase === 'veto' || state?.phase === 'roulette');
   if (!name) {
     return <NameGate code={code} onJoin={(n) => { try { localStorage.setItem('nah.name', n); } catch {} setName(n); }} />;
   }
   if (!state) return <div className="loading">Pushing open the saloon doors…</div>;
-  const p: RoomProps = { state, me, send, skew };
-  const Phase = { lobby: Lobby, nominate: Nominate, veto: Veto, roulette: Roulette, result: Result }[state.phase];
+  const p: RoomProps = { state, me, send, skew, on };
+  const Phase = { lobby: Lobby, nominate: Nominate, veto: Veto, roulette: Roulette, duel: Duel, result: Result }[state.phase];
   return (
     <>
       <Saloon {...p}><Phase {...p} /></Saloon>

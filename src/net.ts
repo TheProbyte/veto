@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Intent, RoomState, ServerMsg } from '../shared/types';
+import type { Intent, RoomEvent, RoomState, ServerMsg } from '../shared/types';
 
 export function playerId(): string {
   let id = '';
@@ -17,6 +17,7 @@ export function useRoom(code: string, name: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [skew, setSkew] = useState(0); // serverNow - clientNow
   const ws = useRef<WebSocket | null>(null);
+  const listeners = useRef(new Set<(e: RoomEvent) => void>());
   const pid = playerId();
 
   useEffect(() => {
@@ -55,6 +56,8 @@ export function useRoom(code: string, name: string | null) {
         if (msg.t === 'state') {
           setSkew(msg.state.now - Date.now());
           setState(msg.state);
+        } else if (msg.t === 'emote' || msg.t === 'say' || msg.t === 'narrate') {
+          for (const fn of listeners.current) { try { fn(msg); } catch {} }
         } else if (msg.t === 'error') {
           setError(msg.message);
           setTimeout(() => setError(null), 3500);
@@ -82,7 +85,12 @@ export function useRoom(code: string, name: string | null) {
     if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(i));
   }, []);
 
-  return { state, me: pid, send, connected, error, skew };
+  const on = useCallback((fn: (e: RoomEvent) => void) => {
+    listeners.current.add(fn);
+    return () => { listeners.current.delete(fn); };
+  }, []);
+
+  return { state, me: pid, send, connected, error, skew, on };
 }
 
 /** Server-synced clock: Date.now() + skew */
