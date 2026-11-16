@@ -252,6 +252,9 @@
 
 /* my hand: the cards are sized (DraftHand --cw) so the whole hand fits the table */
 .dh-fan { flex: 1 1 0; min-height: 0; display: flex; align-items: flex-end; justify-content: center; gap: calc(var(--u) * 3); padding: calc(var(--u) * 6) 0 calc(var(--u) * 6); }
+.dh-fan.is-tight { padding: calc(var(--u) * 3) 0 calc(var(--u) * 4); }
+.dh-fan.is-tight .dh-card-name { display: none; }
+.dh-fan.is-tight .dh-card.is-sel { transform: translateY(calc(var(--u) * -2)) rotate(0deg); }
 .dh-deck { flex: none; width: clamp(24px, calc(var(--cw) * .6), 60px); display: flex; flex-direction: column; align-items: center; gap: var(--u); align-self: center; }
 .dh-deck-n { display: flex; flex-direction: column; align-items: center; line-height: 1; text-transform: uppercase; font-size: calc(var(--t) * 5); color: rgba(232,213,181,.6); }
 .dh-deck-n b { font-family: 'Rye', serif; font-weight: 400; font-size: calc(var(--t) * 8); color: var(--parch); }
@@ -365,6 +368,9 @@
   .nm-titles { display: none; }
   .nm-slots { margin-left: 0; }
   .nm-head { justify-content: space-between; }
+}
+@container nm (max-height: 260px) {
+  .dh-table { display: none; }
 }
 @container nm (max-height: 300px) {
   .nm-felt { padding: var(--u); }

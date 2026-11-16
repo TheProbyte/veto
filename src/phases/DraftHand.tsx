@@ -163,13 +163,17 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
   }
   const n = slots.length;
   const { u, t } = fanBox;
-  const textH = 16 * t + 5 * u; // two name lines + face padding / gaps
-  const lift = 6 * u; // room for a selected card to rise
-  // the fan tilts its cards a few degrees: leave slack so tilted corners stay inside the table
-  const cwH = (fanBox.h - textH - lift - 7 * u) / 1.62; // 6u bottom padding: outer cards dip by up to 4u
-  const deckW = Math.max(24, Math.min(cwH * 0.6, 60));
-  const cwW = (fanBox.w - deckW - 3 * u * Math.max(1, n) - 6 * u) / (Math.max(1, n) * 1.1);
-  const cw = Math.floor(Math.max(24, Math.min(cwH, cwW, Math.max(40 * t, 26 * u))));
+  // the fan tilts its cards a few degrees: leave slack (top: a selected card rises; bottom: outer cards dip) so they stay inside the table
+  const deckW = (cwH: number) => Math.max(24, Math.min(cwH * 0.6, 60));
+  const fit = (textH: number, pad: number) => {
+    const cwH = (fanBox.h - textH - pad) / 1.62;
+    const cwW = (fanBox.w - deckW(cwH) - 3 * u * Math.max(1, n) - 6 * u) / (Math.max(1, n) * 1.1);
+    return Math.floor(Math.max(20, Math.min(cwH, cwW, Math.max(40 * t, 26 * u))));
+  };
+  const roomy = fit(16 * t + 5 * u, 13 * u);
+  // a short table drops the names under the art (hours / short ride on the art; the name is in the title + label)
+  const tight = roomy < 44;
+  const cw = tight ? fit(3 * u, 7 * u) : roomy;
   const giving = mode?.k === 'give' ? offers.find((o) => o.id === mode.offer) : undefined;
   const onOffer = new Map(outgoing.map((o) => [o.give, o.to]));
 
@@ -184,7 +188,7 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
       <button key={appid} type="button" ref={(el) => { if (el) cardEls.current.set(appid, el); else cardEls.current.delete(appid); }}
         className={`dh-card ${isSel ? 'is-sel' : ''} ${burn ? 'is-burning' : ''} ${playing.has(appid) ? 'is-playing' : ''} ${giving ? 'is-giving' : ''}`}
         style={{ '--r': `${c * 3}deg`, '--y': `${Math.round(Math.abs(c) * Math.abs(c) * u)}px` } as CSSProperties}
-        disabled={burn} aria-pressed={isSel} onClick={() => pick(appid)}
+        disabled={burn} aria-pressed={isSel} onClick={() => pick(appid)} title={name}
         aria-label={`${name}${g ? `, ${g.hours > 0 ? `${hrs(g.hours)} hours together` : 'nobody has played it'}` : ''}${missing.length ? `, ${missing.length} short` : ''}`}>
         <span className="dh-face">
           <span className="dh-pip" aria-hidden>{SUITS[appid % 4]}</span>
@@ -301,7 +305,7 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
     <section className={`dh ${giving ? 'is-give' : ''}`} aria-label="Your hand">
       {seatsRow}
       {banner}
-      <div className="dh-fan" ref={fanRef} role="group" aria-label={`Your hand: ${hand.length} of ${DRAFT_HAND} cards`} style={{ '--cw': `${cw}px` } as CSSProperties}>
+      <div className={`dh-fan ${tight ? 'is-tight' : ''}`} ref={fanRef} role="group" aria-label={`Your hand: ${hand.length} of ${DRAFT_HAND} cards`} style={{ '--cw': `${cw}px` } as CSSProperties}>
         <div className="dh-deck" ref={deckRef} title={`${draft.deck} left in the deck`}>
           <CardBacks n={draft.deck} max={4} big />
           <span className="dh-deck-n"><b>{draft.deck}</b>deck</span>
