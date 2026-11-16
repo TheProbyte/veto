@@ -25,7 +25,7 @@ export default function App() {
 function Room({ code }: { code: string }) {
   const [name, setName] = useState<string | null>(getName());
   const { state, me, send, connected, error, skew, on } = useRoom(code, name);
-  useWakeLock(state?.phase === 'veto' || state?.phase === 'roulette');
+  useWakeLock(state?.phase === 'veto' || state?.phase === 'roulette' || state?.phase === 'duel' || state?.phase === 'slide');
   if (!name) {
     return <NameGate code={code} onJoin={(n) => { try { localStorage.setItem('nah.name', n); } catch {} setName(n); }} />;
   }
