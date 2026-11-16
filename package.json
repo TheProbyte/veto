@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b --noEmit false || true; vite build",
+    "build": "vite build && node scripts-embed.mjs",
     "check": "tsc --noEmit -p tsconfig.json",
-    "deploy": "vite build && wrangler deploy"
+    "deploy": "vite build && node scripts-embed.mjs && wrangler deploy"
   },
   "dependencies": {
     "react": "^18.3.1",
