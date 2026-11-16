@@ -5,6 +5,7 @@ import { EXPLAIN_MS } from '../shared/voiced';
 import { SLIDE_ANIM_MS, SLIDE_INTRO_MS, SLIDE_RESULT_MS, SLIDE_TURN_MS, slideDist, slideMark, slideOutcome } from './slide';
 import { NARRATOR, pickLine, type NarrKey } from '../shared/narrator';
 import { lastWords } from './lastwords';
+import { saddleX, simulate } from '../src/phases/horse/sim';
 import { ownedGames, playerSummary, resolveSteamId, storeBits, type Env, type OwnedGame } from './steam';
 
 const SHOT_PAUSE = 3200; // ms to let the shot FX + the game's last words land before the next fuse starts
@@ -1103,7 +1104,7 @@ export class Room extends DurableObject<Env> {
     const s = this.s;
     if (j.k === 'narr') { if (j.key) this.narr(j.key); return false; }
     // bots wait for the Barkeep to finish explaining, like everyone else
-    if (j.k !== 'bready' && j.k !== 'bemote' && j.k[0] === 'b' && s.explainUntil && Date.now() < s.explainUntil) {
+    if (j.k !== 'bready' && j.k !== 'bemote' && j.k !== 'bvote' && j.k[0] === 'b' && s.explainUntil && Date.now() < s.explainUntil) {
       this.job({ ...j, at: s.explainUntil + rnd(400, 1600) });
       return false;
     }
@@ -1216,8 +1217,12 @@ export class Room extends DurableObject<Env> {
         } else if (m.kind === 'golf') {
           this.miniGolf(m, b.id, rnd(2, 6), Math.max(0, Date.now() - m.startedAt));
         } else {
-          const jump = rnd(300, 1500), on = jump + rnd(200, 600), off = on + rnd(300, 1200);
-          this.miniHorse(m, b.id, rnd(20, 98), [jump, on, off]);
+          // a real jump through the client's deterministic sim, so replays match the score
+          const saddle = saddleX(m.seed, b.id);
+          let best = 525, bs = -1;
+          for (let r = 120; r <= 900; r += 10) { const sc = simulate([0, r], saddle).score; if (sc > bs) { bs = sc; best = r; } }
+          const r = clamp(Math.round(best + (Math.random() + Math.random() + Math.random() - 1.5) * 70), 80, 1300);
+          this.miniHorse(m, b.id, simulate([0, r], saddle).score, [0, r]);
         }
         return true;
       }
@@ -1389,7 +1394,10 @@ export class Room extends DurableObject<Env> {
     const s = this.s, v = s.vote;
     if (s.phase !== 'vote' || !v || v.picked) return;
     const humans = s.players.filter((p) => !p.bot && p.connected);
-    if (humans.length && humans.every((p) => v.votes[p.id])) this.decideVote();
+    if (!humans.length || !humans.every((p) => v.votes[p.id])) return;
+    // the humans are in: bots that haven't voted yet vote right now, so their votes still count
+    for (const b of s.players) if (b.bot && !v.votes[b.id]) v.votes[b.id] = pick(FINALE_KINDS);
+    this.decideVote();
   }
 
   decideVote() {
