@@ -33,14 +33,14 @@ export default function Home() {
       <div className="nh-grain" aria-hidden />
 
       <main className="nh-home-main">
-        <div className="nh-kicker">~ Est. tonight ~ Games &amp; Grievances ~</div>
+        <div className="nh-kicker">~ Games &amp; Grievances ~</div>
         <h1 className="nh-title"><span>Nah.</span></h1>
-        <p className="nh-tagline">Pick tonight's game. Shoot down the rest.</p>
+        <p className="nh-tagline">Pick tonight's Steam game together.</p>
 
         <ol className="nh-steps">
-          <li><b>I</b><span>Pull up a chair</span><small>Send the link, link your Steam.</small></li>
-          <li><b>II</b><span>Toss in your games</span><small>We find what y'all own together.</small></li>
-          <li><b>III</b><span>Shoot 'em down</span><small>Take turns. Last box standing wins.</small></li>
+          <li><b>I</b><span>Pull up a chair</span><small>Invite, link Steam</small></li>
+          <li><b>II</b><span>Toss in games</span><small>From what y'all own</small></li>
+          <li><b>III</b><span>Shoot 'em down</span><small>Last one wins</small></li>
         </ol>
 
         <button type="button" className="nh-btn nh-btn-big nh-open" onClick={go} onMouseEnter={() => sfx.hover()}>Open a table</button>

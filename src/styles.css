@@ -873,7 +873,7 @@ canvas { image-rendering: pixelated; }
 .chat-e-ico { font-size: 24px; line-height: 1; }
 .chat-e-lbl { font-family: var(--px-sm); font-size: 9px; font-weight: 400; letter-spacing: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--parch2); }
 .chat-e:hover .chat-e-lbl { color: var(--parch); }
-.chat-taunts { flex: none; display: flex; flex-wrap: wrap; gap: 5px; max-height: 84px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--wood3) transparent; }
+.chat-taunts { flex: none; display: flex; flex-wrap: wrap; gap: 5px; max-height: clamp(54px, 100vh - 780px, 150px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--wood3) transparent; }
 .chat-t {
   border: 0; border-radius: 0; padding: 4px 7px 3px; background: var(--wood2); color: var(--parch); font-family: var(--px); font-size: 12px; line-height: 1.1;
   box-shadow: inset 0 0 0 2px var(--wood3), 0 2px 0 0 var(--ink); text-align: left;

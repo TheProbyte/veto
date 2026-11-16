@@ -233,7 +233,7 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
   } else {
     bar = (
       <div className="dh-bar is-idle">
-        <span className="dh-bar-txt">{hand.length ? (full ? 'Your picks are in. Trade the rest, or sit tight.' : 'Tap a card to play, burn or trade it.') : "Your hand's empty."}</span>
+        <span className="dh-bar-txt">{hand.length ? (full ? 'Picks are in. Trade or sit tight.' : 'Tap a card: play, burn or trade.') : 'Hand empty.'}</span>
         <span className="dh-stat">Burns <b>{burnsLeft}</b></span>
       </div>
     );
@@ -279,13 +279,13 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
                 <span><b>{who(o.from)}</b> offers <b>{nameOf(o.give)}</b></span>
                 <div className="dh-trade-btns">
                   <button type="button" className="nh-btn nh-btn-sm" disabled={hand.length === 0}
-                    onClick={() => { sfx.unlock(); sfx.click(); setSel(null); setMode({ k: 'give', offer: o.id }); }}>Accept: give one of mine…</button>
+                    onClick={() => { sfx.unlock(); sfx.click(); setSel(null); setMode({ k: 'give', offer: o.id }); }}>Accept…</button>
                   <button type="button" className="nh-btn nh-btn-sm nh-btn-ghost" onClick={() => decline(o.id)}>Decline</button>
                 </div>
               </div>
             </div>
           ))}
-            {incoming.length > 1 && <span className="dh-more">+{incoming.length - 1} more offer{incoming.length === 2 ? '' : 's'} waiting</span>}
+            {incoming.length > 1 && <span className="dh-more">+{incoming.length - 1} more</span>}
             </div>
           )}
         <div className="dh-fan" role="group" aria-label={`Your hand: ${hand.length} of ${DRAFT_HAND} cards`}>

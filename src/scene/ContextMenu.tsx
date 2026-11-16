@@ -143,8 +143,11 @@ export function ContextMenu({ room }: { room?: RoomProps }) {
     const el = menuRef.current; if (!el) return;
     const w = el.offsetWidth, h = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight, m = 8;
     setPos({ x: Math.max(m, Math.min(at.x, vw - w - m)), y: Math.max(m, Math.min(at.y, vh - h - m)) });
-    el.querySelector<HTMLElement>('.cm-item')?.focus({ preventScroll: true });
   }, [at?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  // focus the first item once it's placed (a hidden element can't take focus)
+  useLayoutEffect(() => {
+    if (pos && !menuRef.current?.contains(document.activeElement)) menuRef.current?.querySelector<HTMLElement>('.cm-item')?.focus({ preventScroll: true });
+  }, [pos]);
   useLayoutEffect(() => {
     if (!subOpen || !pos) { setSubPos(null); return; }
     const host = menuRef.current?.querySelector<HTMLElement>(`[data-id="${subOpen}"]`), el = subRef.current;

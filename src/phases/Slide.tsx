@@ -785,7 +785,7 @@ export default function Slide({ state, me, send, skew }: RoomProps) {
         {canHold ? (
           <div className={`sl-tip ${holding ? 'hot' : ''}`}>
             {steady ? 'Steady…' : !settled ? 'Wait…' : holding ? 'Let go on the gold!' : 'Hold your glass. Let go to slide.'}
-            {!holding && settled && !steady && <small>or hold Space</small>}
+            <small>{!holding && settled && !steady ? 'or hold Space' : '\u00a0'}</small>
           </div>
         ) : myTurn && alreadySent ? (
           <div className="sl-tip">Sent at {Math.round((released?.power ?? 0) * 100)}%</div>

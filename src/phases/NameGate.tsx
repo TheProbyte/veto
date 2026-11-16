@@ -21,7 +21,7 @@ export default function NameGate({ code, onJoin }: { code: string; onJoin: (n: s
         <div className="nh-kicker dark">Table</div>
         <h1 className="nh-gate-code">{code}</h1>
         <div className="nh-rule" />
-        <label htmlFor="nh-name" className="nh-gate-q">What do they call you, stranger?</label>
+        <label htmlFor="nh-name" className="nh-gate-q">Your name, stranger?</label>
         <input id="nh-name" className="nh-input nh-input-parch" autoFocus value={n} maxLength={20}
           onChange={(e) => setN(e.target.value)} placeholder="Your name" autoComplete="off" autoCapitalize="words" autoCorrect="off" spellCheck={false} enterKeyHint="go" />
         <button type="submit" className="nh-btn nh-btn-big" disabled={!n.trim()}>Pull up a chair</button>

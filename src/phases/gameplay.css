@@ -728,13 +728,13 @@
 /* the gun bar: desktop = in flow under the carousel, sticky to the bottom edge */
 .vt-gunbar {
   position: sticky; bottom: 0; z-index: 30; display: flex; align-items: flex-end; justify-content: center; gap: clamp(20px, 3vw, 44px);
-  margin-top: 46px; height: 176px; pointer-events: none;
+  margin-top: 40px; height: 164px; pointer-events: none;
 }
 .vt-gunbar > * { pointer-events: auto; }
 .vt-arrow { width: 64px; height: 64px; padding: 0; display: grid; place-items: center; font-size: 22px; margin-bottom: 44px; }
 .vt-gunbar.idle .vt-arrow { opacity: .35; }
 .vt-hint {
-  position: absolute; left: calc(50% + 150px); bottom: 58px; white-space: nowrap; pointer-events: none;
+  position: absolute; left: calc(50% + 100px); bottom: 12px; white-space: nowrap; pointer-events: none;
   font-family: var(--px-sm); font-size: 10px; letter-spacing: .06em; color: var(--parch2); opacity: .7; text-shadow: 2px 2px 0 var(--ink);
 }
 @media (pointer: coarse) { .vt-hint { display: none; } }
@@ -883,3 +883,12 @@
 @media (pointer: coarse) { .sl-tip small { display: none; } }
 @media (max-width: 640px) { .sl::before { height: 170px; } }
 @media (prefers-reduced-motion: reduce) { .sl-grab, .sl-glass.mine .sl-glass-sp { animation: none; } }
+
+/* fixed heights so the bar's geometry never re-projects when the copy changes */
+.sl-line, .sl-verdict { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sl-ctl { height: 64px; min-height: 64px; flex: none; }
+.sl-tip small { min-height: 11px; }
+/* desktop: a dark plate behind the instruction line (it can sit over the busts after the auto-scroll) */
+@media (min-width: 641px) {
+  .vt .veto-head { position: relative; z-index: 2; padding: 6px 18px 4px; background: rgba(11,7,5,.72); box-shadow: 0 0 0 2px rgba(11,7,5,.5), 0 6px 18px rgba(0,0,0,.45); }
+}

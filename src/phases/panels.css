@@ -1314,10 +1314,12 @@
   .gp-result .rx-won-how { font-size: 15px; }
 }
 
-/* desktop: one screen, no scroll. Left: poster | LAUNCH + Saddle Up. Right: compact cards in two columns. */
+/* desktop: one screen, no scroll. Wide: poster | LAUNCH + Saddle Up | cards. With the chat panel docked: compact poster + LAUNCH + Saddle Up | cards. */
 @media (min-width: 1024px) and (min-height: 600px) {
-  .saloon.phase-result .saloon-front { padding: 20px 0; }
-  .saloon.phase-result .saloon-stage { width: min(1240px, calc(100vw - 150px)); padding: 0; }
+  .saloon.phase-result .saloon-front { padding-top: 20px; padding-bottom: 20px; }
+  .saloon.phase-result .saloon-stage { width: auto; max-width: 1240px; margin: 0 auto; padding: 0 72px; }
+  .saloon.phase-result.has-chat .saloon-stage { max-width: 1160px; padding: 0 72px 0 0; }
+  .saloon.phase-result.has-chat-tab .saloon-stage { padding-left: 16px; }
   .saloon .result.gp-result {
     margin: 0; padding: 0; min-height: calc(100dvh - 40px);
     display: grid; grid-template-columns: minmax(230px, 280px) minmax(290px, 330px) minmax(0, 1fr);
@@ -1358,4 +1360,29 @@
   .saloon .gp-result .gp-record-grid li, .saloon .gp-result .gp-streak { font-size: 12px; }
   .saloon .gp-result .gp-streak { text-align: left; }
   .saloon .gp-result .history li { font-size: 13px; padding: 3px 0 2px; }
+
+  /* chat docked: two columns, the poster goes landscape (art left, words right) on top of LAUNCH */
+  .saloon.has-chat .result.gp-result { grid-template-columns: minmax(290px, 340px) minmax(0, 1fr); grid-template-rows: auto auto auto; grid-template-areas: 'poster side' 'act side' 'sad side'; row-gap: 12px; }
+  .saloon.has-chat .gp-result > .poster-wrap { align-self: start; transform: rotate(-1deg); }
+  .saloon.has-chat .gp-result .poster { padding: 12px 14px 10px; }
+  .saloon.has-chat .gp-result .poster-body { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; column-gap: 12px; align-items: center; }
+  .saloon.has-chat .gp-result .poster-art { grid-column: 1; grid-row: 1 / -1; width: 84px; margin: 0; box-shadow: 0 0 0 3px var(--wood), 4px 4px 0 3px rgba(42,26,16,.35); }
+  .saloon.has-chat .gp-result .poster-wanted { font-size: 38px; }
+  .saloon.has-chat .gp-result .poster-sub { font-size: 9px; letter-spacing: .24em; margin-top: 2px; }
+  .saloon.has-chat .gp-result .poster-name { font-size: 19px; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .saloon.has-chat .gp-result .poster-reward { font-size: 8px; margin-top: 2px; }
+  .saloon.has-chat .gp-result .poster .poster-repeat { --aw: 84px; left: calc(14px + var(--aw) / 2); top: 50%; width: calc(var(--aw) + 14px); font-size: 9px; line-height: 1.15; padding: 5px 6px 3px;
+    box-shadow: inset 0 0 0 2px var(--stamp), inset 0 0 0 4px rgba(227,205,166,.5), inset 0 0 0 5px var(--stamp); }
+  .saloon.has-chat .gp-result .rx-side { columns: 2 220px; }
+}
+@media (min-width: 1680px) and (min-height: 600px) {
+  .saloon.phase-result.has-chat .saloon-stage { max-width: 1240px; }
+  .saloon.has-chat .result.gp-result { grid-template-columns: minmax(230px, 280px) minmax(290px, 330px) minmax(0, 1fr); grid-template-rows: auto auto; grid-template-areas: 'poster act side' 'poster sad side'; }
+  .saloon.has-chat .gp-result > .poster-wrap { align-self: center; transform: rotate(-1.5deg); }
+  .saloon.has-chat .gp-result .poster { padding: 18px 16px 20px; }
+  .saloon.has-chat .gp-result .poster-body { display: block; }
+  .saloon.has-chat .gp-result .poster-art { width: 64%; margin: 10px auto 8px; }
+  .saloon.has-chat .gp-result .poster-wanted { font-size: 46px; }
+  .saloon.has-chat .gp-result .poster-name { font-size: 21px; display: block; }
+  .saloon.has-chat .gp-result .poster .poster-repeat { left: 50%; top: 46%; width: 86%; font-size: 18px; padding: 8px 10px 6px; }
 }

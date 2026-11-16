@@ -156,7 +156,7 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
       if (!car || window.innerWidth <= 640 || window.innerHeight <= 500) return;
       const front = car.closest('.saloon-front') as HTMLElement | null;
       if (!front) return;
-      const need = car.getBoundingClientRect().bottom + 46 + 176 + 6 - window.innerHeight;
+      const need = car.getBoundingClientRect().bottom + 40 + 164 + 6 - window.innerHeight;
       if (need > 4) front.scrollBy({ top: need, behavior: 'smooth' });
     }, 120);
     return () => clearTimeout(t);
@@ -211,7 +211,7 @@ export default function Veto({ state, me, send, skew, on }: RoomProps) {
                   {isC && !!g.cracks && <PixelSprite draw={crackFor(g.appid)} w={36} h={54} className="vt-crack" />}
                   {g.tier === 'pitch' && <span className="gbox-pitch">PITCH</span>}
                   {!!g.cracks && <span className="gbox-more">1 more</span>}
-                  {a <= 1 && (mineStar || starFree) && (
+                  {(mineStar ? a <= 2 : a <= 1 && starFree) && (
                     <button
                       type="button"
                       className={`vt-badge ${mineStar ? 'pinned' : 'open'} ${isC ? 'big' : 'small'}`}

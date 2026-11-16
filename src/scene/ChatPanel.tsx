@@ -78,7 +78,7 @@ export function useChatLog({ on, state, me }: RoomProps) {
 
 /** what an emote reads like in the log */
 const EMOTE_LOG: Record<string, string> = {
-  tip: 'tips their hat', spit: 'spits', laugh: 'laughs', yeehaw: 'hollers', clap: 'slow claps', shrug: 'shrugs', angry: 'fumes', drink: 'takes a drink',
+  tip: 'tips hat', spit: 'spits', laugh: 'laughs', yeehaw: 'hollers', clap: 'slow claps', shrug: 'shrugs', angry: 'fumes', drink: 'drinks',
 };
 
 /** top of the phase UI (same as Saloon's --stage-top): the panel starts a nameplate's height below it */

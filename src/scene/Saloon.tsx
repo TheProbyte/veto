@@ -35,7 +35,7 @@ const EMOTE_TXT: Record<string, { cap: string; word?: string; at?: number }> = {
   clap: { cap: 'slow claps' },
   shrug: { cap: 'shrugs' },
   angry: { cap: 'fumes' },
-  drink: { cap: 'takes a drink', word: 'ahh…', at: 1400 },
+  drink: { cap: 'drinks', word: 'ahh…', at: 1400 },
 };
 /** how long the caption stays (the canvas animations run 1.6-2.1s) */
 const EMOTE_POP_MS = 2300;
@@ -119,7 +119,6 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
     },
     onBolt: (big) => { window.setTimeout(() => sfx.thunder(big ? 0.85 : 0.3 + Math.random() * 0.35), big ? 500 : 900 + Math.random() * 1800); },
   };
-  if (import.meta.env.DEV) (window as unknown as { __nahFx: SceneFX }).__nahFx = sceneFx.current; // TEMP-VERIFY
   const push = (e: SceneFX['queue'][number]) => { const q = sceneFx.current.queue; q.push(e); if (q.length > 24) q.splice(0, q.length - 24); };
   const phaseRef = useRef(state.phase);
   phaseRef.current = state.phase;
@@ -158,7 +157,7 @@ export default function Saloon({ children, ...rp }: RoomProps & { children: Reac
       const o = prev.get(p.id);
       if (!o) { door = door || 1; continue; }
       if (o.connected !== p.connected && p.id !== me && !p.bot) {
-        add.push({ id: Date.now() + Math.random(), p, text: p.connected ? `${p.name} stumbled back in` : `${p.name} stepped out into the rain` });
+        add.push({ id: Date.now() + Math.random(), p, text: p.connected ? `${p.name} is back` : `${p.name} stepped out` });
         door = p.connected ? door || 1 : 2;
       }
     }
