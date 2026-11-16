@@ -382,3 +382,14 @@ canvas { image-rendering: pixelated; }
 @media (prefers-reduced-motion: reduce) {
   .center .cbox-bob, .crosshair, .seat-order.now, .btn-fire, .btn-launch, .gbox-more { animation: none !important; }
 }
+
+/* keep the trigger reachable on short screens */
+.phase-veto .veto-controls {
+  position: sticky;
+  bottom: 10px;
+  z-index: 30;
+  padding: 8px 0;
+}
+@media (max-height: 820px) {
+  .phase-veto .veto-carousel, .phase-veto [class*="carousel"] { transform-origin: top center; }
+}
