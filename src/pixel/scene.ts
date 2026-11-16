@@ -578,6 +578,12 @@ export class SceneRenderer {
   emis: Uint8Array;
   cool: Float32Array;
   vig: Float32Array;
+  /** per frame: 1 where a bust is the visible pixel (doorway / window light never lands on these) */
+  fg: Uint8Array;
+  /** opaque pixels of the table layer (drawn over the busts' lower edge) */
+  tableMask: Uint8Array;
+  /** alpha mask per cached bust sprite */
+  spriteMasks = new WeakMap<HTMLCanvasElement, Uint8Array>();
   geo: WallGeo = { wins: [], door: null, piano: null, shelf: { x0: 0, x1: 0, y: 0 } };
   sprites = new Map<string, HTMLCanvasElement>();
   looks = new Map<string, BustLook>();
@@ -612,6 +618,8 @@ export class SceneRenderer {
     const [tb, tc] = makeCanvas(W, H);
     drawTable(tc, L);
     this.table = tb;
+    this.fg = new Uint8Array(W * H);
+    this.tableMask = alphaMask(tb);
     // dawn skies for the windows + doorway (drawn over the night ones at the result)
     const [dw, dc] = makeCanvas(W, H);
     this.geo.wins.forEach((w, wi) => {
@@ -773,6 +781,7 @@ export class SceneRenderer {
     } else for (const [id, cur] of this.anims) if (vt - cur.v > (EMO_MS[cur.kind] ?? 1500)) this.anims.delete(id);
 
     // players
+    this.fg.fill(0);
     const overlays: { g: SeatGeom; a: Anim; age: number; ox: number; oy: number; ps: Pose2 }[] = [];
     for (const { p, g } of geoms) {
       const ph = (p.id.charCodeAt(0) || 0) * 0.37 + p.seat;
@@ -808,9 +817,20 @@ export class SceneRenderer {
       }
       const cv = this.sprite(p, g, blink, lit, g.x < lx, gun, ps);
       const pad = Math.round((ps.pad ?? 0) * g.scale);
-      c.drawImage(cv, Math.round(g.x - cv.width / 2) + jx, g.top - pad + bob + jy + (gun === 2 ? 1 : 0));
+      const bx = Math.round(g.x - cv.width / 2) + jx, by = g.top - pad + bob + jy + (gun === 2 ? 1 : 0);
+      c.drawImage(cv, bx, by);
+      let m = this.spriteMasks.get(cv);
+      if (!m) { m = alphaMask(cv); this.spriteMasks.set(cv, m); }
+      stampMask(this.fg, W, H, m, cv.width, cv.height, bx + ox, by + oy);
     }
     c.drawImage(this.table, 0, 0);
+    { // the table covers the busts' lower edge: it takes the floor spill again
+      const tm = this.tableMask, fg = this.fg;
+      for (let y = Math.max(0, oy); y < Math.min(H, H + oy); y++) {
+        const r = y * W, rs = (y - oy) * W;
+        for (let x = Math.max(0, ox); x < Math.min(W, W + ox); x++) if (tm[rs + x - ox]) fg[r + x] = 0;
+      }
+    }
 
     // chain + lamp body (unlit layer; flame drawn after lighting)
     for (let i = 0; i <= L.lampLen - 2; i++) {
@@ -844,11 +864,13 @@ export class SceneRenderer {
     const pn = this.geo.piano;
     const cdx = pn ? pn.x + 8 : -999, cdy = pn ? pn.floor - 20 : -999, cdr = 30;
     const cflick = 0.85 + 0.15 * Math.sin(sec * 7.1 + 2);
+    const fg = this.fg;
     for (let y = 0; y < H; y++) {
       const dy = y - ly;
       for (let x = 0; x < W; x++) {
         const i = y * W + x, o = i * 4;
-        if (this.emis[i]) {
+        const bust = fg[i] === 1;
+        if (!bust && this.emis[i]) {
           d[o] *= emisK; d[o + 1] *= emisK; d[o + 2] *= emisK; continue;
         }
         const dx = x - lx;
@@ -877,7 +899,9 @@ export class SceneRenderer {
         const lq = Math.floor(lamp * 5 + b) / 5;
         const av = amb * this.vig[i];
         const aq = Math.floor(av * 7 + b) / 7;
-        const cl = Math.floor(this.cool[i] * 3 + b) / 3 * coolK;
+        // window / doorway spill (and its lightning + dawn colour) lights the wall and floor, never the busts:
+        // they get the storm and the morning through the seat-independent ambient term instead
+        const cl = bust ? 0 : Math.floor(this.cool[i] * 3 + b) / 3 * coolK;
         d[o] = d[o] * (aq * 0.85 + lq * 1.3 + cl * cR);
         d[o + 1] = d[o + 1] * (aq * 0.9 + lq * 1.0 + cl * cG);
         d[o + 2] = d[o + 2] * (aq * 1.12 + lq * 0.62 + cl * cB);
@@ -1250,5 +1274,21 @@ export class SceneRenderer {
 }
 
 const f2 = (age: number, ms: number) => Math.floor(age / ms) % 2 === 1;
+
+/** 1 where the canvas has any opacity */
+function alphaMask(cv: HTMLCanvasElement): Uint8Array {
+  const w = cv.width, h = cv.height, m = new Uint8Array(w * h);
+  const d = cv.getContext('2d')!.getImageData(0, 0, w, h).data;
+  for (let i = 0; i < m.length; i++) m[i] = d[i * 4 + 3] > 0 ? 1 : 0;
+  return m;
+}
+/** OR a sprite mask into a W x H mask at (x0, y0), clipped */
+function stampMask(dst: Uint8Array, W: number, H: number, m: Uint8Array, w: number, h: number, x0: number, y0: number) {
+  const ya = Math.max(0, -y0), yb = Math.min(h, H - y0), xa = Math.max(0, -x0), xb = Math.min(w, W - x0);
+  for (let y = ya; y < yb; y++) {
+    const r = (y0 + y) * W + x0, s = y * w;
+    for (let x = xa; x < xb; x++) if (m[s + x]) dst[r + x] = 1;
+  }
+}
 
 export function rgbOf(hex: string) { return hexRgb(hex); }

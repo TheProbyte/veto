@@ -11,6 +11,7 @@ export interface MusicDeps {
   noise: AudioBuffer;                     // shared 2s white noise
   impulse: AudioBuffer;                   // room impulse (own convolver, so the tail follows music volume)
   pluckBuf: (freq: number) => AudioBuffer; // cached Karplus-Strong pluck
+  paused?: boolean;                        // start paused (page hidden); see MusicEngine.setPaused
 }
 
 export const mtof = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
@@ -107,12 +108,15 @@ export interface MusicEngine {
   setMode(m: MusicMode): void;
   mode(): MusicMode;
   playing(): boolean;
+  /** page hidden / frozen: stop scheduling and fade the bus out (the owner also suspends the AudioContext) */
+  setPaused(p: boolean): void;
 }
 
 export function createMusic(d: MusicDeps): MusicEngine {
   const { ctx } = d;
-  const bus = ctx.createGain(); // ducks while the tab is hidden
-  bus.gain.value = typeof document !== 'undefined' && document.hidden ? 0 : 1;
+  let paused = !!d.paused;
+  const bus = ctx.createGain(); // ducks while the page is hidden
+  bus.gain.value = paused ? 0 : 1;
   bus.connect(d.dest);
   const verbIn = ctx.createGain();
   const conv = ctx.createConvolver();
@@ -395,7 +399,7 @@ export function createMusic(d: MusicDeps): MusicEngine {
     }
   }
   function ensureTimer() {
-    if (timer || broken || (typeof document !== 'undefined' && document.hidden)) return;
+    if (timer || broken || paused) return;
     timer = window.setInterval(tick, 25);
     tick();
   }
@@ -403,19 +407,20 @@ export function createMusic(d: MusicDeps): MusicEngine {
     if (timer) window.clearInterval(timer);
     timer = 0;
   }
-  if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', () => {
-      const t = ctx.currentTime;
-      bus.gain.cancelScheduledValues(t);
-      bus.gain.setValueAtTime(bus.gain.value, t);
-      if (document.hidden) {
-        stopTimer();
-        bus.gain.linearRampToValueAtTime(0, t + 0.15);
-      } else {
-        bus.gain.linearRampToValueAtTime(1, t + 0.4);
-        if (cur || fading.length) ensureTimer();
-      }
-    });
+  // driven by sfx.ts (visibilitychange / pagehide / freeze and back)
+  function setPaused(p: boolean) {
+    if (p === paused) return;
+    paused = p;
+    const t = ctx.currentTime;
+    bus.gain.cancelScheduledValues(t);
+    bus.gain.setValueAtTime(bus.gain.value, t);
+    if (p) {
+      stopTimer();
+      bus.gain.linearRampToValueAtTime(0, t + 0.15);
+    } else {
+      bus.gain.linearRampToValueAtTime(1, t + 0.4);
+      if (cur || fading.length) ensureTimer();
+    }
   }
 
   return {
@@ -435,5 +440,6 @@ export function createMusic(d: MusicDeps): MusicEngine {
     },
     mode: () => requested,
     playing: () => !!cur && !broken,
+    setPaused,
   };
 }

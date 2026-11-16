@@ -44,9 +44,15 @@ function readMusicVolume(): number {
 function applyLevel() {
   if (!ctx || !master || !mainOut || !musicGain) return;
   const t = ctx.currentTime;
-  for (const [g, v] of [[master, volume], [mainOut, muted ? 0 : 1], [musicGain, musicVolume * MUSIC_TRIM]] as const) {
+  // hidden page: also fade the output (a backstop for browsers that don't honour ctx.suspend())
+  for (const [g, v] of [[master, volume], [mainOut, muted || bgHidden ? 0 : 1], [musicGain, musicVolume * MUSIC_TRIM]] as const) {
     g.gain.cancelScheduledValues(t);
     g.gain.setTargetAtTime(v, t, 0.05);
+  }
+  if (rainBus) { // the rain bed bypasses the compressor: its own volume + mute
+    const g = rainBus.out.gain;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(muted || bgHidden ? 0 : volume * RAIN_MAKEUP, t, 0.05);
   }
 }
 const musicAudible = () => !!engine && engine.playing() && !muted && musicVolume > 0.01;
@@ -77,18 +83,21 @@ function roomImpulse(c: AudioContext, secs = 1.2): AudioBuffer {
 
 function init(): boolean {
   if (ctx) {
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    reconcileCtx();
     return true;
   }
   try {
     const AC: typeof AudioContext | undefined =
       (window as any).AudioContext || (window as any).webkitAudioContext;
     if (!AC) return false;
-    ctx = new AC();
+    // phones: a bigger output buffer ('playback') trades ~50 ms of latency for no audio dropouts
+    // (stutter) when the canvas keeps the CPU busy; desktop keeps the snappy default.
+    const coarse = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
+    try { ctx = new AC(coarse ? { latencyHint: 'playback' } : undefined); } catch { ctx = new AC(); }
     master = ctx.createGain();
     master.gain.value = volume;
     mainOut = ctx.createGain();
-    mainOut.gain.value = muted ? 0 : 1;
+    mainOut.gain.value = muted || bgHidden ? 0 : 1;
     musicGain = ctx.createGain();
     musicGain.gain.value = musicVolume * MUSIC_TRIM;
     const comp = ctx.createDynamicsCompressor();
@@ -122,7 +131,8 @@ function init(): boolean {
     noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    ctx.addEventListener('statechange', reconcileCtx);
+    reconcileCtx();
     return true;
   } catch {
     ctx = null;
@@ -130,13 +140,60 @@ function init(): boolean {
   }
 }
 
-const ready = () => !!ctx && !!master;
+/** a context exists (unlocked) */
+const live = () => !!ctx && !!master;
+/** ...and the page is in the foreground: one-shots no-op while hidden (the clock is frozen, they'd burst on resume) */
+const ready = () => live() && !bgHidden;
+
+/* ---------- page lifecycle: nothing plays while the page is hidden / frozen ----------
+ * Hidden (visibilitychange hidden, pagehide, freeze): the music scheduler pauses, the output fades and the
+ * AudioContext is suspended, which freezes every loop (rain, wind, fuse) and any already-scheduled note
+ * where it is; voice clips (src/voice.ts) pause via onBackground. Visible again (visibilitychange visible,
+ * pageshow, resume): the context resumes, the frozen loops carry on from where they were and whatever was
+ * toggled meanwhile is synced (never double-started). iOS / Edge can also leave the context 'interrupted'
+ * (a call, another app taking audio): it's resumed on the next state change or user gesture. */
+let bgHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+const bgListeners = new Set<(hidden: boolean) => void>();
+
+function reconcileCtx() {
+  if (!ctx) return;
+  const st = ctx.state as string; // 'interrupted' (Safari) isn't in the TS union
+  if (st === 'closed') return;
+  if (bgHidden) { if (st === 'running') ctx.suspend().catch(() => {}); }
+  else if (st !== 'running') ctx.resume().catch(() => {});
+}
+function setBackground(hidden: boolean) {
+  if (hidden === bgHidden) return;
+  bgHidden = hidden;
+  engine?.setPaused(hidden);
+  if (hidden) { applyLevel(); reconcileCtx(); }
+  else { reconcileCtx(); applyLevel(); startMusic(); syncLoops(); }
+  for (const f of bgListeners) { try { f(hidden); } catch { /* listener error */ } }
+}
+/** start / stop the loops to match what was asked for while the page was hidden */
+function syncLoops() {
+  if (!ready()) return;
+  if (wantAmbience) startAmbience(); else { ambNodes?.stop(); ambNodes = null; }
+  if (wantFuse) startFuse(); else { fuseNodes?.stop(); fuseNodes = null; }
+  if (wantRain) startRain(); else stopRain();
+}
+if (typeof document !== 'undefined' && typeof window !== 'undefined') {
+  const shown = () => { if (document.visibilityState !== 'hidden') setBackground(false); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') setBackground(true); else shown(); });
+  window.addEventListener('pagehide', () => setBackground(true));
+  document.addEventListener('freeze', () => setBackground(true));
+  window.addEventListener('pageshow', shown);
+  document.addEventListener('resume', shown);
+  // an 'interrupted' / stray-suspended context comes back on the next tap or key
+  const kick = () => { if (ctx && !bgHidden && (ctx.state as string) !== 'running') reconcileCtx(); };
+  for (const ev of ['pointerdown', 'touchend', 'keydown']) window.addEventListener(ev, kick, { capture: true, passive: true });
+}
 
 function startMusic() {
   if (!ready()) return;
   if (!engine) {
     if (wantMusic === 'off') return;
-    engine = createMusic({ ctx: ctx!, dest: musicGain!, noise: noiseBuf!, impulse: impulse!, pluckBuf: (f) => pluckBuf(f) });
+    engine = createMusic({ ctx: ctx!, dest: musicGain!, noise: noiseBuf!, impulse: impulse!, pluckBuf: (f) => pluckBuf(f), paused: bgHidden });
   }
   engine.setMode(wantMusic); // no-op when already in that mode
 }
@@ -147,6 +204,22 @@ function noise(loop = false): AudioBufferSourceNode {
   s.buffer = noiseBuf;
   s.loop = loop;
   if (!loop) s.loopStart = 0;
+  return s;
+}
+
+/** looping noise for the long beds (wind, synth rain): the shared 2 s buffer repeats audibly as a
+ * rhythmic 'stutter' when it loops under a steady bed, so these get their own ~8.7 s one (made once) */
+let bedNoise: AudioBuffer | null = null;
+function bedNoiseSrc(): AudioBufferSourceNode {
+  if (!bedNoise) {
+    const len = Math.round(ctx!.sampleRate * 8.7);
+    bedNoise = ctx!.createBuffer(1, len, ctx!.sampleRate);
+    const d = bedNoise.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const s = ctx!.createBufferSource();
+  s.buffer = bedNoise;
+  s.loop = true;
   return s;
 }
 
@@ -281,11 +354,12 @@ function startFuse() {
   lfo.start(t);
   let alive = true;
   const pop = () => {
-    if (!alive || !ready()) return;
+    if (!alive || !live()) return;
+    timer = window.setTimeout(pop, 40 + Math.random() * 220);
+    if (bgHidden) return;
     const tt = now();
     const n = 1 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) noiseHit(tt + i * 0.018 * Math.random(), 'highpass', 3000 + Math.random() * 3000, 0.25 + Math.random() * 0.3, 0.008 + Math.random() * 0.01);
-    timer = window.setTimeout(pop, 40 + Math.random() * 220);
   };
   let timer = window.setTimeout(pop, 60);
   fuseNodes = {
@@ -336,7 +410,7 @@ function glassClink(t: number) {
 function startAmbience() {
   if (!ready() || ambNodes) return;
   const t = now();
-  const s = noise(true);
+  const s = bedNoiseSrc();
   const lp = filt('lowpass', 420, 2.2);
   const g = ctx!.createGain();
   g.gain.setValueAtTime(0.0001, t);
@@ -362,9 +436,9 @@ function startAmbience() {
   let timer = 0;
   let glassTimer = 0;
   const play = () => {
-    if (!alive || !ready()) return;
+    if (!alive || !live()) return;
     timer = window.setTimeout(play, 2500 + Math.random() * 4500);
-    if (musicAudible()) return; // free-time piano would clash with the music loop; keep wind + glass
+    if (bgHidden || musicAudible()) return; // free-time piano would clash with the music loop; keep wind + glass
     const tt = now() + 0.02;
     const root = 55 + 12 * Math.floor(Math.random() * 2); // G3 / G4
     const pick = () => root + PENTA[Math.floor(Math.random() * PENTA.length)] + (Math.random() < 0.25 ? 12 : 0);
@@ -377,9 +451,9 @@ function startAmbience() {
     if (Math.random() < 0.35) { pianoNote(tt, root - 12, 0.02); pianoNote(tt, root - 5, 0.014); }
   };
   const clink = () => {
-    if (!alive || !ready()) return;
-    glassClink(now() + 0.02);
+    if (!alive || !live()) return;
     glassTimer = window.setTimeout(clink, 7000 + Math.random() * 14000);
+    if (!bgHidden) glassClink(now() + 0.02);
   };
   timer = window.setTimeout(play, 1500);
   glassTimer = window.setTimeout(clink, 5000 + Math.random() * 6000);
@@ -404,7 +478,7 @@ export const sfx = {
   music(mode: MusicMode) { // background music mode; same mode = no-op; ~1s crossfade; starts only after unlock()
     wantMusic = mode;
     startMusic();
-    rainNodes?.duck(rainDuck());
+    duckRain();
   },
   getMusicMode(): MusicMode { return wantMusic; },
   setMusicVolume(v: number) { // music volume 0..1 (persisted 'nah.musicVolume')
@@ -432,6 +506,10 @@ export const sfx = {
   },
   getVolume(): number { return volume; },
   isMuted(): boolean { return muted; },
+  /** true while the page is hidden / frozen (all audio paused) */
+  isBackground(): boolean { return bgHidden; },
+  /** called with true when the page goes to the background, false when it's back; returns an unsubscribe */
+  onBackground(f: (hidden: boolean) => void): () => void { bgListeners.add(f); return () => { bgListeners.delete(f); }; },
   ambience(on: boolean) {  // low wind + distant saloon piano loop
     wantAmbience = on;
     if (!ready()) return;
@@ -1066,100 +1144,184 @@ function recordedThunder(k: number): boolean {
   return true;
 }
 
-interface RainNodes { stop: () => void; duck: (k: number) => void }
+/* ---- rain: one bed, heard from inside the saloon ----
+ * source(s) -> own fade -> rain bus: lowpass (12 dB/oct, ~1.15 kHz) + a little low-mid warmth -> duck -> own
+ * volume/mute -> output (not through the compressor, so loud one-shots don't pump it).
+ * rain(true) is idempotent: an existing bed is kept (a fading-out one is ramped back up), never restarted. */
+interface RainNodes { kind: 'file' | 'synth'; stopping: boolean; stop: () => void; revive: () => void }
 let rainNodes: RainNodes | null = null;
 let wantRain = false;
 let rainGen = 0;
-const RAIN_FILE_GAIN = 0.3; // the file is normalized to ~-1 dBFS: a bed that never masks the narrator / music
+let rainBus: { input: GainNode; duck: GainNode; out: GainNode } | null = null;
+const RAIN_FILE_GAIN = 0.36;  // the file is normalized to ~-1 dBFS; after the muffling this sits a bit under the old bed
+const RAIN_SYNTH_GAIN = 0.03;
+const RAIN_MAKEUP = 1.7; // the main compressor's automatic makeup gain (+4.6 dB at this level) that the bypass misses
+const RAIN_FADE = 1.5;
 /** rain sits lower under the veto music */
 const rainDuck = () => (wantMusic === 'veto' ? 0.6 : 1);
 
-function stopRain() {
-  rainGen++;
-  rainNodes?.stop();
-  rainNodes = null;
+function rainChain() {
+  if (rainBus) return rainBus;
+  const input = ctx!.createGain();
+  const lp = filt('lowpass', 1150, 0.6);       // gentle (no resonant bump): through walls and the roof
+  const warm = ctx!.createBiquadFilter();       // a touch of low-mid body (the roof boards)
+  warm.type = 'peaking'; warm.frequency.value = 280; warm.Q.value = 0.8; warm.gain.value = 2.5;
+  const duck = ctx!.createGain();
+  duck.gain.value = rainDuck();
+  // effects volume + mute, but after the compressor: shots / thunder would otherwise pump the steady bed
+  // (a shot pulled the whole mix down ~12 dB for half a second, which is heard as the rain stuttering)
+  const o = ctx!.createGain();
+  o.gain.value = muted || bgHidden ? 0 : volume * RAIN_MAKEUP;
+  input.connect(lp).connect(warm).connect(duck).connect(o).connect(ctx!.destination);
+  rainBus = { input, duck, out: o };
+  return rainBus;
 }
-function startRain() {
-  if (!ready() || rainNodes) return;
-  const rec = decoded.get('rain.mp3');
-  if (rec) { rainNodes = recordedRain(rec.buf); return; }
-  if (hasFile('rain.mp3')) {
-    // not decoded yet: synth now, crossfade to the recording once it lands (if rain is still wanted)
-    const gen = ++rainGen;
-    loadFile('rain.mp3').then((buf) => {
-      if (!buf || gen !== rainGen || !wantRain || !ready()) return;
-      rainNodes?.stop();
-      rainNodes = recordedRain(buf);
-    });
-  }
-  rainNodes = synthRain();
+/** glide to the current duck level (veto music) over ~2 s: no step, and a new call just re-aims the glide */
+function duckRain() {
+  if (!rainBus || !ctx) return;
+  const g = rainBus.duck.gain, t = now();
+  g.cancelScheduledValues(t);
+  g.setValueAtTime(g.value, t);
+  g.setTargetAtTime(rainDuck(), t, 0.6);
+}
+/** a bed's own fade in / out; stop() fades and only then frees the nodes, so rain(true) inside the fade revives it */
+function rainFader(kind: RainNodes['kind'], fade: GainNode, level: number, free: () => void): RainNodes {
+  const t = now();
+  fade.gain.setValueAtTime(0, t);
+  fade.gain.setTargetAtTime(level, t, RAIN_FADE / 3);
+  let timer = 0;
+  const node: RainNodes = {
+    kind,
+    stopping: false,
+    stop() {
+      if (node.stopping) return;
+      node.stopping = true;
+      const tt = now();
+      fade.gain.cancelScheduledValues(tt);
+      fade.gain.setValueAtTime(fade.gain.value, tt);
+      fade.gain.setTargetAtTime(0, tt, RAIN_FADE / 4);
+      timer = window.setTimeout(() => { free(); if (rainNodes === node) rainNodes = null; }, RAIN_FADE * 1000 + 600);
+    },
+    revive() {
+      if (!node.stopping) return;
+      node.stopping = false;
+      clearTimeout(timer);
+      const tt = now();
+      fade.gain.cancelScheduledValues(tt);
+      fade.gain.setValueAtTime(fade.gain.value, tt);
+      fade.gain.setTargetAtTime(level, tt, RAIN_FADE / 3);
+    },
+  };
+  return node;
 }
 
-/** gapless loop of the recording: effects volume, own level (x duck), 1.5s fades */
+function stopRain() {
+  rainGen++;
+  rainNodes?.stop(); // stays in rainNodes until the fade is done (revivable)
+}
+function startRain() {
+  if (!ready()) return;
+  rainNodes?.revive();
+  const rec = decoded.get('rain.mp3');
+  if (rainNodes && (rainNodes.kind === 'file' || !rec)) return; // already raining: only the gain moved
+  if (rec) {
+    // the recording replaces the synth stand-in (crossfade)
+    const old = rainNodes;
+    rainNodes = recordedRain(rec.buf);
+    old?.stop();
+    return;
+  }
+  rainNodes = synthRain();
+  if (hasFile('rain.mp3')) {
+    // not decoded yet: the synth plays meanwhile; swap once it lands (if rain is still wanted)
+    const gen = rainGen;
+    loadFile('rain.mp3').then((buf) => { if (buf && gen === rainGen && wantRain) startRain(); });
+  }
+}
+
+/** rain.mp3 is a 30 s loop with 0.25 s of matching padding at both ends. Decoders disagree about MP3
+ * encoder delay / padding, so the length of the decoded buffer can't be trusted for the loop end: find the
+ * exact period by matching the material at loopStart against the tail, then crossfade the last 0.2 s of the
+ * loop into the padding that precedes loopStart (in place, once), so the wrap is sample-continuous even
+ * where the lossy codec made the two copies differ. */
+const RAIN_PAD = 0.25, RAIN_PERIOD = 30;
+const rainLoops = new WeakMap<AudioBuffer, { start: number; end: number }>();
+function rainLoop(buf: AudioBuffer): { start: number; end: number } {
+  let lp = rainLoops.get(buf);
+  if (lp) return lp;
+  const sr = buf.sampleRate, n = buf.length, pad = Math.round(RAIN_PAD * sr);
+  if (n < pad * 2 + sr) { lp = { start: 0, end: buf.duration }; rainLoops.set(buf, lp); return lp; }
+  const x = buf.getChannelData(0);
+  const W = 2048, span = Math.round(0.06 * sr);
+  const expect = Math.min(n - 2 * pad, Math.round(RAIN_PERIOD * sr));
+  let P = expect, bestE = Infinity;
+  for (let p = expect - span; p <= expect + span; p++) {
+    if (pad + p + W > n) break;
+    let e = 0;
+    for (let k = 0; k < W && e < bestE; k++) { const d = x[pad + k] - x[pad + p + k]; e += d * d; }
+    if (e < bestE) { bestE = e; P = p; }
+  }
+  const F = Math.min(Math.round(0.2 * sr), pad, P >> 2);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < F; i++) {
+      const j = pad + P - F + i, w = (i + 0.5) / F; // linear: the two copies are strongly correlated
+      d[j] = d[j] * (1 - w) + d[j - P] * w;
+    }
+  }
+  lp = { start: pad / sr, end: (pad + P) / sr };
+  rainLoops.set(buf, lp);
+  return lp;
+}
+
+/** gapless loop of the recording */
 function recordedRain(buf: AudioBuffer): RainNodes {
   const t = now();
   const s = ctx!.createBufferSource();
   s.buffer = buf;
   s.loop = true;
-  // rain.mp3 is a seamless loop with 0.25s of matching padding at both ends (covers MP3 encoder padding)
-  const inset = buf.duration > 2 ? 0.25 : 0;
-  s.loopStart = inset;
-  s.loopEnd = buf.duration - inset;
+  const lp = rainLoop(buf);
+  s.loopStart = lp.start;
+  s.loopEnd = lp.end;
   const fade = ctx!.createGain();
-  fade.gain.setValueAtTime(0.0001, t);
-  fade.gain.exponentialRampToValueAtTime(1, t + 1.5);
-  const lvl = ctx!.createGain();
-  lvl.gain.value = RAIN_FILE_GAIN * rainDuck();
-  s.connect(fade).connect(lvl);
-  out(lvl);
-  s.start(t, inset);
-  return {
-    duck(k) { lvl.gain.setTargetAtTime(RAIN_FILE_GAIN * k, now(), 0.5); },
-    stop() {
-      const tt = now();
-      fade.gain.cancelScheduledValues(tt);
-      fade.gain.setValueAtTime(Math.max(0.0001, fade.gain.value), tt);
-      fade.gain.exponentialRampToValueAtTime(0.0001, tt + 1.5);
-      s.stop(tt + 1.6);
-    },
-  };
+  s.connect(fade).connect(rainChain().input);
+  s.start(t, lp.start);
+  return rainFader('file', fade, RAIN_FILE_GAIN, () => { try { s.stop(); } catch { /* already stopped */ } fade.disconnect(); });
 }
 
+/** stand-in until the recording is decoded (or when there is none): filtered noise + soft drips on the roof */
 function synthRain(): RainNodes {
   const t = now();
-  const s = noise(true);
-  const hp = filt('highpass', 900);
-  const lp = filt('lowpass', 5200);
+  const s = bedNoiseSrc();
+  const hp = filt('highpass', 120);
+  const lp = filt('lowpass', 1600, 0.5);
   const g = ctx!.createGain();
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.022, t + 2.5);
+  g.gain.value = RAIN_SYNTH_GAIN;
   const lfo = ctx!.createOscillator(); lfo.frequency.value = 0.09;
-  const lg = ctx!.createGain(); lg.gain.value = 0.007;
+  const lg = ctx!.createGain(); lg.gain.value = RAIN_SYNTH_GAIN * 0.3;
   lfo.connect(lg).connect(g.gain);
-  const lvl = ctx!.createGain();
-  lvl.gain.value = rainDuck();
-  s.connect(hp).connect(lp).connect(g).connect(lvl);
-  out(lvl, 0.2);
-  s.start(t, Math.random()); lfo.start(t);
+  const fade = ctx!.createGain();
+  s.connect(hp).connect(lp).connect(g).connect(fade).connect(rainChain().input);
+  s.start(t, Math.random() * 8); lfo.start(t);
   let alive = true;
   const drip = () => {
-    if (!alive || !ready()) return;
-    const tt = now() + 0.01;
-    noiseHit(tt, 'bandpass', 2500 + Math.random() * 2500, (0.012 + Math.random() * 0.02) * rainDuck(), 0.012, 0.3, 3);
+    if (!alive || !live()) return;
     timer = window.setTimeout(drip, 60 + Math.random() * 260);
+    if (bgHidden) return;
+    const tt = now() + 0.01;
+    const n = noise();
+    const f = filt('bandpass', 700 + Math.random() * 900, 2.5);
+    const dg = ctx!.createGain();
+    env(dg, tt, 0.02 + Math.random() * 0.03, 0.002, 0.03);
+    n.connect(f).connect(dg).connect(fade);
+    n.start(tt, Math.random(), 0.08);
   };
   let timer = window.setTimeout(drip, 300);
-  return {
-    duck(k) { lvl.gain.setTargetAtTime(k, now(), 0.5); },
-    stop() {
-      alive = false; clearTimeout(timer);
-      const tt = now();
-      g.gain.cancelScheduledValues(tt);
-      g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), tt);
-      g.gain.exponentialRampToValueAtTime(0.0001, tt + 1.5);
-      s.stop(tt + 1.6); lfo.stop(tt + 1.6);
-    },
-  };
+  return rainFader('synth', fade, 1, () => {
+    alive = false; clearTimeout(timer);
+    try { s.stop(); lfo.stop(); } catch { /* already stopped */ }
+    fade.disconnect();
+  });
 }
 
 /** Phase -> music mode. Home (undefined) and lobby/nominate -> 'lobby'. */
