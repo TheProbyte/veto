@@ -1,3 +1,4 @@
+import { TURN_MS } from '../../shared/types';
 import { useCallback, useEffect, useRef, type CSSProperties } from 'react';
 import type { RoomProps } from '../props';
 import { useNow } from '../net';
@@ -158,7 +159,7 @@ const ROPE = 'M' + Array.from({ length: 61 }, (_, i) => { const x = 20 + i * 5; 
 
 function Fuse({ deadline, skew, mine }: { deadline: number; skew: number; mine: boolean }) {
   const now = useNow(skew);
-  const rem = Math.max(0, deadline - now);
+  const rem = Math.min(TURN_MS, Math.max(0, deadline - now));
   const secs = Math.ceil(rem / 1000);
   const frantic = rem > 0 && rem < 10_000;
   const total = 30_000;
