@@ -12,7 +12,7 @@
   --pxf: 'Pixelify Sans', 'Silkscreen', monospace; --sk: 'Silkscreen', 'Pixelify Sans', monospace;
   position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--u);
   width: 100%; height: var(--nm-h, 60dvh); margin: var(--nm-push, 0px) auto 0; padding: calc(var(--u) * 2);
-  overflow: hidden; container: nm / size;
+  overflow: hidden;
   font-family: var(--pxf); font-size: calc(var(--t) * 7); line-height: calc(var(--t) * 8); color: var(--parch);
   /* translucent table felt: the room reads through */
   background: repeating-conic-gradient(rgba(0,0,0,.18) 0 25%, transparent 0 50%) 0 0 / calc(var(--u) * 2) calc(var(--u) * 2), rgba(20, 52, 34, .58);
@@ -112,6 +112,7 @@
 .nm-deck { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: var(--u); }
 .nm-deck-row { flex: 1 1 0; min-height: 0; display: flex; align-items: stretch; gap: calc(var(--u) * 2); }
 .nm-grid { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; touch-action: pan-y pinch-zoom; }
+.nm-grid, .dh-fan { scroll-margin-left: var(--u); scroll-margin-top: var(--t); } /* read back by units() in Nominate.tsx */
 .nm-grid-in { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); grid-template-rows: repeat(var(--rows, 1), var(--row-h, 120px));
   gap: var(--gap, 8px); align-content: center; }
 .nm-grid-in.from-r { animation: nm-page-r .2s steps(3, end); }
@@ -126,7 +127,7 @@
 .nm-page:hover:not(:disabled) { background: #ffc477; }
 .nm-page:active:not(:disabled) { transform: translateY(var(--u)); box-shadow: none; }
 .nm-page:disabled { cursor: var(--cur-no, default); color: rgba(232,213,181,.3); background: rgba(24,15,8,.7); box-shadow: none; }
-.nm-pips { flex: none; display: flex; align-items: center; justify-content: center; gap: calc(var(--u) * 2); height: calc(var(--t) * 7); }
+.nm-pips { flex: none; display: flex; align-items: center; justify-content: center; gap: calc(var(--u) * 2); height: max(calc(var(--t) * 7), calc(var(--u) * 4)); }
 .nm-pip-b { flex: none; width: calc(var(--u) * 3); height: calc(var(--u) * 3); padding: 0; margin: 0; border: 0; border-radius: 0; cursor: var(--cur-pointer, pointer); background: rgba(232,213,181,.3); box-shadow: 0 0 0 var(--u) var(--ink); }
 .nm-pip-b.on { background: var(--amber); }
 .nm-pager-n { margin-left: var(--u); font-family: var(--sk); font-size: calc(var(--t) * 4); line-height: 1; text-transform: uppercase; color: rgba(232,213,181,.75); }
@@ -134,7 +135,7 @@
 /* ---------- game cards: parchment playing cards that fill their grid cell ---------- */
 .nm-card { position: relative; display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 0; background: none;
   text-align: left; cursor: var(--cur-pointer, pointer); color: var(--card-ink); }
-.nm-face { position: relative; display: flex; flex-direction: column; gap: var(--u); width: 100%; height: 100%; padding: var(--u);
+.nm-face { position: relative; display: flex; flex-direction: column; gap: var(--u); width: 100%; height: 100%; padding: var(--u); overflow: hidden;
   background: var(--card); border: var(--u) solid var(--ink);
   box-shadow: inset 0 calc(var(--u) * -1) 0 rgba(122,74,30,.35), var(--u) var(--u) 0 rgba(0,0,0,.45); transition: transform .12s steps(2, end); }
 .nm-card:hover .nm-face { transform: translateY(calc(var(--u) * -1)); }
@@ -252,7 +253,7 @@
 
 /* my hand: the cards are sized (DraftHand --cw) so the whole hand fits the table */
 .dh-fan { flex: 1 1 0; min-height: 0; display: flex; align-items: flex-end; justify-content: center; gap: calc(var(--u) * 3); padding: calc(var(--u) * 6) 0 calc(var(--u) * 6); }
-.dh-fan.is-tight { padding: calc(var(--u) * 3) 0 calc(var(--u) * 4); }
+.dh-fan.is-tight { padding: calc(var(--u) * 3) 0 calc(var(--u) * 5); overflow: clip; } /* last resort on absurdly short tables */
 .dh-fan.is-tight .dh-card-name { display: none; }
 .dh-fan.is-tight .dh-card.is-sel { transform: translateY(calc(var(--u) * -2)) rotate(0deg); }
 .dh-deck { flex: none; width: clamp(24px, calc(var(--cw) * .6), 60px); display: flex; flex-direction: column; align-items: center; gap: var(--u); align-self: center; }
@@ -323,9 +324,11 @@
 .dh-target:hover { background: #3a2414; }
 .dh-target:active { transform: translateY(var(--u)); }
 .dh-target .nh-av { box-shadow: none; }
+.dh-targets.is-many .dh-target > span { display: none; } /* a full table: faces only (name in the tooltip / label) */
+.dh-targets.is-many .dh-target { padding: 0 var(--u); }
 
 /* ---------- the rules dialog (portaled into .saloon) ---------- */
-.nm-modal { --u: var(--pu, 3px); --t: var(--pt, 3px); position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; padding: 16px; background: rgba(5,3,2,.62); animation: nm-fade .15s steps(2, end); }
+.nm-modal { --u: var(--pu, 3px); --t: var(--pt, 3px); position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 16px; background: rgba(5,3,2,.62); animation: nm-fade .15s steps(2, end); }
 @keyframes nm-fade { from { opacity: 0; } }
 .nm-modal-box { width: min(560px, 100%); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; color: var(--nh-parch, #e8d5b5);
   background: #24160b; border: var(--u) solid #6b3f1c; box-shadow: 0 0 0 var(--u) #120904, calc(var(--u) * 3) calc(var(--u) * 3) 0 rgba(0,0,0,.5); }
@@ -345,37 +348,37 @@
   .nm-mycount b { margin: 2px 0 0; }
 }
 
-/* ---------- fit the table: narrow and short tables shed words, never overflow ---------- */
-@container nm (max-width: 760px) {
-  .nm .nm-long { display: none; }
-  .nm .nm-short { display: inline; }
-  .nm-deal-who, .nm-deal-price { display: none; }
-  .nm-tab { flex: 1 1 0; padding: 0 var(--u); }
-}
-@container nm (max-width: 460px) {
-  .nm-deal-art, .nm-deal-k { display: none; }
-  .nm-deal { flex-basis: 8em; }
-  .nm-rules-lbl { display: none; }
-  .nm-tab { gap: var(--u); }
-  .nm-hint { display: none; }
-  .dh-seat-name, .dh-seat .dh-backs { display: none; }
-  .nm-tag { display: none; }
-}
-@container nm (max-height: 420px) {
-  .nm-how { display: none; }
-}
-@container nm (max-height: 340px) {
-  .nm-titles { display: none; }
-  .nm-slots { margin-left: 0; }
-  .nm-head { justify-content: space-between; }
-}
-@container nm (max-height: 260px) {
-  .dh-table { display: none; }
-}
-@container nm (max-height: 300px) {
-  .nm-felt { padding: var(--u); }
-  .nm-pips .nm-pip-b { display: none; }
-}
+/* ---------- fit the table: narrow and short tables shed words, never overflow (size classes set by useTableFit) ---------- */
+.nm.nm-w760 .nm-long { display: none; }
+.nm.nm-w760 .nm-short { display: inline; }
+.nm.nm-w760 .nm-deal-who, .nm.nm-w760 .nm-deal-price { display: none; }
+.nm.nm-w760 .nm-tab { flex: 1 1 0; padding: 0 var(--u); }
+.nm.nm-w460 .nm-deal-art, .nm.nm-w460 .nm-deal-k { display: none; }
+.nm.nm-w460 .nm-deal { flex: 1 1 0; min-width: calc(var(--t) * 26); gap: var(--u); padding: 0 var(--u); }
+.nm.nm-w460 .nm-deal-txt { flex: 1 1 0; }
+.nm.nm-w460 .nm-rules-lbl { display: none; }
+.nm.nm-w460 .nm-tab { gap: var(--u); }
+.nm.nm-w460 .nm-hint { display: none; }
+.nm.nm-w460 .dh-seat-name, .nm.nm-w460 .dh-seat .dh-backs { display: none; }
+.nm.nm-w460 .nm-tag { display: none; }
+.nm.nm-w460 .dh-target > span { display: none; }
+.nm.nm-w460 .dh-target { padding: 0 var(--u); }
+.nm.nm-w460 .dh-bar.is-offer .dh-bar-txt, .nm.nm-w460 .dh-bar.is-give .dh-bar-txt { flex: 1 1 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nm.nm-h420 .nm-how { display: none; }
+.nm.nm-h340 .nm-titles { display: none; }
+.nm.nm-h340 .nm-slots { margin-left: 0; }
+.nm.nm-h340 .nm-head { justify-content: space-between; }
+/* a short table: chrome steps down to 2px pixels at most, whatever the scene scale */
+.nm.nm-h300 > * { --u: min(var(--pu, 3px), 2px); --t: min(var(--pt, 3px), 2px); }
+.nm.nm-h260 .dh-table { display: none; }
+/* tiny: the dock already shows my picks; the rules button rides at the end of the tab row */
+.nm.nm-h200 .nm-titles, .nm.nm-h200 .nm-slots { display: none; }
+.nm.nm-h200 .nm-head { position: absolute; z-index: 2; top: calc(var(--u) * 2); right: calc(var(--u) * 2); }
+.nm.nm-h200 .nm-rules-btn { margin: 0; min-height: calc(var(--t) * 13); }
+.nm.nm-h200 .nm-tabs { padding-right: calc(var(--t) * 16); }
+.nm.nm-h200 .nm-pips { display: none; }
+.nm.nm-h300 .nm-felt { padding: var(--u); }
+.nm.nm-h300 .nm-pips .nm-pip-b { display: none; }
 
 @media (hover: none) { .nm-card:hover .nm-face { transform: none; } .nm-card.is-mine:hover .nm-face { transform: translateY(calc(var(--u) * -1)); } }
 @media (prefers-reduced-motion: reduce) {

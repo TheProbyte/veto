@@ -168,12 +168,12 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
   const fit = (textH: number, pad: number) => {
     const cwH = (fanBox.h - textH - pad) / 1.62;
     const cwW = (fanBox.w - deckW(cwH) - 3 * u * Math.max(1, n) - 6 * u) / (Math.max(1, n) * 1.1);
-    return Math.floor(Math.max(20, Math.min(cwH, cwW, Math.max(40 * t, 26 * u))));
+    return Math.floor(Math.max(16, Math.min(cwH, cwW, Math.max(40 * t, 26 * u))));
   };
   const roomy = fit(16 * t + 5 * u, 13 * u);
   // a short table drops the names under the art (hours / short ride on the art; the name is in the title + label)
   const tight = roomy < 44;
-  const cw = tight ? fit(3 * u, 7 * u) : roomy;
+  const cw = tight ? fit(3 * u, 9 * u) : roomy;
   const giving = mode?.k === 'give' ? offers.find((o) => o.id === mode.offer) : undefined;
   const onOffer = new Map(outgoing.map((o) => [o.give, o.to]));
 
@@ -231,10 +231,10 @@ export default function DraftHand({ state, me, send }: Pick<RoomProps, 'state' |
     bar = (
       <div className="dh-bar is-offer">
         <span className="dh-bar-txt">Offer <b>{selName}</b> to</span>
-        <div className="dh-targets" role="group" aria-label="Offer to which player">
+        <div className={`dh-targets ${targets.length > 4 ? 'is-many' : ''}`} role="group" aria-label="Offer to which player">
           {targets.length === 0 && <span className="dh-bar-txt">nobody's here</span>}
           {targets.map((p) => (
-            <button key={p.id} type="button" className="dh-target" onClick={() => doOffer(p.id)}>
+            <button key={p.id} type="button" className="dh-target" onClick={() => doOffer(p.id)} title={p.name} aria-label={`Offer to ${p.name}`}>
               <Avatar p={p} size={18} /><span>{p.name}</span>
             </button>
           ))}

@@ -32,11 +32,18 @@ export function hrs(h: number) {
 /** the panel's pixel units (CSS --u chrome / --t text), read back in CSS px */
 export function units(el: Element | null) {
   if (!el) return { u: 3, t: 3 };
+  // .nm-grid / .dh-fan mirror --u / --t into scroll-margin (inert) so the browser resolves calc()/min() to px for us
   const cs = getComputedStyle(el);
-  return { u: parseFloat(cs.getPropertyValue('--u')) || 3, t: parseFloat(cs.getPropertyValue('--t')) || 3 };
+  return { u: parseFloat(cs.scrollMarginLeft) || 3, t: parseFloat(cs.scrollMarginTop) || 3 };
 }
 
 /* ---------------- the table area: a fixed box between the nameplates and the dock ---------------- */
+
+/** size classes on the panel (content box), in place of container queries so older iOS Safari gets the same fit */
+const SIZE_CLASSES: [string, (w: number, h: number) => boolean][] = [
+  ['nm-w760', (w) => w <= 760], ['nm-w460', (w) => w <= 460],
+  ['nm-h420', (_, h) => h <= 420], ['nm-h340', (_, h) => h <= 340], ['nm-h300', (_, h) => h <= 300], ['nm-h260', (_, h) => h <= 260], ['nm-h200', (_, h) => h <= 200],
+];
 
 /** Sizes the nominate panel to exactly the space below the seated players' nameplates and above the dock (no page scroll). */
 function useTableFit(ref: React.RefObject<HTMLElement>, key: string) {
@@ -46,25 +53,37 @@ function useTableFit(ref: React.RefObject<HTMLElement>, key: string) {
     if (!el || !front) return;
     const saloon = el.closest('.saloon');
     let raf = 0;
+    let cur = { push: -1, h: -1 };
+    const set = (push: number, h: number) => {
+      if (push !== cur.push) el.style.setProperty('--nm-push', `${push}px`);
+      if (h !== cur.h) el.style.setProperty('--nm-h', `${h}px`);
+      cur = { push, h };
+    };
     const fit = () => {
-      front.scrollTop = 0;
-      el.style.setProperty('--nm-push', '0px');
+      if (front.scrollTop) front.scrollTop = 0;
       const pr = el.getBoundingClientRect();
+      const top0 = pr.top - Math.max(0, cur.push); // where the panel sits with no push
       let push = 0;
       if (!saloon?.classList.contains('is-split')) {
         // never cover a nameplate that sits above the panel's width
         let plate = 0;
         document.querySelectorAll('.seat-plate').forEach((p) => {
           const r = p.getBoundingClientRect();
-          if (r.height > 0 && r.right > pr.left + 6 && r.left < pr.right - 6 && r.top < pr.top + 120) plate = Math.max(plate, r.bottom);
+          if (r.height > 0 && r.right > pr.left + 6 && r.left < pr.right - 6 && r.top < top0 + 120) plate = Math.max(plate, r.bottom);
         });
-        push = Math.max(0, Math.ceil(plate + 4 - pr.top));
+        push = Math.max(0, Math.ceil(plate + 4 - top0));
       }
       const fr = front.getBoundingClientRect();
       const pb = parseFloat(getComputedStyle(front).paddingBottom) || 0;
-      const h = Math.floor(fr.top + front.clientHeight - pb - (pr.top + push));
-      el.style.setProperty('--nm-push', `${push}px`);
-      el.style.setProperty('--nm-h', `${Math.max(150, h)}px`);
+      let h = Math.max(150, Math.floor(fr.top + front.clientHeight - pb - (top0 + push)));
+      set(push, h);
+      // belt and braces: never leave the saloon front scrollable
+      const over = front.scrollHeight - front.clientHeight;
+      if (over > 0 && h - over >= 150) { h -= over; set(push, h); }
+      const cs = getComputedStyle(el);
+      const cw = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const ch = el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      for (const [c, on] of SIZE_CLASSES) el.classList.toggle(c, on(cw, ch));
     };
     const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fit); };
     fit();
@@ -75,7 +94,9 @@ function useTableFit(ref: React.RefObject<HTMLElement>, key: string) {
     window.addEventListener('resize', later);
     // nameplates pop in / settle after a phase change
     const t1 = window.setTimeout(later, 400), t2 = window.setTimeout(later, 1200);
-    return () => { ro.disconnect(); window.removeEventListener('resize', later); cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); };
+    // the dock and nameplates change size with the board / seats; a cheap re-check keeps the fit honest
+    const iv = window.setInterval(() => { if (!document.hidden) later(); }, 1500);
+    return () => { ro.disconnect(); window.removeEventListener('resize', later); cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); clearInterval(iv); };
   }, [ref, key]);
 }
 
@@ -211,7 +232,7 @@ function RulesButton({ state, isHost, send }: Pick<RoomProps, 'state' | 'send'> 
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
   const close = () => { sfx.click(); setOpen(false); btn.current?.focus(); };
-  const host = btn.current?.closest('.saloon') ?? document.body;
+  const host = document.body; // above the fixed chat / sound buttons (the saloon is its own stacking context)
   return (
     <>
       <button ref={btn} type="button" className="nm-rules-btn" aria-haspopup="dialog" aria-expanded={open} title="Table rules" onClick={() => { sfx.click(); setOpen(true); }}>
@@ -376,7 +397,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
       <span className="nm-deal-txt"><b className="nm-deal-name">{deal.name}</b><span className="nm-deal-who">{dealWho}</span></span>
       <em className="nm-deal-off">-{deal.discount}%</em>
       {deal.price && <span className="nm-deal-price">{deal.price}</span>}
-      <span className="nm-deal-go">Gift ↗</span>
+      <span className="nm-deal-go"><span className="nm-long">Gift </span>↗</span>
     </a>
   );
 
