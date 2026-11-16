@@ -211,7 +211,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
   const [dressing, setDressing] = useState(() => !mine?.style);
   const desk = useDesk();
   const panelRef = useRef<HTMLDivElement>(null);
-  useTableFit(panelRef, `${dressing}|${state.players.length}`, desk && !dressing);
+  useTableFit(panelRef, `${dressing}|${state.players.length}`, desk);
 
   const copy = async () => {
     sfx.unlock(); sfx.click();
@@ -315,7 +315,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
   const canEditRules = isHost || !state.players.some((p) => p.host && p.connected);
 
   return (
-    <div className={`nh-panel nh-wood nh-lobby ${desk && !dressing ? 'is-strip' : ''}`} ref={panelRef}>
+    <div className={`nh-panel nh-wood nh-lobby ${desk ? 'is-strip' : ''} ${dressing ? 'is-dress' : ''}`} ref={panelRef}>
       <i className="nh-nail tl" /><i className="nh-nail tr" /><i className="nh-nail bl" /><i className="nh-nail br" />
       {dressing ? (
         <>
@@ -325,7 +325,7 @@ export default function Lobby({ state, me, send }: RoomProps) {
           </header>
           <CharacterCreator initial={mine?.style} first={!mine?.style} stats={mine?.stats ?? emptyStats()}
             onSave={(style) => send({ t: 'style', style })} onDone={() => { setDressing(false); document.querySelector('.saloon-front')?.scrollTo({ top: 0 }); }} />
-          {posseSec}
+          {!desk && posseSec}
         </>
       ) : (
         <>

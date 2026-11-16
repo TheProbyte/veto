@@ -908,3 +908,17 @@
   .nh-tt-join .nh-input-code { width: 120px; min-height: 40px; }
   .nh-tt-join .nh-btn { min-height: 40px; }
 }
+
+/* ================= pass 9: the outfit step as a wide, short strip on desktop ================= */
+.cc-random-dock { display: none; }
+@media (min-width: 1024px) and (min-height: 600px) {
+  .dock .cc-random-dock { display: inline-flex; min-height: 44px; align-self: center; }
+  .nh-lobby.is-dress .cc-stage .cc-random { display: none; }
+  .nh-lobby.is-strip.is-dress .cc { grid-template-columns: minmax(170px, 230px) minmax(0, 1fr); grid-template-rows: auto auto; gap: 8px 16px; }
+  .nh-lobby.is-strip.is-dress .cc-stage { grid-row: 1 / span 2; align-self: stretch; min-height: 0; padding: 8px 8px 6px; justify-content: flex-end; }
+  .nh-lobby.is-strip.is-dress .cc-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
+  .nh-lobby.is-strip.is-dress .cc-row { min-height: 44px; gap: 6px; min-width: 0; }
+  .nh-lobby.is-strip.is-dress .cc-arrow { width: 38px; min-height: 40px; }
+  .nh-lobby.is-strip.is-dress .cc-mid { padding: 3px 8px 2px; }
+  .nh-lobby.is-strip.is-dress .cc-record { grid-column: 2; padding: 4px 8px; }
+}
