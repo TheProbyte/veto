@@ -81,8 +81,9 @@ export interface Settings {
   cylinderAt: 2 | 3;              // 'slide' and 'cylinder': the finale starts when this many games remain (default 3)
   nominations: 'browse' | 'draft'; // browse the pool (default) or the card-hand draft (dealt 5 cards, play/burn/trade)
   sheriff: boolean;               // Sheriff role during the shootout (Pardon + Jail; posse can run them out of town)
+  explain: boolean;               // the Barkeep explains each step out loud (how_* narration). Default on.
 }
-export const DEFAULT_SETTINGS: Settings = { turnSecs: 30, picks: 3, finale: 'slide', cylinderAt: 3, nominations: 'browse', sheriff: false };
+export const DEFAULT_SETTINGS: Settings = { turnSecs: 30, picks: 3, finale: 'slide', cylinderAt: 3, nominations: 'browse', sheriff: false, explain: true };
 
 /** Whiskey Slide finale: each finalist game has a champion who slides a glass down the bar; closest to the mark without going off the end wins. */
 export interface Slide {
@@ -318,7 +319,8 @@ export type Intent =
   | { t: 'jail'; pid: string } // Sheriff: skip that player's next turn
   | { t: 'oust' } // toggle my vote to run the Sheriff out of town
   | { t: 'ready'; status: 'ready' | 'buy' | 'download' } // Saddle Up ready check
-  | { t: 'saddleUp' }; // host: start the synced 3-2-1 launch // duel: champ fires; reaction = ms between DRAW appearing on their screen and the tap (client-measured); sent before DRAW = foul
+  | { t: 'saddleUp' } // host: start the synced 3-2-1 launch
+  | { t: 'resetRecord' }; // host: wipe this table's history + posse record ("Lately at this table") // duel: champ fires; reaction = ms between DRAW appearing on their screen and the tap (client-measured); sent before DRAW = foul
 
 // server -> client
 export type ServerMsg =

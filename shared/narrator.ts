@@ -12,7 +12,8 @@ export type NarrKey =
   | 'slide' | 'slide_fall' | 'slide_close' | 'slide_win'
   | 'sheriff' | 'pardon' | 'jail' | 'ousted'
   | 'draft' | 'trade' | 'burn'
-  | 'saddle' | 'straggler';
+  | 'saddle' | 'straggler'
+  | 'how_lobby' | 'how_nominate' | 'how_draft' | 'how_veto' | 'how_star' | 'how_slide' | 'how_cylinder' | 'how_duel' | 'how_result';
 
 export interface NarrLine { id: string; text: string; direction?: string }
 
@@ -175,6 +176,33 @@ export const NARRATOR: Record<NarrKey, { when: string; lines: NarrLine[] }> = {
   ] },
   burn: { when: 'Someone burns a card', lines: [
     { id: 'burn_1', text: 'Into the stove it goes.' },
+  ] },
+  how_lobby: { when: 'EXPLAIN (settings.explain): lobby opens', lines: [
+    { id: 'how_lobby_1', text: "Pick your look, link your Steam, and wait for the posse.", direction: 'friendly, clear, unhurried' },
+  ] },
+  how_nominate: { when: 'EXPLAIN: nominations open (browse mode)', lines: [
+    { id: 'how_nom_1', text: 'Tap the games you want to play. They land on the table.', direction: 'clear, helpful' },
+  ] },
+  how_draft: { when: 'EXPLAIN: nominations open (card draft)', lines: [
+    { id: 'how_draft_1', text: 'These cards are yours. Play the ones you want. Trade the rest.', direction: 'clear, helpful' },
+  ] },
+  how_veto: { when: 'EXPLAIN: shootout begins', lines: [
+    { id: 'how_veto_1', text: "On your turn, aim at a game you DON'T want, and pull the trigger.", direction: 'clear, slow, emphasis on DON\'T' },
+  ] },
+  how_star: { when: "EXPLAIN: a few seconds into the first shootout", lines: [
+    { id: 'how_star_1', text: "Tap the badge on a game to protect it. Only you'll know.", direction: 'sly whisper' },
+  ] },
+  how_slide: { when: 'EXPLAIN: whiskey slide starts', lines: [
+    { id: 'how_slide_1', text: 'Hold your glass, let go to slide it. Closest to the chalk wins.', direction: 'clear, helpful' },
+  ] },
+  how_cylinder: { when: 'EXPLAIN: revolver roulette starts', lines: [
+    { id: 'how_cyl_1', text: 'Nothing to do but watch. The cylinder picks.', direction: 'calm' },
+  ] },
+  how_duel: { when: 'EXPLAIN: quick-draw duel starts', lines: [
+    { id: 'how_duel_1', text: 'Wait for DRAW. Then tap as fast as you can. Too early, you lose.', direction: 'tense, clear' },
+  ] },
+  how_result: { when: 'EXPLAIN: result screen', lines: [
+    { id: 'how_result_1', text: 'Mark yourself ready, then saddle up together.', direction: 'warm' },
   ] },
   saddle: { when: 'Synced launch countdown starts', lines: [
     { id: 'saddle_1', text: 'Saddle up! Three... two... one...', direction: 'big, rallying' },
