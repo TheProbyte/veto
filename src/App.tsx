@@ -9,6 +9,7 @@ import Veto from './phases/Veto';
 import Roulette from './phases/Roulette';
 import Result from './phases/Result';
 import Duel from './phases/Duel';
+import Slide from './phases/Slide';
 import type { RoomProps } from './props';
 
 function getName(): string | null {
@@ -30,7 +31,7 @@ function Room({ code }: { code: string }) {
   }
   if (!state) return <div className="loading">Pushing open the saloon doors…</div>;
   const p: RoomProps = { state, me, send, skew, on };
-  const Phase = { lobby: Lobby, nominate: Nominate, veto: Veto, roulette: Roulette, duel: Duel, result: Result }[state.phase];
+  const Phase = { lobby: Lobby, nominate: Nominate, veto: Veto, roulette: Roulette, duel: Duel, slide: Slide, result: Result }[state.phase];
   return (
     <>
       <Saloon {...p}><Phase {...p} /></Saloon>

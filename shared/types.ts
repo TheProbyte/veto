@@ -1,5 +1,5 @@
 // Shared contract between the Durable Object (server) and the React client.
-export type Phase = 'lobby' | 'nominate' | 'veto' | 'roulette' | 'duel' | 'result';
+export type Phase = 'lobby' | 'nominate' | 'veto' | 'roulette' | 'duel' | 'slide' | 'result';
 
 export interface SteamInfo {
   steamid: string;
@@ -76,10 +76,54 @@ export const lookUnlocked = (field: keyof Look, index: number, stats?: ProfileSt
 export interface Settings {
   turnSecs: number;               // 10..90, default 30
   picks: number;                  // nominations per player 1..5, default 3
-  finale: 'cylinder' | 'duel' | 'last'; // how it ends: revolver roulette, quick-draw duel between 2, or shoot down to the last one standing
-  cylinderAt: 2 | 3;              // with finale 'cylinder': spin when this many remain (default 3)
+  /** how it ends: whiskey slide (skill, default), revolver roulette, quick-draw duel between 2, or shoot down to the last one standing */
+  finale: 'slide' | 'cylinder' | 'duel' | 'last';
+  cylinderAt: 2 | 3;              // 'slide' and 'cylinder': the finale starts when this many games remain (default 3)
+  nominations: 'browse' | 'draft'; // browse the pool (default) or the card-hand draft (dealt 5 cards, play/burn/trade)
+  sheriff: boolean;               // Sheriff role during the shootout (Pardon + Jail; posse can run them out of town)
 }
-export const DEFAULT_SETTINGS: Settings = { turnSecs: 30, picks: 3, finale: 'cylinder', cylinderAt: 3 };
+export const DEFAULT_SETTINGS: Settings = { turnSecs: 30, picks: 3, finale: 'slide', cylinderAt: 3, nominations: 'browse', sheriff: false };
+
+/** Whiskey Slide finale: each finalist game has a champion who slides a glass down the bar; closest to the mark without going off the end wins. */
+export interface Slide {
+  games: number[];               // 2–3 finalist appids
+  champs: string[];              // champion player id per game (same index; a player may champion more than one)
+  order: number[];               // slide order as indices into games
+  turn: number;                  // index into order of the current slider (order.length = everyone has slid)
+  turnDeadline: number;          // ms epoch; on timeout the glass is slid at a random power
+  mark: number;                  // target position along the bar, 0..1 (e.g. 0.8); the bar ends at 1.0 (off the end = fell)
+  throws: { game: number; power: number; dist: number; fell: boolean; at: number }[]; // dist 0..~1.15 (server-computed from power + small wobble)
+  round: number;                 // 1, or 2+ for a tie-break re-slide
+  winner?: number;               // winning appid once decided
+  decidedAt?: number;
+}
+
+/** Card-hand draft (settings.nominations === 'draft'). Hands are PRIVATE: the server sends each player only their own hand. */
+export interface Draft {
+  hand: number[];                       // MY cards (appids from the pool); empty for others' views
+  handCounts: Record<string, number>;   // player id -> cards in hand (public)
+  burns: Record<string, number>;        // player id -> burns used (max DRAFT_BURNS)
+  deck: number;                         // cards left in the deck
+  offers: { id: number; from: string; to: string; give: number; at: number }[]; // open trade offers (public): "from" offers card "give" to "to"
+}
+export const DRAFT_HAND = 5;
+export const DRAFT_BURNS = 1;
+
+/** Sheriff role (settings.sheriff): rotates each round. */
+export interface Sheriff {
+  pid: string;
+  pardonUsed: boolean;   // one Pardon: bring a shot-down game back (not once the finale has started)
+  jailUsed: boolean;     // one Jail: the jailed player's next turn is skipped
+  jailed?: string;       // player currently in jail (cleared after their skipped turn)
+  votes: string[];       // players voting to run the Sheriff out of town (majority of other connected humans = ousted)
+  ousted: boolean;       // run out of town: loses unused powers and their remaining turns are skipped
+}
+
+/** Saddle Up (result screen): ready check + synced launch. */
+export interface Launch {
+  ready: Record<string, 'ready' | 'buy' | 'download'>; // player id -> status
+  launchAt?: number;     // ms epoch: synced 3-2-1 ends here; clients open steam://run/<appid>
+}
 
 export const BADGES = {
   trigger: { label: 'Trigger Happy', icon: '🔫', desc: 'Most games shot this round' },
@@ -219,6 +263,10 @@ export interface RoomState {
   pitches: Pitch[];
   settings: Settings;
   duel?: Duel;
+  slide?: Slide;
+  draft?: Draft;     // present during nomination when settings.nominations === 'draft' (hand redacted per player)
+  sheriff?: Sheriff; // present during the shootout when settings.sheriff
+  launch?: Launch;   // present in the result phase
   record: PosseRecord; // persists for this table code across rounds and nights
   board: BoardGame[];
   turnOrder: string[];
@@ -259,7 +307,18 @@ export type Intent =
   | { t: 'bots'; n: number } // host, lobby only: add n practice bots (1..3); n=0 removes all bots
   | { t: 'emote'; emote: EmoteId } // broadcast as an event, rate limited
   | { t: 'say'; text: string } // speech bubble (<= SAY_MAX chars), rate limited
-  | { t: 'bang'; reaction: number }; // duel: champ fires; reaction = ms between DRAW appearing on their screen and the tap (client-measured); sent before DRAW = foul
+  | { t: 'bang'; reaction: number }
+  | { t: 'slide'; power: number } // whiskey slide: current champion releases the glass; power 0..1 from the client's charge meter
+  | { t: 'draftPlay'; appid: number } // play a card from my hand onto the table (counts as a nomination)
+  | { t: 'draftBurn'; appid: number } // discard a card and draw a new one (max DRAFT_BURNS)
+  | { t: 'draftOffer'; to: string; appid: number } // offer one of my cards to a player
+  | { t: 'draftAccept'; offer: number; give: number } // accept an offer to me, giving back one of my cards
+  | { t: 'draftDecline'; offer: number } // decline an offer to me (or withdraw my own)
+  | { t: 'pardon'; appid: number } // Sheriff: revive a shot-down game
+  | { t: 'jail'; pid: string } // Sheriff: skip that player's next turn
+  | { t: 'oust' } // toggle my vote to run the Sheriff out of town
+  | { t: 'ready'; status: 'ready' | 'buy' | 'download' } // Saddle Up ready check
+  | { t: 'saddleUp' }; // host: start the synced 3-2-1 launch // duel: champ fires; reaction = ms between DRAW appearing on their screen and the tap (client-measured); sent before DRAW = foul
 
 // server -> client
 export type ServerMsg =

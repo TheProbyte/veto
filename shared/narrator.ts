@@ -8,7 +8,11 @@ export type NarrKey =
   | 'open' | 'join' | 'leave' | 'back' | 'bots' | 'dress' | 'deal' | 'house' | 'pitch'
   | 'draw' | 'first_blood' | 'kill' | 'spree' | 'revenge' | 'ricochet' | 'crack' | 'misfire'
   | 'fuse_low' | 'slowmo' | 'cylinder' | 'duel' | 'duel_foul' | 'duel_win'
-  | 'result' | 'repeat' | 'never_survive' | 'rematch' | 'kick';
+  | 'result' | 'repeat' | 'never_survive' | 'rematch' | 'kick'
+  | 'slide' | 'slide_fall' | 'slide_close' | 'slide_win'
+  | 'sheriff' | 'pardon' | 'jail' | 'ousted'
+  | 'draft' | 'trade' | 'burn'
+  | 'saddle' | 'straggler';
 
 export interface NarrLine { id: string; text: string; direction?: string }
 
@@ -131,6 +135,53 @@ export const NARRATOR: Record<NarrKey, { when: string; lines: NarrLine[] }> = {
   ] },
   kick: { when: 'Host kicks a player or bot', lines: [
     { id: 'kick_1', text: 'And stay out!' },
+  ] },
+  slide: { when: 'Whiskey Slide finale starts', lines: [
+    { id: 'slide_1', text: "Alright, sharpshooters. Let's see how steady them hands really are.", direction: 'sliding a glass down the bar' },
+    { id: 'slide_2', text: 'Slide it to the mark. Spill it off the end and you buy the next round.' },
+  ] },
+  slide_fall: { when: 'A glass slides off the end of the bar', lines: [
+    { id: 'slidefall_1', text: 'Aaand it’s on the floor.', direction: 'wincing at the crash' },
+    { id: 'slidefall_2', text: "That's comin' out of your tab." },
+  ] },
+  slide_close: { when: 'A glass stops very near the mark', lines: [
+    { id: 'slideclose_1', text: 'Ooh. Right on the money.' },
+    { id: 'slideclose_2', text: "Now that's a steady hand." },
+  ] },
+  slide_win: { when: 'Whiskey Slide decided', lines: [
+    { id: 'slidewin_1', text: 'Closest glass wins. Drinks are on the loser.' },
+  ] },
+  sheriff: { when: 'A Sheriff is appointed for the shootout', lines: [
+    { id: 'sheriff_1', text: "There's a new Sheriff in town. Behave.", direction: 'mock-serious' },
+    { id: 'sheriff_2', text: 'Somebody pinned on the badge. Lord help us.' },
+  ] },
+  pardon: { when: 'Sheriff pardons a shot-down game', lines: [
+    { id: 'pardon_1', text: 'The Sheriff giveth. Back from the dead!' },
+    { id: 'pardon_2', text: 'Pardoned! Dust yourself off, partner.' },
+  ] },
+  jail: { when: 'Sheriff jails a player', lines: [
+    { id: 'jail_1', text: 'Into the cell you go. Sit this one out.' },
+  ] },
+  ousted: { when: 'The posse runs the Sheriff out of town', lines: [
+    { id: 'ousted_1', text: 'The people have spoken. Hand over the badge.', direction: 'gleeful' },
+    { id: 'ousted_2', text: 'Run outta town! Didn’t even finish their drink.' },
+  ] },
+  draft: { when: 'Cards are dealt in draft mode', lines: [
+    { id: 'draft_1', text: 'Five cards each. Play em, burn em, or trade em.', direction: 'dealing cards' },
+  ] },
+  trade: { when: 'Two players complete a trade', lines: [
+    { id: 'trade_1', text: 'A deal is struck.' },
+    { id: 'trade_2', text: 'Hope you know what you’re doin’ with that one.' },
+  ] },
+  burn: { when: 'Someone burns a card', lines: [
+    { id: 'burn_1', text: 'Into the stove it goes.' },
+  ] },
+  saddle: { when: 'Synced launch countdown starts', lines: [
+    { id: 'saddle_1', text: 'Saddle up! Three... two... one...', direction: 'big, rallying' },
+  ] },
+  straggler: { when: "Launch countdown starts but someone isn't ready", lines: [
+    { id: 'straggler_1', text: "Somebody's still downloadin'. Shameful." },
+    { id: 'straggler_2', text: 'Some of y’all ain’t got the game. Buy it, partner.' },
   ] },
 };
 
