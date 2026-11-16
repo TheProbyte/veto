@@ -268,6 +268,10 @@ export interface RoomState {
   draft?: Draft;     // present during nomination when settings.nominations === 'draft' (hand redacted per player)
   sheriff?: Sheriff; // present during the shootout when settings.sheriff
   launch?: Launch;   // present in the result phase
+  /** ms epoch: the Barkeep is explaining this step until then; actions are held and clients show the big explain card */
+  explainUntil?: number;
+  explainText?: string; // the line being explained (for the big card)
+  explainFrom?: number; // ms epoch: when that line starts
   record: PosseRecord; // persists for this table code across rounds and nights
   board: BoardGame[];
   turnOrder: string[];

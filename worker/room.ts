@@ -1,8 +1,9 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { BadgeId, BoardGame, Intent, Launch, Phase, Player, PoolGame, PosseRecord, ProfileStats, RoomEvent, RoomState, ServerMsg, Settings, ShotEvent } from '../shared/types';
 import { DEFAULT_SETTINGS, DRAFT_BURNS, DRAFT_HAND, EMOTES, LOOK_COUNTS, SAY_MAX, lookUnlocked, randomLook, type EmoteId, type Look } from '../shared/types';
+import { EXPLAIN_MS } from '../shared/voiced';
 import { SLIDE_ANIM_MS, SLIDE_INTRO_MS, SLIDE_RESULT_MS, SLIDE_TURN_MS, slideDist, slideMark, slideOutcome } from './slide';
-import { pickLine, type NarrKey } from '../shared/narrator';
+import { NARRATOR, pickLine, type NarrKey } from '../shared/narrator';
 import { lastWords } from './lastwords';
 import { ownedGames, playerSummary, resolveSteamId, storeBits, type Env, type OwnedGame } from './steam';
 
@@ -71,8 +72,10 @@ interface X {
   deck: number[]; // draft: remaining deck, top first
   offerSeq: number;
   sheriffRot: number; // sheriff rotation counter
+  explained: string[]; // how_* keys already explained at this table (each plays once; resetRecord replays them)
+  recentLines: Record<string, number>; // narration line id -> when it last played (cooldown against repeats)
 }
-const freshX = (): X => ({ jobs: [], seq: 0, turnStart: 0, fireMs: {}, misfires: [], finaleAt: 0, slideAt: 0, hands: {}, deck: [], offerSeq: 0, sheriffRot: 0 });
+const freshX = (): X => ({ jobs: [], seq: 0, turnStart: 0, fireMs: {}, misfires: [], finaleAt: 0, slideAt: 0, hands: {}, deck: [], offerSeq: 0, sheriffRot: 0, explained: [], recentLines: {} });
 const emptyRecord = (): PosseRecord => ({ rounds: 0, wins: [], vetoers: [], noms: [], streaks: [] });
 
 function fresh(code: string): RoomState {
@@ -208,18 +211,37 @@ export class Room extends DurableObject<Env> {
     const now = Date.now();
     if (now - this.narrAt < NARR_GAP && !(n.pri >= NARR_HIGH && (n.pri > this.narrPri || CUES.has(n.key)))) return;
     const line = pickLine(n.key, this.narrId);
+    // cooldown: don't repeat the same recorded line within 90 s (phase cues and explanations excepted)
+    const last = this.x.recentLines[line.id] ?? 0;
+    if (!CUES.has(n.key) && now - last < 90_000) return;
+    this.x.recentLines[line.id] = now;
+    if (n.key.startsWith('how_')) { this.s.explainText = line.text; this.s.explainFrom = now; }
     this.narrAt = now; this.narrPri = n.pri; this.narrId = line.id;
     this.event({ t: 'narrate', id: line.id, text: line.text, at: now });
   }
   job(j: Job) { this.x.jobs.push(j); }
   /** the Barkeep explains a step (settings.explain), a moment after the phase cue so both are heard */
-  vetoExplain(delay: number) {
-    this.explain('how_veto', delay, 'veto');
-    if (this.s.record.rounds === 0) this.explain('how_star', delay + 9000, 'veto'); // star tip on a table's first shootout only
+  /** shootout explanation (first shootout at this table): the shot rules, then the hidden star. Returns ms to hold the first turn. */
+  vetoExplain(delay: number): number {
+    const a = this.explain('how_veto', delay, 'veto');
+    const b = a ? this.explain('how_star', delay + a, 'veto') : this.explain('how_star', delay, 'veto');
+    return a || b ? delay + a + b : 0;
   }
-  explain(key: NarrKey, delay: number, ph = this.s.phase) {
-    if (!this.s.settings.explain) return;
-    this.job({ at: Date.now() + delay, k: 'narr', ph, key });
+  /**
+   * The Barkeep explains a step, once per table (settings.explain). Everyone is held (explainUntil) until he's done.
+   * Returns the hold length in ms from `delay` (0 when not explaining).
+   */
+  explain(key: NarrKey, delay: number, ph = this.s.phase): number {
+    if (!this.s.settings.explain || this.x.explained.includes(key)) return 0;
+    this.x.explained.push(key);
+    const ms = EXPLAIN_MS[key] ?? 5000;
+    const s = this.s, now = Date.now();
+    // queue behind an explanation that's still running (e.g. the star tip right after the shot rules)
+    const from = Math.max(now + delay, s.explainUntil && s.explainUntil > now ? s.explainUntil : 0);
+    if (!s.explainUntil || s.explainUntil <= now) { s.explainFrom = from; s.explainText = NARRATOR[key].lines[0].text; }
+    s.explainUntil = Math.max(s.explainUntil ?? 0, now + delay + ms);
+    this.job({ at: now + delay, k: 'narr', ph, key });
+    return ms;
   }
 
   schedule() {
@@ -393,6 +415,7 @@ export class Room extends DurableObject<Env> {
         if (s.phase !== 'lobby' && s.phase !== 'nominate' && s.phase !== 'result') throw new Bad('Finish the round first.');
         s.history = [];
         s.record = emptyRecord();
+        this.x.explained = [];
         if (s.result) { s.result.repeatCount = 0; s.result.neverSurvive = undefined; }
         this.broadcast();
         return;
@@ -673,11 +696,12 @@ export class Room extends DurableObject<Env> {
         const added = this.autofill();
         if (!s.board.length) throw new Bad('Nothing on the table to shoot at.');
         this.clearDraft();
+        let hold: number;
         if (added) {
           this.narr('house');
-          this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' }); this.vetoExplain(5600);
-        } else { this.narr('draw'); this.vetoExplain(3000); }
-        this.startVeto(pid);
+          this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' }); hold = this.vetoExplain(5400);
+        } else { this.narr('draw'); hold = this.vetoExplain(2900); }
+        this.startVeto(pid, hold);
         this.broadcast();
         return;
       }
@@ -686,8 +710,8 @@ export class Room extends DurableObject<Env> {
         if (!this.isHost(pid)) throw new Bad('Only the host calls a rematch.');
         if (!s.board.length) throw new Bad('Nothing to rematch.');
         this.narr('rematch');
-        this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' }); this.vetoExplain(5600);
-        this.startVeto(pid);
+        this.job({ at: Date.now() + 2600, k: 'narr', ph: 'veto', key: 'draw' });
+        this.startVeto(pid, this.vetoExplain(5400));
         this.broadcast();
         return;
       }
@@ -757,8 +781,8 @@ export class Room extends DurableObject<Env> {
 
   // ---------- draft ----------
   openNominations() {
-    if (this.s.settings.nominations === 'draft') { this.dealDraft(); this.narr('draft'); this.explain('how_draft', 3400); }
-    else { this.clearDraft(); this.narr('deal'); this.explain('how_nominate', 3400); }
+    if (this.s.settings.nominations === 'draft') { this.dealDraft(); if (!this.explain('how_draft', 400)) this.narr('draft'); }
+    else { this.clearDraft(); if (!this.explain('how_nominate', 400)) this.narr('deal'); }
     this.scheduleBotNoms();
   }
 
@@ -1090,9 +1114,10 @@ export class Room extends DurableObject<Env> {
     if (s.phase !== 'veto') throw new Bad('No shootout right now.');
     if (this.alive().length <= this.threshold()) throw new Bad('Holster it. The finale decides now.');
     if (s.turnOrder[s.turnIdx] !== pid) throw new Bad("Not your turn, cowboy.");
+    if (Date.now() < this.x.turnStart - 150) throw new Bad('Hold your fire. Listen to the Barkeep.');
   }
 
-  startVeto(pid: string) {
+  startVeto(pid: string, hold = 0) {
     const s = this.s, x = this.x;
     for (const p of s.players) { p.shieldUsed = false; p.revengeOn = undefined; p.badges = undefined; }
     s.board.forEach((g) => { g.alive = true; g.killedBy = undefined; g.shieldedBy = undefined; g.cracks = 0; g.lastWords = undefined; });
@@ -1110,7 +1135,7 @@ export class Room extends DurableObject<Env> {
       return;
     }
     s.aim = s.board[0].appid;
-    this.armTurn(0);
+    this.armTurn(hold);
     const now = Date.now();
     for (const b of s.players.filter((p) => p.bot && s.turnOrder.includes(p.id))) {
       if (Math.random() < 0.3) this.job({ at: now + rnd(1500, 9000), k: 'bstar', ph: 'veto', pid: b.id });
@@ -1181,7 +1206,7 @@ export class Room extends DurableObject<Env> {
       if (this.alive().length === this.threshold()) { ev.slowmo = true; this.narr('slowmo'); }
       if (firstBlood) this.narr('first_blood');
       if (kills === 3) this.narr('spree');
-      if (Math.random() < 0.35) this.narr('kill');
+      if (Math.random() < 0.2) this.narr('kill');
     }
     s.lastShot = ev;
     s.shots.push(ev);
@@ -1241,14 +1266,14 @@ export class Room extends DurableObject<Env> {
       champs[k] = c; used.add(c);
     });
     const now = Date.now();
+    s.phase = 'slide';
+    const hold = this.explain('how_slide', 2600);
     s.slide = {
       games: games.map((g) => g.appid), champs: champs as string[], order: shuffle(games.map((_, k) => k)),
-      turn: 0, turnDeadline: now + SLIDE_INTRO_MS + SLIDE_TURN_MS, mark: slideMark(), throws: [], round: 1,
+      turn: 0, turnDeadline: now + SLIDE_INTRO_MS + (hold ? 2600 + hold - SLIDE_INTRO_MS + 400 : 0) + SLIDE_TURN_MS, mark: slideMark(), throws: [], round: 1,
     };
     this.x.slideAt = 0;
-    s.phase = 'slide';
     this.narr('slide');
-    this.explain('how_slide', 3200);
     this.botSlide();
     return true;
   }
@@ -1318,12 +1343,12 @@ export class Room extends DurableObject<Env> {
       champs.push(c);
     }
     // when the Barkeep explains the duel (~8 s line), hold the standoff until he's done talking
-    const startedAt = Date.now() + (s.settings.explain ? 7500 : 1200);
+    const dHold = this.explain('how_duel', 700, 'duel');
+    const startedAt = Date.now() + (dHold ? 700 + dHold + 200 : 1200);
     const drawAt = startedAt + rnd(2500, 5000);
     s.duel = { games: [a.appid, b.appid], champs: [champs[0], champs[1]], startedAt, drawAt, taps: {} };
     s.phase = 'duel';
     this.narr('duel');
-    this.explain('how_duel', 700);
     for (const c of champs) {
       if (!s.players.find((p) => p.id === c)?.bot) continue;
       const r = rnd(260, 520);
