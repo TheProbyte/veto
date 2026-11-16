@@ -76,7 +76,10 @@ export function useTableFit(ref: React.RefObject<HTMLElement>, key: string, on =
           const r = p.getBoundingClientRect();
           if (r.height > 0 && r.right > pr.left + 6 && r.left < pr.right - 6 && r.top < top0 + 120) plate = Math.max(plate, r.bottom);
         });
-        push = Math.max(0, Math.ceil(plate + 4 - top0));
+        // the panel's pixel frame is drawn outside its box (box-shadow): clear the plates by that much too
+        const pu = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--pu')) || 4;
+        const frame = (parseFloat(getComputedStyle(el).getPropertyValue('--fit-frame')) || 0) * pu;
+        push = Math.max(0, Math.ceil(plate + 4 + frame - top0));
       }
       const fr = front.getBoundingClientRect();
       const pb = parseFloat(getComputedStyle(front).paddingBottom) || 0;
