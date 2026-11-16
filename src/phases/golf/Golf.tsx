@@ -23,7 +23,7 @@ const CELEBRATE_MS = 2600;
 type Phase = 'wait' | 'aim' | 'roll' | 'holed' | 'over';
 interface Ghost { x: number; y: number; fx: number; fy: number; t0: number; strokes: number; holed: boolean; col: string }
 interface Conf { x: number; y: number; vx: number; vy: number; life: number; col: string }
-interface Saved { x: number; y: number; s: number; d?: [number, number] }
+interface Saved { x: number; y: number; s: number; d?: [number, number]; h?: number }
 
 const colorFor = (pid: string) => GHOST_COLS[hashStr(pid) % GHOST_COLS.length];
 const gameNameIn = (st: RoomState, a: number) => st.board.find((g) => g.appid === a)?.name ?? st.pool.find((g) => g.appid === a)?.name ?? `App ${a}`;
@@ -89,6 +89,7 @@ function GolfGame({ state, mini, me, send, skew, on }: RoomProps & { mini: Mini 
     angle: Math.atan2(course.hole[1] - course.tee[1], course.hole[0] - course.tee[0]),
     power: 0, kbd: false,
     done: (saved0?.d ?? null) as [number, number] | null,
+    holed: !!(saved0?.d && saved0.h === 1) || !!(myResult && myResult.score > 0),
     lastHit: 0, holedAt: 0,
   });
   const [ui, setUi] = useState({ strokes: G.current.strokes, phase: G.current.phase, power: 0 });
@@ -130,12 +131,13 @@ function GolfGame({ state, mini, me, send, skew, on }: RoomProps & { mini: Mini 
   }, [mini.results, me, course]);
 
   /* ---- actions ---- */
-  const finish = (strokes: number) => {
+  const finish = (strokes: number, holed: boolean) => {
     const g = G.current;
+    g.holed = holed;
     const ms = Math.max(0, Math.round(Date.now() + live.current.skew - live.current.mini.startedAt));
     g.done = [strokes, ms];
     live.current.send({ t: 'golfDone', strokes, ms });
-    save(saveKey, { x: Math.round(g.ball.x), y: Math.round(g.ball.y), s: strokes, d: g.done });
+    save(saveKey, { x: Math.round(g.ball.x), y: Math.round(g.ball.y), s: strokes, d: g.done, h: holed ? 1 : 0 });
   };
   const shareRest = (holed: boolean) => {
     const g = G.current;
@@ -147,6 +149,7 @@ function GolfGame({ state, mini, me, send, skew, on }: RoomProps & { mini: Mini 
     if (g.phase !== 'aim' || g.power < 0.06) return;
     const [vx, vy] = launch(g.angle, g.power);
     g.last = [g.ball.x, g.ball.y];
+    save(saveKey, { x: Math.round(g.ball.x), y: Math.round(g.ball.y), s: g.strokes + 1 }); // a reload mid-roll keeps the stroke
     g.ball.vx = vx; g.ball.vy = vy;
     g.strokes++; g.rollT = 0; g.phase = 'roll'; g.power = 0; g.aim = null;
     sfx.click();
@@ -195,7 +198,7 @@ function GolfGame({ state, mini, me, send, skew, on }: RoomProps & { mini: Mini 
         if (ev.holed) {
           g.ball.x = course.hole[0]; g.ball.y = course.hole[1]; g.ball.vx = g.ball.vy = 0;
           g.phase = 'holed'; g.holedAt = pnow;
-          finish(g.strokes); shareRest(true);
+          finish(g.strokes, true); shareRest(true);
           sfx.glass(); window.setTimeout(() => sfx.clink(), 140);
           if (g.strokes === 1) { sfx.coin(); window.setTimeout(() => sfx.yeehaw(), 500); }
           if (!reduce) for (let i = 0; i < 70; i++) {
@@ -215,7 +218,7 @@ function GolfGame({ state, mini, me, send, skew, on }: RoomProps & { mini: Mini 
         if (rest) {
           g.ball.vx = g.ball.vy = 0;
           shareRest(false);
-          if (g.strokes >= MAX_STROKES) { g.phase = 'over'; finish(MAX_STROKES); flashMsg(`${MAX_STROKES} strokes: that'll do`); }
+          if (g.strokes >= MAX_STROKES) { g.phase = 'over'; finish(MAX_STROKES, false); flashMsg(`${MAX_STROKES} strokes: that'll do`); }
           else g.phase = 'aim';
           sync();
         }
@@ -268,7 +271,7 @@ function GolfGame({ state, mini, me, send, skew, on }: RoomProps & { mini: Mini 
           el.style.opacity = gh.strokes > 0 && !gone ? '1' : '0';
         }
       }
-      if (g.phase === 'aim' || g.phase === 'roll' || g.phase === 'wait' || (g.phase === 'over' && !g.done)) {
+      if (g.phase === 'aim' || g.phase === 'roll' || g.phase === 'wait' || (g.phase === 'over' && !g.holed)) {
         const [x, y] = D(g.ball.x, g.ball.y);
         const pulse = g.phase === 'aim' && !g.aim && Math.floor(pnow / 400) % 2 === 0;
         if (pulse) { ctx.fillStyle = 'rgba(255,231,184,.35)'; ctx.fillRect(Math.round(x) - 3, Math.round(y) - 3, 6, 6); }
@@ -357,10 +360,10 @@ function GolfGame({ state, mini, me, send, skew, on }: RoomProps & { mini: Mini 
         <Clock deadline={mini.deadline} startedAt={mini.startedAt} skew={skew} />
       </header>
 
-      <div className="gf-stage" ref={stageRef}>
+      <div className={`gf-stage ${phase === 'aim' ? 'live' : ''}`} ref={stageRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onLostPointerCapture={onCancel}>
         {sz.w > 0 && (
           <div className="gf-frame" style={frameStyle}>
-            <div className={`gf-pad ${phase === 'aim' ? 'live' : ''}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onLostPointerCapture={onCancel}>
+            <div className="gf-pad">
               <canvas ref={cvRef} className="gf-cv" style={frameStyle} width={cw} height={ch} aria-label={`${course.name}: drag back from anywhere to aim, release to putt`} />
               <div className="gf-tags" aria-hidden>
                 {others.map((pid) => {
@@ -393,7 +396,7 @@ function GolfGame({ state, mini, me, send, skew, on }: RoomProps & { mini: Mini 
             <div className="gf-hint">{phase === 'roll' ? 'Rolling…' : ui.power > 0 ? 'Release to putt' : 'Drag back from anywhere · let go to putt'}</div>
           </>
         ) : phase === 'wait' ? <div className="gf-hint">Everyone tees off together. Fewest strokes wins.</div>
-          : phase === 'over' && !G.current.done ? <div className="gf-hint">Time's up.</div>
+          : phase === 'over' && !G.current.holed ? <div className="gf-hint">{G.current.done ? `Out of strokes: ${MAX_STROKES} on the card.` : "Time's up."}</div>
           : <div className="gf-hint">Holed. Watching the others…</div>}
       </footer>
     </div>,

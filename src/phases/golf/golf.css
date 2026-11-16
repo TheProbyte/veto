@@ -15,7 +15,7 @@
 .gf-title { font-family: var(--title); font-size: clamp(16px, 4.4vw, 30px); line-height: 1.05; color: var(--amber); text-shadow: var(--pt) var(--pt) 0 var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* header: my game | hole name + strokes | clock (padded clear of the saloon's corner buttons) */
-.gf-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 44px; min-height: 48px; }
+.gf-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 52px; min-height: 48px; }
 .gf-for { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; }
 .gf-for-art { flex: none; width: 30px; height: 45px; box-shadow: 0 0 0 var(--pu) var(--ink), 0 0 0 calc(var(--pu) * 2) var(--wood3, #5a3a22); }
 .gf-for-art .pxcover { width: 100%; height: 100%; }
@@ -29,7 +29,7 @@
 .gf-clock small { font-size: 10px; color: var(--parch2, #c9b08a); letter-spacing: .06em; text-transform: uppercase; }
 .gf-clock.hot { color: #ff6a50; animation: pulse .6s steps(2) infinite; }
 @media (max-width: 520px) {
-  .gf-head { padding: 0 40px; flex-wrap: wrap; row-gap: 2px; justify-content: center; }
+  .gf-head { padding: 0 52px; flex-wrap: wrap; row-gap: 2px; justify-content: center; }
   .gf-hole { order: -1; flex: 1 0 100%; }
   .gf-for { flex: 1 1 auto; }
   .gf-for-art { width: 20px; height: 30px; }
@@ -37,13 +37,13 @@
 }
 
 /* stage: the course, integer-scaled and centred, in a brass-and-ink frame */
-.gf-stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; position: relative; }
+.gf-stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; position: relative; touch-action: none; }
+.gf-stage.live { cursor: var(--cur-aim); }
 .gf-frame {
   position: relative;
   box-shadow: 0 0 0 var(--pu) var(--ink), 0 0 0 calc(var(--pu) * 2) #c4581f, 0 0 0 calc(var(--pu) * 3) var(--ink), calc(var(--pu) * 3) calc(var(--pu) * 5) 0 calc(var(--pu) * 2) rgba(0,0,0,.45);
 }
-.gf-pad { position: absolute; inset: 0; touch-action: none; cursor: var(--cur-default); }
-.gf-pad.live { cursor: var(--cur-aim); }
+.gf-pad { position: absolute; inset: 0; touch-action: none; }
 .gf-cv { display: block; image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
 .gf-tags { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
 .gf-tag { position: absolute; left: 0; top: 0; transition: opacity .25s; will-change: transform; }
