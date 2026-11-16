@@ -563,6 +563,18 @@ export const sfx = {
   /** called whenever a level or mute changes (slider moves); returns an unsubscribe */
   onLevels(f: () => void): () => void { levelListeners.add(f); return () => { levelListeners.delete(f); }; },
   isUnlocked(): boolean { return live(); },
+  /** tempo of the music actually playing (for things that move to the beat): recorded lobby 81, recorded
+   * showdown (intro or loop) 96, procedural lobby / result 76, procedural veto / roulette 92; 0 when nothing
+   * is audible (off, muted, music at 0, page hidden) */
+  getMusicBpm(): number {
+    if (muted || bgHidden || musicVolume < 0.01 || wantMusic === 'off') return 0;
+    if (mediaPlaying()) return mediaCur === 'showdown' ? 96 : 81;
+    if (engine && engine.playing()) {
+      const m = engine.mode();
+      return m === 'veto' || m === 'roulette' ? 92 : m === 'lobby' || m === 'result' ? 76 : 0;
+    }
+    return 0;
+  },
   unlock() {               // call on first user click/keydown; resumes AudioContext (idempotent)
     if (!init()) return;
     preloadFiles();
@@ -1425,13 +1437,13 @@ let mediaCur: Track | null = null;
 let sdStage: 'intro' | 'loop' = 'intro';
 let sdPoll = 0;
 
-function mediaEl(file: string, dest: AudioNode, loop: boolean): MediaEl | null {
+function mediaEl(file: string, dest: AudioNode, loop: boolean, preload: 'auto' | 'none' = 'auto'): MediaEl | null {
   let m = mediaEls.get(file);
   if (m) return m;
   if (!live() || !hasMedia(file)) return null;
   try {
     const el = new Audio();
-    el.preload = 'auto';
+    el.preload = preload;
     el.loop = loop;
     el.src = `/media/${file}`;
     const src = ctx!.createMediaElementSource(el);
@@ -1445,15 +1457,18 @@ function mediaEl(file: string, dest: AudioNode, loop: boolean): MediaEl | null {
     return me;
   } catch { return null; }
 }
-/** the element for a music file (created, and so fetched, on first call) */
-function musicEl(file: string): MediaEl | null {
+/** the element for a music file (created on first call). `fetch`: it's needed (or due) now, so let it download;
+ * the showdown files are created with preload='none' in the unlock gesture (primed) and only fetched later. */
+function musicEl(file: string, fetch = true): MediaEl | null {
   if (!live() || !hasMedia(file)) return null;
   if (!mediaBus) {
     mediaBus = ctx!.createGain();
     mediaBus.gain.value = MEDIA_TRIM;
     mediaBus.connect(musicGain!);
   }
-  return mediaEl(file, mediaBus, file !== F_INTRO);
+  const m = mediaEl(file, mediaBus, file !== F_INTRO, fetch || file === F_LOBBY ? 'auto' : 'none');
+  if (m && fetch && m.el.preload !== 'auto') m.el.preload = 'auto';
+  return m;
 }
 const ok = (file: string) => { const m = musicEl(file); return !!m && !m.failed && !m.blocked; };
 /** the recording(s) for this track are listed and playable */
@@ -1562,16 +1577,26 @@ function retryBlockedMedia() {
   for (const m of mediaEls.values()) if (m.blocked) { m.blocked = false; any = true; }
   if (any && ready()) startMusic();
 }
-/** in the unlock gesture: the lobby track starts (startMusic), the sting is primed (muted play + pause, so iOS
- * lets it play later); the showdown files are fetched ~5 s later unless needed sooner */
+/** in the unlock gesture (iOS only lets an element play later if play() was first called inside a gesture):
+ * create every listed element and prime it (play + immediate pause at gain 0, back to the start). unlock()
+ * then starts the wanted track via startMusic(), still inside the gesture. The showdown files stay
+ * preload='none' and are fetched ~5 s later unless needed sooner. */
 let primed = false;
 function primeMedia() {
   if (!live() || primed) return;
   primed = true;
+  const els: MediaEl[] = [];
+  for (const f of MUSIC_FILES) { const m = musicEl(f, f === F_LOBBY); if (m) els.push(m); }
   const sting = stingEl();
-  if (sting && sting.el.paused && !stingBusy) {
-    const p = sting.el.play();
-    if (p && typeof p.then === 'function') p.then(() => { if (!stingBusy) sting.el.pause(); }).catch(() => {});
+  if (sting && !stingBusy) els.push(sting);
+  for (const m of els) {
+    if (m.failed || !m.el.paused || m.target > 0) continue;
+    try {
+      const p = m.el.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {}); // AbortError from the pause() below is expected
+      m.el.pause();
+      m.el.currentTime = 0;
+    } catch { /* not seekable yet: it starts at 0 anyway */ }
   }
   window.setTimeout(() => { for (const f of [F_INTRO, F_LOOP]) musicEl(f); }, 5000);
 }
