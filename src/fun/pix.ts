@@ -79,3 +79,55 @@ export function fontsReady(ms = 900): Promise<void> {
 
 export const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** 9x9 sheriff-gold star for the end card (filled) and its burnt-wood "not yet" twin */
+const STAR_ROWS = [
+  '....h....',
+  '...hhm...',
+  '...hmm...',
+  'hhhhmmmmd',
+  '.hhmmmmd.',
+  '..hmmmd..',
+  '..hmdmd..',
+  '.hmd.dmd.',
+  '.hd...dd.',
+];
+export const STAR_ICON = { w: 11, h: 11, draw: iconFrom(STAR_ROWS, { h: '#fff3b8', m: '#f2d36b', d: '#a87c18' }) };
+export const STAR_DIM = { w: 11, h: 11, draw: iconFrom(STAR_ROWS, { h: PAL.wood4, m: PAL.wood3, d: PAL.wood2 }) };
+
+/** chunky bitmap digits for the canvas scoreboard: 5x7 (score) and 3x5 (combo, with 'x') */
+export const FONT57: Record<string, string[]> = {
+  '0': ['.###.', '##.##', '##.##', '##.##', '##.##', '##.##', '.###.'],
+  '1': ['..##.', '.###.', '..##.', '..##.', '..##.', '..##.', '.####'],
+  '2': ['.###.', '##.##', '...##', '..##.', '.##..', '##...', '#####'],
+  '3': ['####.', '...##', '...##', '.###.', '...##', '...##', '####.'],
+  '4': ['...##', '..###', '.#.##', '#..##', '#####', '...##', '...##'],
+  '5': ['#####', '##...', '####.', '...##', '...##', '##.##', '.###.'],
+  '6': ['.###.', '##...', '##...', '####.', '##.##', '##.##', '.###.'],
+  '7': ['#####', '...##', '..##.', '..##.', '.##..', '.##..', '.##..'],
+  '8': ['.###.', '##.##', '##.##', '.###.', '##.##', '##.##', '.###.'],
+  '9': ['.###.', '##.##', '##.##', '.####', '...##', '...##', '.###.'],
+};
+export const FONT35: Record<string, string[]> = {
+  '0': ['###', '#.#', '#.#', '#.#', '###'], '1': ['.#.', '##.', '.#.', '.#.', '###'], '2': ['##.', '..#', '.#.', '#..', '###'],
+  '3': ['##.', '..#', '.#.', '..#', '##.'], '4': ['#.#', '#.#', '###', '..#', '..#'], '5': ['###', '#..', '##.', '..#', '##.'],
+  '6': ['.##', '#..', '###', '#.#', '###'], '7': ['###', '..#', '.#.', '.#.', '.#.'], '8': ['###', '#.#', '###', '#.#', '###'],
+  '9': ['###', '#.#', '###', '..#', '##.'], 'x': ['...', '#.#', '.#.', '#.#', '...'],
+};
+/** draw `text` with a bitmap font; returns the width used. `col(x, y)` picks each lit pixel's colour (glyph-local y). */
+export function bitText(c: Ctx, font: Record<string, string[]>, text: string, x0: number, y0: number, col: (gy: number) => string, shadow?: string): number {
+  let x = x0;
+  for (const ch of text) {
+    const g = font[ch]; if (!g) { x += 2; continue; }
+    for (let y = 0; y < g.length; y++) for (let gx = 0; gx < g[y].length; gx++) {
+      if (g[y][gx] !== '#') continue;
+      if (shadow) { c.fillStyle = shadow; c.fillRect(x + gx + 1, y0 + y + 1, 1, 1); }
+    }
+    for (let y = 0; y < g.length; y++) for (let gx = 0; gx < g[y].length; gx++) {
+      if (g[y][gx] !== '#') continue;
+      c.fillStyle = col(y); c.fillRect(x + gx, y0 + y, 1, 1);
+    }
+    x += g[0].length + 1;
+  }
+  return x - x0 - 1;
+}
