@@ -172,17 +172,18 @@ interface Surf { x0: number; x1: number; y: number; kind: 'shelf' | 'bar' | 'pia
 interface Box { x0: number; x1: number; y0: number; y1: number }
 interface Geo {
   W: number; H: number; S: number; surfs: Surf[]; bar: number; piano: { x0: number; x1: number; y: number };
-  mirror: Box; lamps: { x: number; y: number }[]; hudTop: number; hudRight: number;
+  mirror: Box; lamps: { x: number; y: number }[]; hudTop: number; hudRight: number; hudLeft: number;
 }
 
 /** art-pixel geometry; `qb` = the quit button's rect (safe areas + where the HUD may go) */
-function geo(vw: number, vh: number, qb: DOMRect | null): Geo {
+function geo(vw: number, vh: number, qb: DOMRect | null, padL = 10): Geo {
   // the same chunky pixel as the saloon scene, but never so small that bottles get fiddly on a phone
   const S = clamp(computeLayout(vw, vh).P, 3, 6);
   const W = Math.ceil(vw / S), H = Math.ceil(vh / S);
   const portrait = H > W * 1.15;
   const hudTop = qb && qb.height ? Math.max(2, Math.floor(qb.top / S)) : 3;
   const hudRight = qb && qb.width ? Math.ceil((vw - qb.left) / S) + 2 : 16;
+  const hudLeft = Math.max(2, Math.ceil((padL - 10) / S) + 2); // clear a landscape notch
   const hudBot = hudTop + 14;
   const bar = Math.round(H * (portrait ? 0.82 : 0.8));
   const surfs: Surf[] = [];
@@ -204,7 +205,7 @@ function geo(vw: number, vh: number, qb: DOMRect | null): Geo {
   }
   surfs.push({ x0: piano.x0 + 3, x1: piano.x1 - 3, y: piano.y, kind: 'piano' });
   surfs.push({ x0: 6, x1: W - 6, y: bar, kind: 'bar' });
-  return { W, H, S, surfs, bar, piano, mirror, lamps, hudTop, hudRight };
+  return { W, H, S, surfs, bar, piano, mirror, lamps, hudTop, hudRight, hudLeft };
 }
 
 /* ---- the back bar, painted once per size into a palette buffer, then lit + vignetted ---- */
@@ -506,7 +507,7 @@ function stepBits(list: Bit[], dt: number, H: number) {
   return list.filter((b) => b.t < b.life && b.y < H + 4);
 }
 
-function tick(G: Game, now: number, dt: number, spawning: boolean, frozen: boolean) {
+function tick(G: Game, now: number, dt: number, spawning: boolean) {
   if (spawning && now >= G.nextSpawn && now - G.start < ROUND_MS - 400) {
     spawn(G, now);
     const t = clamp((now - G.start) / ROUND_MS, 0, 1);
@@ -517,7 +518,7 @@ function tick(G: Game, now: number, dt: number, spawning: boolean, frozen: boole
       const s = (now - q.born) / 1000;
       q.y = q.toss.y0 - (q.toss.vy * s - (q.toss.g * s * s) / 2);
       q.x += q.vx * dt;
-    } else if (q.vx && !frozen) {
+    } else if (q.vx) {
       const s = G.g.surfs[q.surf], hw = sprites()[q.kind].width / 2;
       q.x += q.vx * dt;
       if (q.x < s.x0 + hw) { q.x = s.x0 + hw; q.vx = -q.vx; }
@@ -566,9 +567,9 @@ function drawBits(c: CanvasRenderingContext2D, list: Bit[]) {
 }
 
 function drawHud(c: CanvasRenderingContext2D, G: Game, now: number) {
-  const { W, hudTop: top, hudRight } = G.g;
+  const { W, hudTop: top, hudRight, hudLeft } = G.g;
   // carved wooden score plate with brass nails
-  const px0 = 2, pw = 19, ph = 13;
+  const px0 = hudLeft, pw = 19, ph = 13;
   c.fillStyle = PAL.ink; c.fillRect(px0 - 1, top - 1, pw + 2, ph + 2);
   for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
     const v = y === 0 ? 4.4 : y === 1 ? 3.4 : y === ph - 1 ? 1 : 2.4 + (Math.sin(y * 0.9 + Math.sin(x * 0.4) * 1.6) > 0.8 ? -0.7 : 0) + (x === 0 ? 0.8 : 0);
@@ -691,6 +692,7 @@ function Gallery({ onClose, onSubmit, tableBest }: { onClose: () => void; onSubm
   const cvRef = useRef<HTMLCanvasElement>(null);
   const fxRef = useRef<HTMLDivElement>(null);
   const quitRef = useRef<HTMLButtonElement>(null);
+  const hudRef = useRef<HTMLDivElement>(null);
   const game = useRef<Game | null>(null);
   const [phase, setPhase] = useState<Phase>('ready');
   const [hud, setHud] = useState({ score: 0, combo: 0, hits: 0 });
@@ -713,9 +715,11 @@ function Gallery({ onClose, onSubmit, tableBest }: { onClose: () => void; onSubm
     const c = cv.getContext('2d'); if (!c) return;
     let dead = false, raf = 0, sent = false;
     const setup = () => {
-      const g = geo(el.clientWidth || innerWidth, el.clientHeight || innerHeight, quitRef.current?.getBoundingClientRect() ?? null);
+      let padL = 10;
+      try { padL = parseFloat(getComputedStyle(hudRef.current!).paddingLeft) || 10; } catch { /* default */ }
+      const g = geo(el.clientWidth || innerWidth, el.clientHeight || innerHeight, quitRef.current?.getBoundingClientRect() ?? null, padL);
       const prev = game.current;
-      if (prev && prev.g.W === g.W && prev.g.H === g.H && prev.g.hudTop === g.hudTop) return;
+      if (prev && prev.g.W === g.W && prev.g.H === g.H && prev.g.hudTop === g.hudTop && prev.g.hudLeft === g.hudLeft) return;
       cv.width = g.W; cv.height = g.H;
       cv.style.width = `${g.W * g.S}px`; cv.style.height = `${g.H * g.S}px`;
       c.imageSmoothingEnabled = false;
@@ -738,9 +742,9 @@ function Gallery({ onClose, onSubmit, tableBest }: { onClose: () => void; onSubm
       const G = game.current!;
       const now = performance.now();
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
-      const frozen = now < G.freeze; // hit-stop: only the FX hold still; spawns, expiry and the clock run on
+      const frozen = now < G.freeze; // hit-stop: only the FX hold still; targets, spawns, expiry and the clock run on
       if (now >= G.start && readyShown) { readyShown = false; setPhase('play'); sfx.cock(); }
-      if (now >= G.start) tick(G, now, dt, !G.ended, frozen);
+      if (now >= G.start) tick(G, now, dt, !G.ended);
       if (!frozen) {
         G.bits = stepBits(G.bits, dt, G.g.H);
         G.hud = stepBits(G.hud, dt, G.g.H);
@@ -863,7 +867,7 @@ function Gallery({ onClose, onSubmit, tableBest }: { onClose: () => void; onSubm
       <canvas ref={cvRef} className="fun-tp-canvas" onPointerDown={onDown} onContextMenu={(e) => e.preventDefault()} />
       <div className="fun-tp-fx" ref={fxRef} aria-hidden />
       <span className="fun-sr" aria-live="polite">{phase === 'play' ? `${hud.score} points${hud.combo >= 2 ? `, combo ${hud.combo}` : ''}` : ''}</span>
-      <div className="fun-tp-hud">
+      <div className="fun-tp-hud" ref={hudRef}>
         <button ref={quitRef} type="button" className="px-btn px-btn-sm fun-x" onClick={() => { sfx.click(); onClose(); }} aria-label="Quit target practice (no score)">✕</button>
       </div>
       {phase === 'ready' && (

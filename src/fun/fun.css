@@ -7,9 +7,12 @@
 .fun-tp { display: flex; flex-direction: column; gap: calc(var(--pt) * 1); width: 100%; min-width: 0; max-width: 100%; align-self: stretch; }
 .fun-tp-row { display: flex; align-items: center; flex-wrap: nowrap; gap: calc(var(--pt) * 4); min-width: 0; }
 /* .nh-btn reserves its own depth below (margin), so nothing under it gets covered */
-.fun-tp .fun-btn { flex: none; }
+.fun-tp-row { gap: calc(var(--pt) * 3); }
+/* own the spacing under the plank (its depth grows on hover) instead of relying on .nh-btn's --d-based margin */
+.fun-tp .fun-btn { flex: 0 1 auto; min-width: 0; margin: var(--pu) calc(var(--pu) + 2px) calc(var(--pu) * 4 + 2px); }
+.fun-tp .fun-btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fun-board-btn {
-  flex: none; margin: 0 0 calc(var(--pu) * 2); padding: calc(var(--pt) * 2) calc(var(--pt) * 4); border: 0; border-radius: 0; cursor: var(--cur-pointer);
+  flex: none; min-height: 28px; margin: 0 var(--pu) calc(var(--pu) * 2) 0; padding: calc(var(--pt) * 2) calc(var(--pt) * 4); border: 0; border-radius: 0; cursor: var(--cur-pointer);
   font-family: var(--px-sm); font-size: calc(var(--pt) * 6); letter-spacing: .08em; text-transform: uppercase; line-height: 1.2;
   color: var(--parch); background: rgba(12, 7, 4, .55); box-shadow: inset 0 0 0 var(--pu) var(--wood3, #5a3a22), 0 var(--pu) 0 0 #120904;
 }
@@ -21,7 +24,8 @@
   font-family: var(--px-sm); font-size: calc(var(--pt) * 6); line-height: 1.6; color: var(--parch2);
 }
 .fun-tp-best .k { flex: none; color: var(--amber); text-transform: uppercase; letter-spacing: .06em; }
-.fun-tp-best .e { display: inline-flex; align-items: baseline; gap: .4em; min-width: 0; flex: 0 1 auto; }
+.fun-tp-best .e { display: inline-flex; align-items: baseline; gap: .4em; flex: 0 1 auto; min-width: calc(5.5ch + .8em); }
+.fun-tp-best .k + .e { min-width: calc(4.5ch + .4em); } /* every entry keeps a stub of its name + its whole score */
 .fun-tp-best .e > i { flex: none; font-style: normal; color: var(--parch3, #9c8160); }
 .fun-tp-best .nm { min-width: 2.5ch; max-width: 11ch; overflow: hidden; text-overflow: ellipsis; color: var(--parch); }
 .fun-tp-best .e.me .nm { color: var(--amber); }
@@ -58,8 +62,8 @@
 @keyframes fun-pop { 0% { translate: 0 0; scale: 1.25; opacity: 1; } 15% { scale: 1; } 70% { opacity: 1; } 100% { translate: 0 calc(var(--pt) * -14); opacity: 0; } }
 
 .fun-tp-hud {
-  position: absolute; right: 0; top: 0; display: flex; pointer-events: none;
-  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 0 0;
+  position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: flex-end; pointer-events: none;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
 }
 .fun-tp-hud > * { pointer-events: auto; }
 .fun-tp-banner, .fun-tp-end {
