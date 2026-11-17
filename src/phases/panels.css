@@ -109,7 +109,7 @@
    .nh-btn            wooden plank: grain, brass nails left + right, burnt/carved label (secondary)
    .nh-btn-big        painted sign: amber board, red pinstripe, stepped bevel (primary: "Lookin' good", "Deal 'em in")
    .nh-btn-red        red painted sign (the "To the guns" kind)
-   --d is the depth (the dark block under the button): hover lifts 1u + grows it, press sinks into it. */
+   --d is the depth (the dark block under the button): hover only brightens; press sinks the face 1u into it. */
 .nh-btn {
   --d: calc(var(--pu) * 2); --edge: #120904; --dp: #2a1608;
   --face: #6e4626; --face-hi: #8f5e34; --face-lo: #4a2c14; --grain: rgba(30,14,4,.22);
@@ -128,22 +128,29 @@
     0 var(--d) 0 0 var(--dp), calc(var(--pu) * -1) calc(var(--d) - var(--pu)) 0 0 var(--edge), var(--pu) calc(var(--d) - var(--pu)) 0 0 var(--edge), 0 calc(var(--d) + var(--pu)) 0 0 var(--edge);
   transform: translateY(0); transition: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
-/* brass nails (sized on the text grid so they never crowd the label) */
-.nh-btn::before, .nh-btn::after {
-  content: ''; position: absolute; top: calc(50% - var(--pt)); width: calc(var(--pt) * 2); height: calc(var(--pt) * 2); pointer-events: none;
-  background: linear-gradient(135deg, #ffe6a3 0 50%, #c8953f 50%); box-shadow: var(--pt) var(--pt) 0 0 rgba(20,8,2,.55);
+/* brass nails, both in ::after (sized on the text grid so they never crowd the label) */
+.nh-btn::after {
+  content: ''; position: absolute; top: calc(50% - var(--pt)); left: calc(var(--pt) * 3); right: calc(var(--pt) * 2); height: calc(var(--pt) * 3); pointer-events: none;
+  --nail: linear-gradient(135deg, var(--nail-a, #ffe6a3) 0 50%, var(--nail-b, #c8953f) 50%); --nail-sh: linear-gradient(rgba(20,8,2,.55), rgba(20,8,2,.55));
+  background:
+    var(--nail) 0 0 / calc(var(--pt) * 2) calc(var(--pt) * 2) no-repeat,
+    var(--nail) right var(--pt) top 0 / calc(var(--pt) * 2) calc(var(--pt) * 2) no-repeat,
+    var(--nail-sh) var(--pt) var(--pt) / calc(var(--pt) * 2) calc(var(--pt) * 2) no-repeat,
+    var(--nail-sh) right 0 top var(--pt) / calc(var(--pt) * 2) calc(var(--pt) * 2) no-repeat;
 }
-.nh-btn::before { left: calc(var(--pt) * 3); }
-.nh-btn::after { right: calc(var(--pt) * 3); }
+/* ::before = the hit area: covers the face, its edge and the depth block, and never leaves the pointer while the face sinks */
+.nh-btn::before { content: ''; position: absolute; left: calc(var(--pu) * -1); right: calc(var(--pu) * -1); top: calc(var(--pu) * -2); bottom: calc(var(--d) * -1 - var(--pu) * 2); }
+/* hover never moves the button (it only brightens); press sinks the face 1 unit into its depth, bottom edge stays put */
 @media (hover: hover) {
-  .nh-btn:hover:not(:disabled):not([aria-disabled='true']) { --d: calc(var(--pu) * 3); transform: translateY(calc(var(--pu) * -1)); filter: brightness(1.12) saturate(1.05); }
+  .nh-btn:hover:not(:disabled):not([aria-disabled='true']) { filter: brightness(1.14) saturate(1.06); }
 }
-.nh-btn:active:not(:disabled):not([aria-disabled='true']) { --d: 0px; transform: translateY(calc(var(--pu) * 2)); filter: brightness(.96); }
+.nh-btn:active:not(:disabled):not([aria-disabled='true']) { --d: var(--pu); transform: translateY(var(--pu)); filter: brightness(.96); }
+.nh-btn:active:not(:disabled):not([aria-disabled='true'])::before { top: calc(var(--pu) * -3); }
 .nh-btn:focus-visible { outline: var(--pu) dashed var(--nh-parch); outline-offset: calc(var(--pu) * 2); }
 .nh-btn:disabled, .nh-btn[aria-disabled='true'] { cursor: var(--cur-no); filter: grayscale(1) brightness(.62) contrast(.9); transform: none; }
 .nh-btn-sm { min-height: calc(var(--pt) * 16); padding: calc(var(--pt) * 3) calc(var(--pt) * 7); font-size: calc(var(--pt) * 7); }
 .nh-btn-xs { min-height: 0; padding: calc(var(--pt) * 2) calc(var(--pt) * 5); font-size: calc(var(--pt) * 7); margin: 2px 2px 6px; }
-.nh-btn-xs::before, .nh-btn-xs::after { display: none; }
+.nh-btn-xs::after { display: none; }
 .nh-btn .nh-spin { background: conic-gradient(#f6e4c4 0 25%, rgba(246,228,196,.25) 0 50%, #f6e4c4 0 75%, rgba(246,228,196,.25) 0); }
 
 /* primary: a painted sign board */
@@ -161,7 +168,8 @@
     0 calc(var(--pu) * -1) 0 0 var(--edge), calc(var(--pu) * -1) 0 0 0 var(--edge), var(--pu) 0 0 0 var(--edge),
     0 var(--d) 0 0 var(--dp), calc(var(--pu) * -1) calc(var(--d) - var(--pu)) 0 0 var(--edge), var(--pu) calc(var(--d) - var(--pu)) 0 0 var(--edge), 0 calc(var(--d) + var(--pu)) 0 0 var(--edge);
 }
-.nh-btn-big::before, .nh-btn-big::after, .nh-btn-primary::before, .nh-btn-primary::after { display: none; }
+.nh-btn-big::after, .nh-btn-primary::after { display: none; }
+.nh-btn-big:active:not(:disabled):not([aria-disabled='true']), .nh-btn-primary:active:not(:disabled):not([aria-disabled='true']) { --d: calc(var(--pu) * 2); }
 .nh-btn-big .nh-spin { background: conic-gradient(#3a1006 0 25%, rgba(58,16,6,.25) 0 50%, #3a1006 0 75%, rgba(58,16,6,.25) 0); }
 /* red sign */
 .nh-btn-red {
@@ -175,12 +183,12 @@
     0 calc(var(--pu) * -1) 0 0 var(--edge), calc(var(--pu) * -1) 0 0 0 var(--edge), var(--pu) 0 0 0 var(--edge),
     0 var(--d) 0 0 var(--dp), calc(var(--pu) * -1) calc(var(--d) - var(--pu)) 0 0 var(--edge), var(--pu) calc(var(--d) - var(--pu)) 0 0 var(--edge), 0 calc(var(--d) + var(--pu)) 0 0 var(--edge);
 }
-.nh-btn-red::before, .nh-btn-red::after { background: #ffd28c; }
+.nh-btn-red { --nail-a: #ffd28c; --nail-b: #ffd28c; }
 .nh-btn-red .nh-spin { background: conic-gradient(#fff1d6 0 25%, rgba(255,241,214,.25) 0 50%, #fff1d6 0 75%, rgba(255,241,214,.25) 0); }
 /* done (Copied!) = a green-painted plank; ghost = a dark plank */
 .nh-btn.is-done { --face: #5f7d3a; --face-hi: #86a85a; --face-lo: #3c5222; color: #f3ffe0; }
 .nh-btn-ghost { --face: #3a2414; --face-hi: #533520; --face-lo: #24160b; }
-.nh-btn-ghost::before, .nh-btn-ghost::after { opacity: .6; }
+.nh-btn-ghost::after { opacity: .6; }
 .nh-linkbtn { background: none; border: 0; padding: 4px 6px; color: rgba(232,213,181,.55); font-family: var(--nh-px); font-size: calc(var(--pt) * 7); text-decoration: underline; cursor: var(--cur-pointer); }
 .nh-linkbtn:hover { color: var(--nh-amber); }
 
@@ -647,7 +655,7 @@
 .nh-seg button { min-width: 44px; min-height: 44px; padding: 4px 10px; border: 0; border-radius: 0; cursor: var(--cur-pointer); font-family: var(--nh-px); font-size: calc(var(--pt) * 7); color: var(--nh-parch);
   background: #1c120a; box-shadow: 0 calc(var(--pu) * -1) 0 0 #4a2c14, 0 var(--pu) 0 0 #4a2c14, calc(var(--pu) * -1) 0 0 0 #4a2c14, var(--pu) 0 0 0 #4a2c14; margin: 2px; }
 .nh-seg button.on { color: #1c0f07; background: var(--nh-amber); box-shadow: inset 0 calc(var(--pu) * -1) 0 var(--nh-amber2), 0 calc(var(--pu) * -1) 0 0 #120904, 0 var(--pu) 0 0 #120904, calc(var(--pu) * -1) 0 0 0 #120904, var(--pu) 0 0 0 #120904; }
-.nh-seg button:active { transform: translateY(2px); }
+
 .nh-seg button:focus-visible { outline: var(--pu) solid var(--nh-parch); outline-offset: var(--pu); }
 .nh-seg-wrap button { flex: 1 1 auto; }
 
@@ -849,7 +857,7 @@
   box-shadow: 0 calc(var(--pu) * -1) 0 0 #120904, calc(var(--pu) * -1) 0 0 0 #120904, var(--pu) 0 0 0 #120904, 0 var(--pu) 0 0 #120904, 0 calc(var(--pu) * 2) 0 0 rgba(0,0,0,.45);
   margin: var(--pu) var(--pu) calc(var(--pu) * 2);
 }
-@media (hover: hover) { .nh-seg button:not(.on):hover { filter: brightness(1.2); transform: translateY(calc(var(--pu) * -1)); } }
+@media (hover: hover) { .nh-seg button:not(.on):hover { filter: brightness(1.2); } }
 .nh-seg button:active { transform: translateY(var(--pu)); }
 .nh-seg button.on { color: #2a1206; text-shadow: 0 var(--pt) 0 rgba(255,236,196,.6); transform: translateY(var(--pu));
   background: linear-gradient(180deg, #ffe2a6 0 var(--pu), #ffb35c var(--pu) calc(100% - var(--pu)), #d9732e calc(100% - var(--pu)));
@@ -864,7 +872,7 @@
 .nh-swatch-felt { background: repeating-conic-gradient(var(--fd) 0 25%, transparent 0 50%) 0 0 / calc(var(--pu) * 2) calc(var(--pu) * 2), linear-gradient(180deg, var(--fl) 0 30%, var(--fb) 30%); }
 .nh-swatch-deck { width: 26px; height: 38px; }
 .nh-swatch.on { box-shadow: 0 0 0 var(--pu) #120904, 0 0 0 calc(var(--pu) * 2) var(--nh-amber), 0 0 0 calc(var(--pu) * 3) #120904; transform: translateY(calc(var(--pu) * -1)); }
-@media (hover: hover) { .nh-swatch:not(.on):hover { transform: translateY(calc(var(--pu) * -1)); filter: brightness(1.15); } }
+@media (hover: hover) { .nh-swatch:not(.on):hover { filter: brightness(1.2); } }
 .nh-swatch-name { font-family: var(--nh-px); font-size: calc(var(--pt) * 7); color: rgba(232,213,181,.7); }
 .nh-theme-sw { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; vertical-align: middle; }
 .nh-felt-sw { display: inline-block; width: 14px; height: 14px; background: linear-gradient(180deg, var(--fl) 0 30%, var(--fb) 30%); box-shadow: 0 0 0 var(--pu) #120904; }
@@ -911,6 +919,7 @@
 .cc-row { align-items: center; gap: 8px; min-height: 48px; }
 .cc-arrow.coin { flex: none; width: 42px; min-height: 0; height: 42px; box-shadow: none; }
 .cc-arrow.coin:disabled { filter: grayscale(1) brightness(.55); }
+.cc-arrow.coin:active:not(:disabled) { transform: none; }
 .cc-mid { align-self: stretch; grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; padding: 5px 10px 5px;
   background: linear-gradient(180deg, rgba(255,214,160,.06) 0 var(--pu), transparent var(--pu)), rgba(12,7,4,.55); }
 .cc-sw { align-self: center; gap: 2px; }
@@ -1066,3 +1075,86 @@
 
 /* keep labels clear of the brass nails, whatever local padding overrides apply */
 .nh-btn { padding-left: max(calc(var(--pt) * 9), 18px) !important; padding-right: max(calc(var(--pt) * 9), 18px) !important; }
+
+/* lobby busts: never clip the hat or the shoulders. The bust canvas is 48 wide with 18 rows of hat-drop headroom on top;
+   the tallest hat (cactus) uses 9 of them, so crop 7 rows and keep 2 rows of air above it. The frame is wider than the canvas. */
+.nh-me-bust { width: 58px; height: 62px; place-items: start center; }
+.nh-me-bust > .px-bust { margin-top: -7px; }
+.nh-posse-bust > .px-bust { transform: scale(.66) translateY(-7px); transform-origin: top center; }
+@media (min-width: 1024px) and (min-height: 600px) {
+  .nh-lobby.is-strip .nh-me-bust { width: 54px; height: 52px; }
+  .nh-lobby.is-strip .nh-posse-bust > .px-bust { transform: scale(.58) translateY(-7px); }
+}
+
+/* ================= the end page: Saddle Up strip under the poster (ready check + host's synced launch) ================= */
+.rs-left { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; }
+.sadl {
+  display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 44px; padding: 4px 8px; box-sizing: border-box;
+  font-family: var(--px); color: var(--nh-parch); background: rgba(22,13,8,.92);
+  box-shadow: 0 0 0 var(--pu) #120904, inset 0 0 0 var(--pu) #4a2c14, calc(var(--pu) * 2) calc(var(--pu) * 2) 0 0 rgba(0,0,0,.45);
+}
+.sadl-k { flex: none; display: flex; flex-direction: column; align-items: center; line-height: 1.05; }
+.sadl-t { font-family: var(--px-sm); font-size: calc(var(--pt) * 6); letter-spacing: .12em; text-transform: uppercase; color: var(--nh-amber); white-space: nowrap; }
+.sadl-k b { font-family: 'Rye', serif; font-weight: 400; font-size: 16px; color: var(--nh-parch); }
+.sadl-seg { flex: none; display: flex; gap: 3px; }
+.sadl-b {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 32px; height: 32px; padding: 0 6px; margin: 0;
+  border: 0; border-radius: 0; cursor: var(--cur-pointer); font-family: var(--px); font-weight: 700; font-size: calc(var(--pt) * 7); color: #f6e4c4;
+  background: linear-gradient(180deg, #7a5232 0 var(--pu), #4a2c14 var(--pu) calc(100% - var(--pu)), #2a1608 calc(100% - var(--pu)));
+  box-shadow: 0 0 0 var(--pu) #120904; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.sadl-b .pxi { width: calc(var(--pt) * 7); height: calc(var(--pt) * 7); flex: none; }
+@media (hover: hover) { .sadl-b:not(.on):hover { filter: brightness(1.2); } }
+.sadl-b:active { box-shadow: 0 0 0 var(--pu) #120904, inset 0 var(--pu) 0 0 rgba(0,0,0,.5); }
+.sadl-b.on { color: #12200a; background: linear-gradient(180deg, #d8f5b0 0 var(--pu), #9fd06a var(--pu) calc(100% - var(--pu)), #5f8a34 calc(100% - var(--pu))); }
+.sadl-b.download.on { color: #0e1a2a; background: linear-gradient(180deg, #d6e8ff 0 var(--pu), #8fb8e8 var(--pu) calc(100% - var(--pu)), #4a6f9a calc(100% - var(--pu))); }
+.sadl-b.buy.on { color: #2a1206; background: linear-gradient(180deg, #ffe2a6 0 var(--pu), #ffb35c var(--pu) calc(100% - var(--pu)), #d9732e calc(100% - var(--pu))); }
+.sadl-b.hint { box-shadow: 0 0 0 var(--pu) #120904, 0 0 0 calc(var(--pu) * 2) var(--nh-amber); animation: pulse 1s steps(2) infinite; }
+.sadl-posse { flex: 1 1 auto; min-width: 0; display: flex; gap: 6px; padding: 3px 4px; overflow-x: auto; scrollbar-width: none; }
+.sadl-posse::-webkit-scrollbar { display: none; }
+.sadl-pc { position: relative; flex: none; width: 28px; height: 24px; background: rgba(42,26,16,.7); box-shadow: 0 0 0 var(--pu) #120904; }
+.sadl-pc.me { box-shadow: 0 0 0 var(--pu) var(--nh-amber); }
+.sadl-pc.off { opacity: .5; }
+.sadl-bust { width: 28px !important; height: 24px !important; display: block; }
+.sadl-pc i { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 13px; height: 13px; background: #160d08; color: var(--nh-parch); box-shadow: 0 0 0 var(--pu) #120904; }
+.sadl-pc i .pxi { width: 9px; height: 9px; }
+.sadl-pc.ready { box-shadow: 0 0 0 var(--pu) #6b7a3a; }
+.sadl-pc.ready i { background: #1f2914; color: #c8f0a0; }
+.sadl-pc.download i { background: #1e2c3d; color: #bcd6f0; }
+.sadl-pc.buy i { background: #3a2a0c; color: #ffe9a8; }
+.sadl-buy { flex: none; font-family: var(--px-sm); font-size: calc(var(--pt) * 7); color: var(--nh-amber); white-space: nowrap; }
+.sadl .sadl-go { flex: none; min-height: 34px; padding: 6px 12px 5px; font-size: 16px; font-weight: 700; white-space: nowrap; --face: #9e1b1b; --hi: #d0392c; --lo: #4a0606; color: #fff1d6; }
+@media (prefers-reduced-motion: reduce) { .sadl-b.hint { animation: none; } }
+/* desktop: the strip sits under the poster, a touch wider than it */
+@media (min-width: 900px) and (min-height: 560px) {
+  .rs-left { flex: none; }
+  .sadl { max-width: min(480px, 44vw); gap: 10px; padding: 5px 10px; }
+}
+@media (min-width: 1600px) and (min-height: 900px) { .sadl { zoom: 1.25; } }
+/* phones: one line, no labels */
+@media (max-width: 899px), (max-height: 559px) {
+  .rs-left { width: min(calc(100vw - 24px), 420px); gap: 8px; }
+  .sadl { width: 100%; min-height: 40px; gap: 6px; padding: 3px 6px; }
+  .sadl-t { display: none; }
+  .sadl-lbl { display: none; }
+  .sadl-b { min-width: 30px; height: 30px; padding: 0 4px; }
+  .sadl .sadl-go { padding: 5px 8px 4px; font-size: 14px; min-height: 32px; }
+  .sadl-pc { width: 24px; height: 21px; }
+  .sadl-bust { width: 24px !important; height: 21px !important; }
+}
+@media (min-width: 400px) and (max-width: 899px) { .sadl-lbl { display: inline; } }
+.nh-remember { font-family: var(--nh-px); font-size: calc(var(--pt) * 6); color: rgba(232,213,181,.7); display: flex; align-items: center; flex-wrap: wrap; gap: 0 4px; }
+.nh-remember b { color: var(--nh-parch); font-weight: 600; }
+.nh-remember .nh-linkbtn { min-height: 0; padding: 2px 4px; font-size: calc(var(--pt) * 6); }
+.sadl .sadl-go { min-height: 36px; }
+/* phones: the host's buttons share one row (the Saddle Up strip took that space); the camera goes icon-only */
+@media (max-width: 899px), (max-height: 559px) {
+  .rs-acts { flex-wrap: nowrap; gap: 6px; width: 100%; justify-content: center; }
+  .rs-acts .nh-btn.rs-again { flex: 0 1 auto; min-width: 0; font-size: 15px; min-height: 44px; padding: 6px 8px !important; }
+  .rs-acts .nh-btn.rs-rematch { flex: none; font-size: calc(var(--pt) * 7); padding-left: 14px !important; padding-right: 14px !important; }
+  .rs-acts .nh-btn.rs-rematch::after { left: calc(var(--pt) * 2); right: var(--pt); }
+  .rs-acts .rs-photo .fun-btn { padding-left: 10px; padding-right: 10px; }
+  .rs-acts .rs-photo .fun-btn > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .sadl { min-height: 40px; padding-top: 2px; padding-bottom: 2px; }
+  .sadl .sadl-go { min-height: 34px; }
+}

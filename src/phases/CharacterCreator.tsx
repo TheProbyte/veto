@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { LOOK_COUNTS, LOOK_LABELS, LOOK_UNLOCKS, lookUnlocked, type Look, type ProfileStats } from '../../shared/types';
 import BustPreview from '../pixel/BustPreview';
 import { DockActions, play } from '../scene/Dock';
@@ -41,13 +41,32 @@ function randomUnlocked(stats: ProfileStats): Look {
 
 const mq = (q: string) => { try { return !!window.matchMedia?.(q).matches; } catch { return false; } };
 
-function useScale() {
-  const calc = () => (mq('(max-height: 500px) and (orientation: landscape)') ? 2 : mq('(max-width: 640px)') ? (window.innerHeight < 700 ? 2 : 3) : window.innerHeight < 820 ? 3 : 4);
-  const [s, setS] = useState(calc);
-  useEffect(() => {
+/** bust canvas size in bust pixels (BustPreview: 48 wide, 56 + 18 rows of hat headroom) */
+const BW = 48;
+/**
+ * Pixel scale of the preview: a viewport guess, capped so the whole bust (hat brim to shoulders) fits the stage's width with air
+ * on both sides. The stage's width never depends on the bust, so measuring it can't feed back.
+ */
+function useScale(stage: RefObject<HTMLElement>) {
+  const guess = () => (mq('(max-height: 500px) and (orientation: landscape)') ? 2 : mq('(max-width: 640px)') ? (window.innerHeight < 700 ? 2 : 3) : window.innerHeight < 820 ? 3 : 4);
+  const calc = () => {
+    let s = guess();
+    const el = stage.current;
+    if (el && el.clientWidth > 0) {
+      const cs = getComputedStyle(el);
+      const w = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      s = Math.min(s, Math.max(1, Math.floor((w * 0.84) / BW)));
+    }
+    return s;
+  };
+  const [s, setS] = useState(guess);
+  useLayoutEffect(() => {
     const on = () => setS(calc());
+    on();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(on) : null;
+    if (stage.current) ro?.observe(stage.current);
     window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', on); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return s;
 }
@@ -63,7 +82,8 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
   const bustRef = useRef<HTMLDivElement>(null);
   const doneT = useRef(0);
   useEffect(() => () => clearTimeout(doneT.current), []);
-  const scale = useScale();
+  const stageRef = useRef<HTMLDivElement>(null);
+  const scale = useScale(stageRef);
   const reduce = mq('(prefers-reduced-motion: reduce)');
 
   const kick = (hat: boolean) => {
@@ -108,7 +128,7 @@ export default function CharacterCreator({ initial, first, stats, onSave, onDone
 
   return (
     <div className={`cc ${tip ? 'is-tipping' : ''}`}>
-      <div className="cc-stage">
+      <div className="cc-stage" ref={stageRef}>
         <div className="cc-scenery" aria-hidden><i className="cc-sun" /><i className="cc-town" /><i className="cc-walk" /></div>
         <div className="cc-spot" aria-hidden />
         <div className="cc-bust" ref={bustRef}>

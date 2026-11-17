@@ -50,6 +50,8 @@ export interface SceneApi {
 
 /** mouse parallax only with a fine pointer and motion allowed */
 const parallaxOk = () => { try { return matchMedia('(pointer: fine)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+/** the player's Parallax setting (SoundMenu: localStorage 'nah.parallax', '0' = off; changes fire window 'nah:prefs') */
+const parallaxPref = () => { try { return localStorage.getItem('nah.parallax') !== '0'; } catch { return true; } };
 
 /** One canvas, its own rAF loop (~10-13fps). Scene data is read from a ref, so React never re-renders per frame. Pauses while the tab is hidden. */
 export function PixelScene({ layout, data, api }: { layout: Layout; data: SceneData; api?: MutableRefObject<SceneApi | null> }) {
@@ -78,8 +80,11 @@ export function PixelScene({ layout, data, api }: { layout: Layout; data: SceneD
       host.style.setProperty('--plx-wx', String(r.lw.x)); host.style.setProperty('--plx-wy', String(r.lw.y));
     };
     const plxOn = parallaxOk();
+    let plxPref = parallaxPref();
+    const onPrefs = () => { plxPref = parallaxPref(); if (!plxPref && r) { r.plxT.x = 0; r.plxT.y = 0; } };
+    window.addEventListener('nah:prefs', onPrefs);
     const onMove = (e: PointerEvent) => {
-      if (e.pointerType !== 'mouse' || !r) return;
+      if (e.pointerType !== 'mouse' || !r || !plxPref) return;
       r.plxT.x = Math.max(-1, Math.min(1, (e.clientX / Math.max(1, window.innerWidth)) * 2 - 1));
       r.plxT.y = Math.max(-1, Math.min(1, (e.clientY / Math.max(1, window.innerHeight)) * 2 - 1));
     };
@@ -113,7 +118,7 @@ export function PixelScene({ layout, data, api }: { layout: Layout; data: SceneD
     start();
     return () => {
       dead = true; cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis); if (api) api.current = null;
-      window.removeEventListener('pointermove', onMove); document.documentElement.removeEventListener('pointerleave', onLeave);
+      window.removeEventListener('pointermove', onMove); document.documentElement.removeEventListener('pointerleave', onLeave); window.removeEventListener('nah:prefs', onPrefs);
     };
   }, [layout]); // eslint-disable-line react-hooks/exhaustive-deps
   const style: CSSProperties = { width: layout.W * layout.P, height: layout.H * layout.P };

@@ -222,6 +222,21 @@ export function PosseRecordCard({ state }: { state: RoomState }) {
   );
 }
 
+/* ---------- "Remember my Steam": the profile I last linked with, reused at the next table ---------- */
+const STEAM_KEY = 'nah.steam';
+interface SavedSteam { profile: string; steamid: string; name: string }
+function readSavedSteam(): SavedSteam | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(STEAM_KEY) || 'null') as Partial<SavedSteam> | null;
+    return v && typeof v.profile === 'string' && v.profile.trim() ? { profile: v.profile.trim(), steamid: String(v.steamid ?? ''), name: String(v.name ?? '') } : null;
+  } catch { return null; }
+}
+function writeSavedSteam(v: SavedSteam | null) {
+  try { if (v) localStorage.setItem(STEAM_KEY, JSON.stringify(v)); else localStorage.removeItem(STEAM_KEY); } catch { /* storage off */ }
+}
+/** table codes this page load has already auto-linked at (never twice, even after an unlink or an error) */
+const autoLinked = new Set<string>();
+
 const DESK = '(min-width: 1024px) and (min-height: 600px)';
 /** desktop: the lobby is one wide, short strip under the nameplates (no scroll) */
 function useDesk() {
@@ -244,7 +259,10 @@ export default function Lobby(props: RoomProps) {
   const host = state.players.find((p) => p.host);
   const isHost = !!mine?.host;
   const [copied, setCopied] = useState(false);
-  const [profile, setProfile] = useState('');
+  const [saved, setSaved] = useState(readSavedSteam);
+  const [profile, setProfile] = useState(() => saved?.profile ?? '');
+  const typed = useRef<string | null>(null); // the profile string I linked with on this page
+  const [autoNote, setAutoNote] = useState(false);
   const copyT = useRef(0);
   useEffect(() => () => clearTimeout(copyT.current), []);
   // step 1 is the character creator until I've picked a look; local state so the save echo doesn't yank it mid hat-tip
@@ -280,7 +298,38 @@ export default function Lobby(props: RoomProps) {
     const v = profile.trim();
     if (!v || mine?.linking) return;
     sfx.unlock(); sfx.cock();
+    typed.current = v;
+    setAutoNote(false);
     send({ t: 'link', profile: v });
+  };
+
+  // remember a successful (public) link: the profile string I used, plus the steamid it resolved to
+  const linkedId = mine?.steam && !mine.steam.private ? mine.steam.steamid : '';
+  useEffect(() => {
+    const st = mine?.steam;
+    if (!linkedId || !st) return;
+    const prev = readSavedSteam();
+    const used = typed.current?.trim() || (prev && prev.steamid === st.steamid ? prev.profile : '') || st.steamid;
+    const next = { profile: used, steamid: st.steamid, name: st.name };
+    if (!prev || prev.profile !== next.profile || prev.steamid !== next.steamid || prev.name !== next.name) writeSavedSteam(next);
+    setSaved(next);
+  }, [linkedId, mine?.steam?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // a new table and I'm not linked yet: link the remembered profile once
+  useEffect(() => {
+    if (!mine || mine.bot || mine.steam || mine.linking || autoLinked.has(state.code)) return;
+    autoLinked.add(state.code);
+    const sv = readSavedSteam();
+    if (!sv) return;
+    setAutoNote(true);
+    send({ t: 'link', profile: sv.profile });
+  }, [mine?.id, state.code]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const forgetSteam = () => {
+    sfx.click();
+    writeSavedSteam(null);
+    setSaved(null);
+    setAutoNote(false);
   };
 
   const ready = state.players.filter((p) => p.steam && !p.steam.private);
@@ -317,7 +366,12 @@ export default function Lobby(props: RoomProps) {
               <b>{steam.name}</b>
               <span>{steam.private ? 'Library hidden' : `${steam.gameCount} games`}</span>
             </div>
-            <button type="button" className="nh-linkbtn" onClick={() => { sfx.click(); send({ t: 'unlink' }); }}>unlink</button>
+            <button type="button" className="nh-linkbtn" onClick={() => { sfx.click(); setAutoNote(false); send({ t: 'unlink' }); }}>unlink</button>
+          </div>
+        )}
+        {autoNote && steam && saved && (
+          <div className="nh-remember" role="status">
+            Linked as <b>{steam.name}</b> from last time · <button type="button" className="nh-linkbtn" onClick={forgetSteam} title="Stop linking this Steam automatically on this device">forget</button>
           </div>
         )}
         {mine?.linkError && <div className="nh-err">{mine.linkError}</div>}

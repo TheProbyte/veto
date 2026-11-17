@@ -16,6 +16,36 @@ import './nominate.css';
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 const HOURS = [0, 10, 50, 100];
+const DAY = 86_400_000;
+/** "haven't played in ages": nobody here has touched it in 180 days (or ever) */
+const AGES = 180 * DAY;
+const agesAgo = (g: PoolGame, now: number) => !g.lastPlayed || g.lastPlayed < now - AGES;
+
+/**
+ * "Pick for me": the best remaining candidates for my picks. Everyone has it, co-op (or unknown), not played lately;
+ * games I've put hours into but the group hasn't touched in a while first (oldest lastPlayed, by month), then group hours.
+ * Loosens (recent, then "almost everyone") only when the strict list runs dry. Never one I've already picked.
+ */
+export function autoPicks(pool: PoolGame[], board: BoardGame[], me: string, n: number): PoolGame[] {
+  if (n <= 0) return [];
+  const onBoard = new Map(board.map((b) => [b.appid, b.by]));
+  const free = pool.filter((g) => !(onBoard.get(g.appid) ?? []).includes(me) && g.coop !== false);
+  const mineH = (g: PoolGame) => (g.hoursBy?.[me] ?? 0) > 0 ? 1 : 0;
+  const month = (g: PoolGame) => Math.floor((g.lastPlayed || 0) / (30 * DAY));
+  const rank = (a: PoolGame, b: PoolGame) =>
+    mineH(b) - mineH(a)
+    || (onBoard.has(a.appid) ? 1 : 0) - (onBoard.has(b.appid) ? 1 : 0) // someone else's pick already counts for them: prefer a new one
+    || month(a) - month(b)
+    || (b.hours || 0) - (a.hours || 0);
+  const out: PoolGame[] = [];
+  const take = (ok: (g: PoolGame) => boolean) => {
+    for (const g of free.filter((g) => ok(g) && !out.includes(g)).sort(rank)) { if (out.length >= n) break; out.push(g); }
+  };
+  take((g) => g.tier === 'all' && !g.recent);
+  take((g) => g.tier === 'all');
+  take((g) => g.tier === 'almost' && !g.recent);
+  return out;
+}
 type Tab = 'all' | 'almost' | 'buy';
 
 /** nominate toggle with the thematic bits: my new pick flies onto the dock, a take-back slides off */
@@ -277,6 +307,10 @@ export default function Nominate({ state, me, send }: RoomProps) {
   const [coopOnly, setCoopOnly] = useState(true);
   const [fresh, setFresh] = useState(false);
   const [blood, setBlood] = useState(false);
+  const [ages, setAges] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  const autoT = useRef<number[]>([]);
+  useEffect(() => () => autoT.current.forEach(clearTimeout), []);
   const [minHours, setMinHours] = useState(0);
   const [tabPick, setTabPick] = useState<Tab | null>(null);
   const [tossed, setTossed] = useState<number | null>(null);
@@ -300,8 +334,9 @@ export default function Nominate({ state, me, send }: RoomProps) {
   useTableFit(panelRef, `${state.players.map((p) => p.seat).join(',')}|${drafting}`);
   useTableTheme(settingsOf(state));
 
-  const filtered = (coopOnly ? 1 : 0) + (fresh ? 1 : 0) + (blood ? 1 : 0) + (minHours ? 1 : 0);
-  const visible = state.pool.filter((g) => !(coopOnly && g.coop === false) && !(fresh && g.recent) && !(blood && g.hours > 0) && g.hours >= minHours);
+  const filtered = (coopOnly ? 1 : 0) + (fresh ? 1 : 0) + (blood ? 1 : 0) + (ages ? 1 : 0) + (minHours ? 1 : 0);
+  const now = Date.now();
+  const visible = state.pool.filter((g) => !(coopOnly && g.coop === false) && !(fresh && g.recent) && !(blood && g.hours > 0) && !(ages && !agesAgo(g, now)) && g.hours >= minHours);
   const lists: Record<'all' | 'almost', PoolGame[]> = { all: visible.filter((g) => g.tier === 'all'), almost: visible.filter((g) => g.tier === 'almost') };
   const hasTier = (t: 'all' | 'almost') => state.pool.some((g) => g.tier === t);
   const tab: Tab = tabPick ?? (drafting ? 'all' : hasTier('all') || !hasTier('almost') ? 'all' : 'almost');
@@ -328,7 +363,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
     const art = (w || minW) * 30 / 64;
     return { w: minW, h: Math.round(text + art * 0.42), ideal: Math.round(text + art) };
   }, [lines]);
-  const filterKey = `${tier}|${coopOnly}|${fresh}|${blood}|${minHours}`;
+  const filterKey = `${tier}|${coopOnly}|${fresh}|${blood}|${ages}|${minHours}`;
   const pager = usePages(list.length, size, filterKey);
   const shown = list.slice(pager.start, pager.start + pager.per);
 
@@ -347,6 +382,23 @@ export default function Nominate({ state, me, send }: RoomProps) {
     tossOrTake(g.appid, mineNow, e.currentTarget.querySelector('.nm-art') ?? e.currentTarget, send);
   };
 
+  /** Pick for me: toss in my remaining picks, one card flight every 250 ms */
+  const autoLeft = Math.max(0, MAX_NOMS - myCount);
+  const autoList = useMemo(() => autoPicks(state.pool, state.board, me, autoLeft), [state.pool, state.board, me, autoLeft]);
+  const pickForMe = (e: MouseEvent<HTMLElement>) => {
+    if (autoBusy || !autoList.length) return;
+    const btn = e.currentTarget;
+    const picks = autoList.slice();
+    setAutoBusy(true);
+    sfx.unlock(); play('coin');
+    autoT.current.forEach(clearTimeout);
+    autoT.current = picks.map((g, i) => window.setTimeout(() => {
+      const card = document.querySelector(`.nm-card[data-appid="${g.appid}"] .nm-art`);
+      tossOrTake(g.appid, false, card ?? btn, send);
+      if (i === picks.length - 1) autoT.current.push(window.setTimeout(() => setAutoBusy(false), 600));
+    }, i * 250));
+  };
+
   /** hover detail: who's put hours in */
   const hoursTitle = (g: PoolGame) => {
     const hb = g.hoursBy || {};
@@ -361,7 +413,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
     const full = !isMine && myCount >= MAX_NOMS;
     const missing = g.tier === 'almost' ? g.missing.map((id) => byId.get(id)).filter(Boolean) as Player[] : [];
     return (
-      <button key={g.appid} type="button" className={`nm-card ${isMine ? 'is-mine' : ''} ${others.length ? 'is-nom' : ''} ${full ? 'is-full' : ''} ${tossed === g.appid ? 'is-tossed' : ''}`}
+      <button key={g.appid} type="button" data-appid={g.appid} className={`nm-card ${isMine ? 'is-mine' : ''} ${others.length ? 'is-nom' : ''} ${full ? 'is-full' : ''} ${tossed === g.appid ? 'is-tossed' : ''}`}
         onClick={(e) => toggle(g, e)} aria-pressed={isMine} title={hoursTitle(g)}>
         <span className="nm-face">
           <ShotArt appid={g.appid} className="nm-art">
@@ -400,7 +452,7 @@ export default function Nominate({ state, me, send }: RoomProps) {
       <span className="nm-long">{label}</span><span className="nm-short" aria-hidden>{short}</span>
     </button>
   );
-  const clearFilters = () => { sfx.click(); setCoopOnly(false); setFresh(false); setBlood(false); setMinHours(0); };
+  const clearFilters = () => { sfx.click(); setCoopOnly(false); setFresh(false); setBlood(false); setAges(false); setMinHours(0); };
   const pickTab = (k: Tab) => { sfx.click(); setTabPick(k); };
   const tabBtn = (k: Tab, label: string, short: string, n: number, dot: boolean) => (
     <button key={k} type="button" role="tab" aria-selected={tab === k} data-tab={k} className={`nm-tab ${k === 'buy' ? 'is-buy' : ''} ${tab === k ? 'on' : ''}`} onClick={() => pickTab(k)}>
@@ -452,8 +504,14 @@ export default function Nominate({ state, me, send }: RoomProps) {
                 {chip(coopOnly, 'Co-op', 'Co-op', () => setCoopOnly((v) => !v), 'Multiplayer / co-op only')}
                 {chip(fresh, 'Not played lately', 'Fresh', () => setFresh((v) => !v), 'Nobody played it in the last 2 weeks')}
                 {chip(blood, 'Never played', 'Unplayed', () => setBlood((v) => !v), 'Nobody here has played it yet')}
+                {chip(ages, "Haven't played in ages", 'Ages', () => setAges((v) => !v), 'Nobody here has played it in 6 months (or ever)')}
                 {chip(minHours > 0, minHours ? `${minHours}h+ together` : 'Any hours', minHours ? `${minHours}h+` : 'Hours', () => setMinHours((h) => HOURS[(HOURS.indexOf(h) + 1) % HOURS.length]), 'Minimum hours played together')}
               </div>
+              <button type="button" className="nm-auto" onClick={pickForMe} disabled={autoBusy || autoLeft === 0 || autoList.length === 0 || state.phase !== 'nominate'}
+                title={autoLeft === 0 ? 'Your picks are full' : `Toss in ${Math.min(autoLeft, autoList.length)} for you: games everyone has, not played lately, ones you know first`}
+                aria-label={autoLeft === 0 ? 'Pick for me (your picks are full)' : `Pick for me: ${Math.min(autoLeft, autoList.length)} game${Math.min(autoLeft, autoList.length) === 1 ? '' : 's'}`}>
+                <PixelIcon name="dice" /><span className="nm-long">Pick for me</span><span className="nm-short" aria-hidden>Auto</span>
+              </button>
               {dealEl}
             </div>
             {state.poolLoading && <div className="nm-loading"><LoadingScreen inline label="Rifling through everyone's libraries…" /></div>}

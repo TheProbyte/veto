@@ -71,8 +71,9 @@ canvas { image-rendering: pixelated; }
   box-shadow: inset var(--pu) var(--pu) 0 0 var(--hi), inset calc(var(--pu) * -1) calc(var(--pu) * -1) 0 0 var(--lo), 0 calc(-1 * var(--b)) 0 0 var(--edge), calc(-1 * var(--b)) 0 0 0 var(--edge), var(--b) 0 0 0 var(--edge), 0 calc(var(--b) + var(--depth)) 0 0 var(--edge);
   transform: translateY(0); transition: none; user-select: none; -webkit-user-select: none; text-decoration: none;
 }
-@media (hover: hover) { .px-btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(calc(var(--pu) * -1)); --depth: calc(var(--pu) * 3); } }
-.px-btn:active { transform: translateY(var(--pu)); --depth: var(--pu); }
+/* hover only brightens (never moves); press sinks 1 unit into the depth (bottom edge stays put) */
+@media (hover: hover) { .px-btn:hover:not(:disabled) { filter: brightness(1.14); } }
+.px-btn:active:not(:disabled) { transform: translateY(var(--pu)); --depth: var(--pu); }
 .px-btn:disabled { cursor: var(--cur-no); filter: grayscale(.7) brightness(.6); transform: none; }
 .px-btn-sm { padding: 6px 10px; font-size: calc(var(--pt) * 7); }
 
@@ -169,7 +170,7 @@ canvas { image-rendering: pixelated; }
 .dock-actions:empty { display: none; }
 .dock-act { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .dock-act-row { flex-direction: row; gap: 14px; }
-.dock-act .nh-btn-big { min-height: 52px; padding: 10px 26px; font-size: 22px; white-space: nowrap; }
+.dock-act .nh-btn-big { min-height: 64px; min-width: 300px; padding: 12px 40px; font-size: 30px; white-space: nowrap; }
 .dock-act .nh-hint { max-width: 340px; font-size: calc(var(--pt) * 8); }
 .dock .nh-waiting { font-size: calc(var(--pt) * 7); min-height: 52px; }
 .dock-in:not(:has(.dock-board)) .dock-actions { margin: 0 auto; }
@@ -655,7 +656,7 @@ canvas { image-rendering: pixelated; }
   .dock-card { --cw: 34px; }
   .dock-actions { margin: 0; }
   .dock-act { width: 100%; }
-  .dock-act .nh-btn-big { width: 100%; max-width: 420px; font-size: 20px; padding: 10px 14px; }
+  .dock-act .nh-btn-big { width: 100%; max-width: 420px; min-width: 0; min-height: 58px; font-size: 24px; padding: 10px 14px; }
   .dock-act-row { gap: 10px; }
   .dock-act-row .nh-btn-big { flex: 1 1 auto; width: auto; }
   .dock-act-row .nh-waiting { flex: 1 1 auto; justify-content: center; }
@@ -672,7 +673,7 @@ canvas { image-rendering: pixelated; }
   .dock-card { --cw: 28px; }
   .dock-card-by { display: none; }
   .dock-act .nh-hint { display: none; }
-  .dock-act .nh-btn-big { min-height: 46px; font-size: 18px; padding: 8px 12px; }
+  .dock-act .nh-btn-big { min-height: 52px; font-size: 21px; padding: 8px 12px; }
 }
 
 /* landscape phones: lobby/nominate split, scene on the left half, panel + dock on the right */
@@ -688,7 +689,7 @@ canvas { image-rendering: pixelated; }
   .is-split .dock-card { --cw: 26px; }
   .is-split .dock-card-by, .is-split .dock-label { display: none; }
   .is-split .dock-act .nh-hint { display: none; }
-  .is-split .dock-act .nh-btn-big { min-height: 44px; font-size: 17px; padding: 6px 14px; }
+  .is-split .dock-act .nh-btn-big { min-height: 48px; min-width: 0; font-size: 19px; padding: 6px 16px; }
   .is-split .dock .nh-waiting { min-height: 44px; font-size: calc(var(--pt) * 7); }
 }
 
@@ -1024,9 +1025,44 @@ html.cat-hover .saloon-front, html.cat-hover .saloon-stage { cursor: var(--cur-p
   background: radial-gradient(circle at 38% 32%, #fff2c0 0 10%, #f6cf62 11% 38%, #d9a33c 39% 66%, #a8701e 67%);
 }
 .coin > .pxi, .coin > i { position: relative; z-index: 1; width: 46%; height: 46%; transform: translateY(calc(var(--pu) * -0.5)); }
-@media (hover: hover) { .coin:hover:not(:disabled) { transform: translateY(calc(var(--pu) * -1)); filter: brightness(1.12); } }
+@media (hover: hover) { .coin:hover:not(:disabled) { filter: brightness(1.16); } }
+.coin:active:not(:disabled) { transform: none; }
 .coin:active:not(:disabled)::before { inset: calc(var(--pu) * 2) var(--pu) var(--pu) var(--pu); }
 .coin:active:not(:disabled) > .pxi { transform: translateY(calc(var(--pu) * 0.5)); }
 .coin:disabled { cursor: var(--cur-no); filter: grayscale(1) brightness(.55); transform: none; }
 .coin:focus-visible { outline: none; filter: brightness(1.2); }
 .coin:focus-visible::before { box-shadow: inset 0 0 0 var(--pu) #fff3c4; }
+
+/* pressable hit areas: an invisible ::before that covers the button plus its depth and edge, so the target never slides out
+   from under the pointer while the face sinks 1 unit (hover never moves anything) */
+.px-btn::before, .nm-btn::before, .nm-chip::before, .nh-seg button::before, .nh-swatch::before, .nm-rules-btn::before {
+  content: ''; position: absolute; left: calc(var(--pu) * -1); right: calc(var(--pu) * -1); top: calc(var(--pu) * -2); bottom: calc(var(--pu) * -3);
+}
+.px-btn:active::before, .nm-btn:active::before, .nm-chip:active::before, .nh-seg button:active::before, .nm-rules-btn:active::before { top: calc(var(--pu) * -3); }
+
+/* the dealer's primary sign (Deal 'em in, To the guns, Lookin' good): big, and raised off the bottom edge of the screen */
+.dock-in { padding-top: 14px; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+.dock-act-row .nh-btn-big { min-width: 260px; }
+@media (min-width: 1024px) and (min-height: 600px) {
+  .dock-in { padding-top: 16px; padding-bottom: calc(26px + env(safe-area-inset-bottom)); }
+}
+@media (min-width: 1600px) and (min-height: 900px) {
+  .dock-act .nh-btn-big { min-height: 76px; min-width: 360px; font-size: 36px; padding: 14px 52px; }
+  .dock-in { padding-bottom: calc(34px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 640px) and (min-height: 501px) {
+  .dock-in { padding-top: 12px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .dock-act-row .nh-btn-big { min-width: 0; }
+}
+@media (max-width: 640px) and (min-height: 501px) and (max-height: 640px) {
+  .dock-in { padding-top: 8px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .is-split .dock-in { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .dock-act-row .nh-btn-big { min-width: 0; }
+}
+/* short desktop screens (1280x720): the sign stays big, the dock a little leaner so the lobby / creator never scroll */
+@media (min-width: 1024px) and (min-height: 600px) and (max-height: 800px) {
+  .dock-in { padding-top: 10px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .dock-act .nh-btn-big { min-height: 58px; font-size: 27px; padding: 10px 36px; }
+}

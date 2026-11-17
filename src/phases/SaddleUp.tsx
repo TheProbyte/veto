@@ -31,8 +31,12 @@ export function barkLaunch() {
   playVoice('launch', 'emote');
 }
 
-/** children: the host's other result buttons (Rematch / Another round), laid out in one row with Saddle up! */
-export default function SaddleUp({ state, me, send, skew, children }: RoomProps & { children?: ReactNode }) {
+/**
+ * children: the host's other result buttons (Rematch / Another round), laid out in one row with Saddle up!
+ * slim: the result page's one-line strip (my status toggle, the posse's mini busts with their status, the host's Saddle up!).
+ * Either way it owns the synced 3-2-1 overlay and the steam://run for everyone who's ready (guests included).
+ */
+export default function SaddleUp({ state, me, send, skew, children, slim }: RoomProps & { children?: ReactNode; slim?: boolean }) {
   const res = state.result;
   const launch = state.launch;
   const ready = launch?.ready ?? {};
@@ -75,6 +79,60 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
   const set = (status: Status) => { sfx.click(); send({ t: 'ready', status }); };
 
   const others = humans.filter((p) => p.id !== me);
+  const goDisabled = counting && !stale && left > -2000;
+  const goTitle = '3-2-1, then Steam opens for everyone ready';
+
+  const countdown = show && !stale && createPortal(
+    <div className="sad-cd" role="alert" aria-live="assertive">
+      <div className="sad-cd-game">{res.name}</div>
+      {n > 3 ? <div className="sad-cd-big small">Saddle up…</div>
+        : n >= 1 ? <div className="sad-cd-big" key={n}>{n}</div>
+        : <div className="sad-cd-big go" key="go">RIDE!</div>}
+      {n <= 0 && (ready[me] === 'ready'
+        ? <div className="sad-cd-sub">Opening Steam…</div>
+        : <a className="px-btn sad-cd-store" href={store} target="_blank" rel="noreferrer">Get it on Steam</a>)}
+      {n > 0 && ready[me] !== 'ready' && <div className="sad-cd-sub">Not ready: Steam won't open for you.</div>}
+    </div>,
+    document.body,
+  );
+
+  if (slim) {
+    const mine = launch && meP && !meP.bot;
+    const opts: Status[] = ['ready', 'download', 'buy'];
+    return (
+      <div className="sadl" role="group" aria-label={`Saddle up: ${readyN} of ${humans.length} ready`}>
+        <span className="sadl-k"><span className="sadl-t">Saddle up</span><b>{readyN}/{humans.length}</b></span>
+        {mine && (
+          <span className="sadl-seg" role="group" aria-label="Your status">
+            {opts.map((o) => (
+              <button key={o} type="button" className={`sadl-b ${o} ${myStatus === o ? 'on' : ''} ${o === 'buy' && !owned && !myStatus ? 'hint' : ''}`}
+                aria-pressed={myStatus === o} aria-label={CHIP[o].label} title={CHIP[o].label} onClick={() => set(o)}>
+                <PixelIcon name={o} />{o === 'ready' && <span className="sadl-lbl">Ready</span>}
+              </button>
+            ))}
+          </span>
+        )}
+        <span className="sadl-posse">
+          {humans.map((p) => {
+            const st = (ready[p.id] as Status | undefined) ?? 'wait';
+            return (
+              <span key={p.id} className={`sadl-pc ${st} ${p.id === me ? 'me' : ''} ${p.connected ? '' : 'off'}`} title={`${p.id === me ? 'You' : p.name}: ${CHIP[st].label}`}
+                role="img" aria-label={`${p.id === me ? 'You' : p.name}: ${CHIP[st].label}`}>
+                <MiniBust p={p} className="sadl-bust" /><i aria-hidden><PixelIcon name={st} /></i>
+              </span>
+            );
+          })}
+        </span>
+        {!owned && <a className="sadl-buy" href={store} target="_blank" rel="noreferrer" title={pitched ? 'Nobody owns it yet: buy or gift it on Steam' : 'Buy or gift it on Steam'}>Buy ↗</a>}
+        {amHost && launch && (
+          <button type="button" className="px-btn sadl-go" title={goTitle} disabled={goDisabled} onClick={() => { sfx.spurs(); send({ t: 'saddleUp' }); }}>
+            Saddle up!
+          </button>
+        )}
+        {countdown}
+      </div>
+    );
+  }
 
   return (
     <div className="sad px-box">
@@ -123,7 +181,7 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
       {amHost ? (
         <div className="sad-host">
           {launch && (
-            <button className="px-btn sad-go" title="3-2-1, then Steam opens for everyone ready" disabled={counting && !stale && left > -2000} onClick={() => { sfx.spurs(); send({ t: 'saddleUp' }); }}>
+            <button className="px-btn sad-go" title={goTitle} disabled={goDisabled} onClick={() => { sfx.spurs(); send({ t: 'saddleUp' }); }}>
               Saddle up! <small>Launches for everyone ready</small>
             </button>
           )}
@@ -135,19 +193,7 @@ export default function SaddleUp({ state, me, send, skew, children }: RoomProps 
         </div>
       )}
 
-      {show && !stale && createPortal(
-        <div className="sad-cd" role="alert" aria-live="assertive">
-          <div className="sad-cd-game">{res.name}</div>
-          {n > 3 ? <div className="sad-cd-big small">Saddle up…</div>
-            : n >= 1 ? <div className="sad-cd-big" key={n}>{n}</div>
-            : <div className="sad-cd-big go" key="go">RIDE!</div>}
-          {n <= 0 && (ready[me] === 'ready'
-            ? <div className="sad-cd-sub">Opening Steam…</div>
-            : <a className="px-btn sad-cd-store" href={store} target="_blank" rel="noreferrer">Get it on Steam</a>)}
-          {n > 0 && ready[me] !== 'ready' && <div className="sad-cd-sub">Not ready: Steam won't open for you.</div>}
-        </div>,
-        document.body,
-      )}
+      {countdown}
     </div>
   );
 }

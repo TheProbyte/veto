@@ -21,6 +21,7 @@ import { BUZZ, buzz } from '../scene/haptics';
 import { useShotExtras } from './ShotExtras';
 import { PosseRecordCard } from './Lobby';
 import GroupPhoto from '../fun/GroupPhoto';
+import SaddleUp from './SaddleUp';
 import './panels.css';
 
 /** The end page: the winner big on a WANTED poster, one line on how it was won, a few badges, this table's record, the host's buttons. */
@@ -70,6 +71,7 @@ export default function Result(props: RoomProps) {
 
   return (
     <div className="rs">
+      <div className="rs-left">
       <div className="rs-poster poster-wrap">
         <div className="poster px-poster-in" ref={posterRef}>
           {NAILS.map(([l, t], i) => <PixelSprite key={i} draw={drawNail} w={7} h={7} className={`px-nail ${nails > i ? 'on' : ''}`} style={{ left: l, top: t }} />)}
@@ -81,6 +83,9 @@ export default function Result(props: RoomProps) {
           </div>
           {res.repeatCount >= 2 && <div className="poster-repeat">Played the last {res.repeatCount} times</div>}
         </div>
+      </div>
+      {/* ride out together: ready check + the host's synced launch (no solo LAUNCH button) */}
+      <SaddleUp {...props} slim />
       </div>
 
       <div className="rs-side">

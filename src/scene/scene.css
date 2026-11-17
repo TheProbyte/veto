@@ -15,7 +15,7 @@
 }
 .emo-rail-b .pxi { width: calc(var(--pt) * 12); height: calc(var(--pt) * 12); }
 .emo-rail-b:hover, .emo-rail-b:focus-visible { background: #5a3a22; outline: none; box-shadow: inset var(--pu) var(--pu) 0 0 #7a5232, inset calc(var(--pu) * -1) calc(var(--pu) * -1) 0 0 #2a1a10, 0 0 0 var(--pu) var(--amber); }
-.emo-rail-b:active { transform: translateY(var(--pu)); }
+.emo-rail-b:active { filter: brightness(.9); }
 .emo-rail-b:disabled { cursor: var(--cur-default); filter: grayscale(.6) brightness(.6); transform: none; }
 .emo-rail-tip {
   position: absolute; left: calc(100% + var(--pu) * 4); top: 50%; transform: translateY(-50%); white-space: nowrap; pointer-events: none;

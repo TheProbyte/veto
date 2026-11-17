@@ -729,8 +729,8 @@
   background: #2a1a10; color: var(--parch);
   box-shadow: 0 0 0 var(--pu) var(--ink), inset var(--pu) var(--pu) 0 0 #5a3a22, inset calc(var(--pu) * -1) calc(var(--pu) * -1) 0 0 #160d08, 0 calc(var(--pu) * 2) 0 var(--pu) var(--ink);
 }
-.fv-card:hover:not(:disabled) { background: #33200f; transform: translateY(calc(var(--pu) * -1)); }
-.fv-card:active:not(:disabled) { transform: translateY(var(--pu)); }
+.fv-card:hover:not(:disabled) { background: #33200f; filter: brightness(1.12); }
+.fv-card:active:not(:disabled) { filter: brightness(.94); }
 .fv-card.mine { background: #3a2a0c; box-shadow: 0 0 0 var(--pu) var(--ink), inset 0 0 0 calc(var(--pu) * 2) var(--amber), 0 calc(var(--pu) * 2) 0 var(--pu) var(--ink); }
 .fv-card:disabled { cursor: var(--cur-default) !important; }
 .fv-art { display: block; width: 100%; height: auto; aspect-ratio: 40 / 28; image-rendering: pixelated; box-shadow: 0 0 0 var(--pu) var(--ink); }

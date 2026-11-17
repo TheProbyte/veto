@@ -1,5 +1,5 @@
-// Sound button (fixed top-right) + popover with Music / Effects / Voice sliders (each with -/+ 5% buttons),
-// Mute and Test. Slider positions are shown in %; the gain is position² (see sliderGain in sfx.ts).
+// Sound button (fixed top-right) + Settings popover with Music / Effects / Voice sliders (each with -/+ 5% buttons),
+// Mute and Test, and the Parallax on/off switch (localStorage 'nah.parallax', '0' = off; fires window 'nah:prefs'). Slider positions are shown in %; the gain is position² (see sliderGain in sfx.ts).
 // Also drives background music from the game phase: <SoundMenu phase={state.phase} />.
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -44,7 +44,9 @@ const CSS = `
   background: #3b2416; color: #e8d5b5;
   box-shadow: 0 calc(var(--pu) * -1) 0 0 #0b0705, 0 var(--pu) 0 0 #0b0705, calc(var(--pu) * -1) 0 0 0 #0b0705, var(--pu) 0 0 0 #0b0705, inset 0 calc(var(--pu) * -1) 0 0 #160d08, inset 0 var(--pu) 0 0 #7a5232; }
 .snd-act:hover { background: #5a3a22; }
-.snd-act[aria-pressed="true"] { background: #ffb35c; color: #160d08; box-shadow: 0 calc(var(--pu) * -1) 0 0 #0b0705, 0 var(--pu) 0 0 #0b0705, calc(var(--pu) * -1) 0 0 0 #0b0705, var(--pu) 0 0 0 #0b0705, inset 0 var(--pu) 0 0 #b0702c; }
+.snd-pref { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 2px 0; padding-top: 10px; box-shadow: inset 0 var(--pu) 0 0 rgba(0,0,0,.35); }
+.snd-pref .snd-act { min-width: 72px; padding: 0 12px; }
+.snd-act[aria-pressed="true"], .snd-act[aria-checked="true"] { background: #ffb35c; color: #160d08; box-shadow: 0 calc(var(--pu) * -1) 0 0 #0b0705, 0 var(--pu) 0 0 #0b0705, calc(var(--pu) * -1) 0 0 0 #0b0705, var(--pu) 0 0 0 #0b0705, inset 0 var(--pu) 0 0 #b0702c; }
 `;
 
 function Icon({ quiet }: { quiet: boolean }) {
@@ -58,6 +60,16 @@ function Icon({ quiet }: { quiet: boolean }) {
   );
 }
 
+/** display prefs (not sound) that live in this popover */
+const PARALLAX_KEY = 'nah.parallax';
+function parallaxPref(): boolean {
+  try { return localStorage.getItem(PARALLAX_KEY) !== '0'; } catch { return true; }
+}
+function setParallaxPref(on: boolean) {
+  try { localStorage.setItem(PARALLAX_KEY, on ? '1' : '0'); } catch { /* storage off */ }
+  try { window.dispatchEvent(new CustomEvent('nah:prefs', { detail: { parallax: on } })); } catch { /* old browser */ }
+}
+
 interface Slider { id: string; label: string; value: number; set: (v: number) => void; test?: () => void }
 
 export default function SoundMenu({ phase }: { phase?: string } = {}) {
@@ -67,6 +79,12 @@ export default function SoundMenu({ phase }: { phase?: string } = {}) {
   const [music, setMusic] = useState(() => sfx.getMusicVolume());
   const [fx, setFx] = useState(() => sfx.getVolume());
   const [voice, setVoice] = useState(() => sfx.getVoiceVolume());
+  const [plx, setPlx] = useState(parallaxPref);
+  useEffect(() => {
+    const on = () => setPlx(parallaxPref());
+    window.addEventListener('nah:prefs', on);
+    return () => window.removeEventListener('nah:prefs', on);
+  }, []);
   const root = useRef<HTMLDivElement>(null);
   const testT = useRef(0);
 
@@ -124,15 +142,15 @@ export default function SoundMenu({ phase }: { phase?: string } = {}) {
       <style>{CSS}</style>
       <button
         type="button" className="snd-btn" aria-haspopup="dialog" aria-expanded={open} aria-pressed={muted}
-        aria-label={muted ? 'Sound settings (muted)' : 'Sound settings'} title="Sound"
+        aria-label={muted ? 'Settings (sound muted)' : 'Settings'} title="Sound & settings"
         onPointerDown={() => sfx.unlock()}
         onClick={() => { sfx.unlock(); setOpen((o) => !o); }}
       >
         <Icon quiet={quiet} />
       </button>
       {open && (
-        <div className="snd-pop" role="dialog" aria-label="Sound">
-          <h2 className="snd-title">Sound</h2>
+        <div className="snd-pop" role="dialog" aria-label="Settings">
+          <h2 className="snd-title">Settings</h2>
           {sliders.map((sl) => {
             const pct = Math.round(sl.value * 100);
             return (
@@ -161,6 +179,11 @@ export default function SoundMenu({ phase }: { phase?: string } = {}) {
           <div className="snd-actions">
             <button type="button" className="snd-act" aria-pressed={muted} onClick={toggleMute}>{muted ? 'Unmute' : 'Mute'}</button>
             <button type="button" className="snd-act" onClick={() => { sfx.unlock(); unmute(); testClick(); }}>Test</button>
+          </div>
+          <div className="snd-pref">
+            <span className="snd-lbl" id="snd-plx-l">Parallax</span>
+            <button type="button" className="snd-act snd-plx" role="switch" aria-checked={plx} aria-labelledby="snd-plx-l"
+              title="The saloon shifts a little with your mouse" onClick={() => { sfx.click(); setPlx(!plx); setParallaxPref(!plx); }}>{plx ? 'On' : 'Off'}</button>
           </div>
         </div>
       )}
